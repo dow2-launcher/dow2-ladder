@@ -1,0 +1,22 @@
+[Unit]
+Description=DoW2 own lobby server (experiment): RLink proxy to Relic + our private rooms, :47443 TLS (lobby/own_lobby.py)
+After=network-online.target dow2-ladder.service
+Wants=network-online.target
+
+[Service]
+User=ladder
+Group=ladder
+Environment=LOBBY_DATA=/srv/ownlobby/data
+Environment=LADDER_DB=/srv/ladder/data/ladder.sqlite
+Environment=LOBBY_RELAYS=15.220.68.107:47100,116.202.106.150:47100
+ExecStart=/usr/bin/python3 -u /srv/ownlobby/app/own_lobby.py
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/srv/ownlobby/data /srv/ladder/data
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

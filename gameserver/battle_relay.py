@@ -24,6 +24,9 @@ peer sent goes first and the answers we already gave are not repeated. Servers a
 Bridge (DWR3, Relay.dll 15, 01.11.2026): "DWR3" + IPv4 + port of the Relic relay - the player plays on Relic (with anybody)
 and we only carry the connection: everything is passed on to that Relic relay at once, nothing is hosted here. For players
 whose own path to Relic is bad or cut on the way (Russia: DPI on foreign hosting) - the server near them carries it.
+Native (02.11.2026, own lobby server experiment): no preamble - the game itself was sent here by our lobby server
+(lobby/own_lobby.py answers host/join with this server as the room's relay), so the stream starts with the game's own first
+frame (u16 length, then 15 hello). Hosted here like DWR1; a guest whose session is on another of our servers is passed there.
 Usage: battle_relay.py [port] [bind]   (default 47100 127.0.0.1)
 Peers silent for IDLE seconds are dropped (the game pings every ~3 s).
 """
@@ -239,8 +242,9 @@ async def handle(r, w):
     a = w.get_extra_info('peername'); p = Peer(w, f'{a[0]}:{a[1]}')
     q = asyncio.Queue(); rt = None
 
-    async def reader():                                 # one reader per peer: frames into q, None at the end
+    async def reader(first=None):                       # one reader per peer: frames into q, None at the end
         try:
+            if first is not None: await q.put(first)
             while True:
                 n = int.from_bytes(await r.readexactly(2), 'big')
                 await q.put(await r.readexactly(n) if n else b'')
@@ -253,7 +257,15 @@ async def handle(r, w):
         if pre == b'DWRQ':                              # another server of ours asks: is this session here?
             sid = await asyncio.wait_for(r.readexactly(4), 5)
             w.write(b'Y' if sid in sessions else b'N'); await w.drain(); w.close(); return
-        pre += await asyncio.wait_for(r.readexactly(6), 15)
+        native = None
+        if pre[:3] != b'DWR':                           # native: our lobby server sent the game here, pre = its first frame's start
+            n = int.from_bytes(pre[:2], 'big')
+            if n < 2 or pre[2] != 0x15: log(ev='bad_preamble', peer=p.addr, hex=pre.hex()); w.close(); return
+            native = pre[2:4] + await asyncio.wait_for(r.readexactly(n - 2), 15)
+            pre = b'DWR1' + b'\0' * 6                   # hosted here; no Relic relay behind it
+            log(ev='native', peer=p.addr)
+        else:
+            pre += await asyncio.wait_for(r.readexactly(6), 15)
         if pre[:4] == b'DWR3':                    # bridge: straight on to the Relic relay the game wanted
             dest = (socket.inet_ntoa(pre[4:8]), int.from_bytes(pre[8:10], 'big'))
             ip = ipaddress.ip_address(dest[0])          # only Relic relay ports on public addresses: not an open proxy
@@ -264,7 +276,7 @@ async def handle(r, w):
         if pre[:4] not in (b'DWR1', b'DWR2'): log(ev='bad_preamble', peer=p.addr, hex=pre.hex()); w.close(); return
         compat = pre[:4] == b'DWR2'
         if compat: await asyncio.wait_for(r.readexactly(1), 15)
-        rt = asyncio.ensure_future(reader())
+        rt = asyncio.ensure_future(reader(native))
         if True:   # 30.10.2026: a guest whose lobby is on another of our servers is passed on there in the strict mode (DWR1) too
             relic = (socket.inet_ntoa(pre[4:8]), int.from_bytes(pre[8:10], 'big'))
             held, answered, sid = [], [], None

@@ -9,6 +9,7 @@
 | `replay/` | реплеи: загрузка, дубли, разбор, истории (`/replay/`) | `/srv/replayweb/app/`, воркер — `/usr/local/bin/` | `replay-web`, `replay-story` |
 | `site/` | лендинг Elite (корень сайта и `/elite/`), Elite Lab, ассеты рас/карт | `/var/www/rts-site/elite/` (кроме `dl/` — его заливает CI лаунчера) | nginx |
 | `gameserver/` | наш игровой сервер (`battle_relay.py`, порт 47100) и старый пересыльщик в Relic (`relay_proxy.py`) | Timeweb: `/srv/dow2battle/`, `/srv/dow2relay/` | `dow2-battle`, `dow2-relay` |
+| `lobby/` | свой лобби-сервер (эксперимент): игра с OwnLobby.dll ходит сюда вместо dow2r-lobby.reliclink.com; всё пробрасывается в Relic, свои — приватные комнаты автоматча, их ретранслятор и итог в ладдер | `/srv/ownlobby/app/` (данные, сертификат, флаги `own_rooms.on`, `trace.on`, `unrated.on` — `/srv/ownlobby/data/`) | `dow2-ownlobby` (47443 TLS, статус 127.0.0.1:47444) |
 | `deploy/` | скрипт выкладки, юниты systemd, уведомление о логах | — | ставится руками |
 
 Данные (базы, токены, ключи) в репозитории не лежат: они в `/srv/*/data/` на сервере.

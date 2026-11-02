@@ -93,6 +93,18 @@ gameserver/"; continue; fi
   done
   pending=$(echo "$pending" | sort -u)
 fi
+# ---- own lobby server (experiment, 02.11.2026): only where it is installed (/srv/ownlobby); its rooms live in memory -
+# restart only when no room of ours is open (else wait for the next run, as the game servers do)
+if has lobby/ && [ -d /srv/ownlobby/app ]; then
+  rooms=$(curl -s -m 5 http://127.0.0.1:47444/ | python3 -c 'import json,sys
+try: print(len(json.load(sys.stdin).get("rooms", [])))
+except Exception: print(0)')
+  if [ "${rooms:-0}" -gt 0 ]; then pending="$pending
+lobby/"; else
+    install -o root -g root -m 644 lobby/own_lobby.py lobby/relic_ca.pem /srv/ownlobby/app/
+    systemctl restart dow2-ownlobby && done_parts="$done_parts лобби"
+  fi
+fi
 # deploy/ (systemd units, notifier) is installed by hand: it changes how the services run
 
 if [ -n "$pending" ]; then echo "$pending" | grep . > .pending; else rm -f .pending .pending_since; fi
