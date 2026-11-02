@@ -911,7 +911,8 @@ def _steam_now():  # игроков DoW2: Retribution в Steam прямо сей
 # Relic's public API lists the custom games being set up right now - the same list the game's browser shows:
 # community/advertisement/findAdvertisements?title=dow2r -> matches (id, description, mapname, passwordprotected,
 # maxplayers, matchmembers {profile_id, teamid}, observers, slotinfo = base64+zlib with the army badges) + avatars
-# {profile_id, name "/steam/<id64>", alias, country}. Fetched every 15 s; public answer without SteamIDs (like mm_live).
+# {profile_id, name "/steam/<id64>", alias, country}. Fetched every 15 s; each player with his SteamID (from that name, as Relic itself
+# publishes it): the launcher's player menu (stats on our site, Steam profile).
 ROOMS = {'ts': 0, 'rooms': [], 'error': ''}
 _ROOM_RATING = {}                                     # steam -> (time, rating, source): the ladder / Relic rating, 10 min
 ROOMS_URL = 'https://dow-api.reliclink.com/community/advertisement/findAdvertisements?title=dow2r'
@@ -960,7 +961,7 @@ def _rooms_once():
             if rid is not None: races.append({'race_id': rid})
             players.append({'name': a.get('alias') or 'Player', 'country': a.get('country') or '', 'team': x.get('teamid'),
                             'host': x.get('profile_id') == m.get('host_profile_id'), 'rating': rating, 'rsrc': src,
-                            'race': rr.get(str(rid), '') if rid is not None else '', 'hero': hero})
+                            'race': rr.get(str(rid), '') if rid is not None else '', 'hero': hero, 'steam': steam or None})
         # which game: Elite for sure (Elite-only races, badges or maps) / vanilla (a vanilla-only map, no Elite marks) /
         # probably Elite (a map both have) / another mod (a map neither has). Relic's public list carries no version field.
         if elite_sure({'mapname': mn, 'slotinfo': m.get('slotinfo', ''), 'matchhistorymember': races}): game, sure = 'elite', True
