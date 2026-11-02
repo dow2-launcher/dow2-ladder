@@ -3,7 +3,7 @@
 # оставляет только матчи Elite, считает рейтинг Glicko-2 отдельно по режимам (1v1/2v2/3v3)
 # и сезонам (квартал). Отдаёт JSON для страницы /ladder/. Данные только из Relic; реплеев Relic не хранит.
 import random
-import json, os, re, sqlite3, threading, time, math, base64, zlib, urllib.request, urllib.parse
+import json, os, re, sqlite3, struct, threading, time, math, base64, zlib, urllib.request, urllib.parse
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from concurrent.futures import ThreadPoolExecutor
 import stream, users                                # launcher users / presence, the live stream (SSE)
@@ -602,10 +602,12 @@ def _player_view(p):  # под MM_LOCK: что вернуть игроку в po
     wnames = [m['players'].get(w, {}).get('name') for w in m.get('watchers', [])]
     if p['role'] == 'watcher':
         return {'state': 'matched', 'match': m['id'], 'mode': m['mode'], 'role': 'watcher', 'host_steam': m['host_steam'],
-                'lobby': m['lobby'], 'map': m.get('map'), 'roster': roster, 'watchers': m['watchers'], 'watcher_pids': wpids, 'watcher_names': wnames, 'allies': [], 'enemies': [], 'own_server': own_all, **extra}
+                'lobby': m['lobby'], 'map': m.get('map'), 'roster': roster, 'watchers': m['watchers'], 'watcher_pids': wpids, 'watcher_names': wnames, 'allies': [], 'enemies': [], 'own_server': own_all,
+                'direct': (m.get('pool') or '').endswith('|direct'), 'room': m.get('room'), **extra}
     return {'state': 'matched', 'match': m['id'], 'mode': m['mode'], 'role': p['role'], 'slot': m.get('slots', {}).get(p['steam']),
             'roster': roster, 'watchers': m.get('watchers', []), 'watcher_pids': wpids, 'watcher_names': wnames, 'bots': bool(m.get('bots')),
             'host_steam': m['host_steam'], 'lobby': m['lobby'], 'map': m.get('map'), 'own_server': own_all,
+            'direct': (m.get('pool') or '').endswith('|direct'), 'room': m.get('room'),
             'allies': side([s for s in mine if s != p['steam']]), 'enemies': side(theirs), **extra}
 
 def _clean(v, n=48):
@@ -649,7 +651,7 @@ def mm_join(steam, mode, d=None):
         MM[steam] = {'jts': now, 'steam': steam, 'mode': mode, 'rating': rating, 'rd': rd, 'games': games, 'ruiner': _ruin_blocked(steam),
                      'pid': pid, 'name': name or _clean(d.get('name')), 'state': 'searching', 'match': None, 'role': None,
                      'rsrc': rsrc, 'race': _clean(d.get('race'), 32), 'hero': _clean(d.get('hero'), 32), 'maps': maps, 'max_diff': max_diff,
-                     'ts': now, 'seen': now, 'pool': '%s|%s' % (_clean(d.get('group'), 24) or '', _game(d)),   # one queue per game (01.11.2026: vanilla and Elite never meet); 30.10: no own-server pool
+                     'ts': now, 'seen': now, 'pool': '%s|%s%s' % (_clean(d.get('group'), 24) or '', _game(d), '|direct' if d.get('direct') else ''),   # one queue per game (01.11: vanilla and Elite never meet); 02.11: MMFind 0.34 fast automatch (experiment) only with its own kind
                      'game': _game(d),
                     
                      'own': bool(d.get('own_server')), 'ping': _relay_ping(d.get('relay_ping')) if d.get('own_server') else None,
@@ -681,7 +683,7 @@ def mm_poll(steam):
         p['seen'] = time.time()
         return _player_view(p)
 
-def mm_host(steam, lobby, mapname=None):
+def mm_host(steam, lobby, mapname=None, room=None):
     steam = str(steam)
     with MM_LOCK:
         p = MM.get(steam)
@@ -690,6 +692,7 @@ def mm_host(steam, lobby, mapname=None):
             if m:
                 m['lobby'] = str(lobby)[:80]
                 if _clean(mapname, 64): m['map'] = _clean(mapname, 64)     # the map the host really set (history shows it)
+                if str(room or '').isdigit(): m['room'] = str(int(room))  # MMFind 0.34 fast automatch: the private room's id, guests join by it
             p['seen'] = time.time()
             return {'ok': True}
     return {'ok': False}
@@ -894,6 +897,21 @@ def _steam_now():  # игроков DoW2: Retribution в Steam прямо сей
 ROOMS = {'ts': 0, 'rooms': [], 'error': ''}
 _ROOM_RATING = {}                                     # steam -> (time, rating, source): the ladder / Relic rating, 10 min
 ROOMS_URL = 'https://dow-api.reliclink.com/community/advertisement/findAdvertisements?title=dow2r'
+try:                                                  # the site's game data: map names, sizes, minimaps; race keys by Relic race id
+    _ASSETS = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets_index.json')))   # a copy of the site's assets/index.json
+except Exception:
+    _ASSETS = {'maps': {}, 'relic_race_id': {}}
+
+def _slot_fields(raw, pid):
+    # slotinfo: after a player's Relic profile id (u32) come u32 fields; the 5th is the hero index, the 6th the race id
+    # (Relic race id = racebps id: 0 CSM, 1 Eldar, 2 IG, 3 OM, 4 Orks, 5 SM, 6 Tau, 7 Tyranids) - read 02.11.2026 against the badges
+    try:
+        i = raw.find(struct.pack('<I', pid))
+        if i < 0: return None, None
+        v = struct.unpack_from('<6I', raw, i + 4)
+        return (v[5] if v[5] < 16 else None), (v[4] if v[4] < 8 else None)
+    except Exception:
+        return None, None
 
 def _room_rating(steam):
     hit = _ROOM_RATING.get(steam)
@@ -909,22 +927,38 @@ def _rooms_once():
         d = json.load(r)
     av = {a['profile_id']: a for a in d.get('avatars') or []}
     out = []
+    rr = _ASSETS.get('relic_race_id') or {}
     for m in d.get('matches') or []:
         b = badges(m)
         mn = (m.get('mapname') or '').lower()
-        elite = elite_sure({'mapname': mn, 'slotinfo': m.get('slotinfo', ''), 'matchhistorymember': []})
-        vanilla = not elite and mn in VAN_MAPS and not any('elite' in w for w in b)
-        players = []
+        try: raw = zlib.decompress(base64.b64decode(m.get('slotinfo', '')))
+        except Exception: raw = b''
+        players, races = [], []
         for x in m.get('matchmembers') or []:
             a = av.get(x.get('profile_id')) or {}
             steam = (a.get('name') or '').rsplit('/', 1)[-1] if (a.get('name') or '').startswith('/steam/') else ''
             rating, src = _room_rating(steam) if steam else (None, 'new')
+            rid, hero = _slot_fields(raw, x.get('profile_id') or 0)
+            if rid is not None: races.append({'race_id': rid})
             players.append({'name': a.get('alias') or 'Player', 'country': a.get('country') or '', 'team': x.get('teamid'),
-                            'host': x.get('profile_id') == m.get('host_profile_id'), 'rating': rating, 'rsrc': src})
+                            'host': x.get('profile_id') == m.get('host_profile_id'), 'rating': rating, 'rsrc': src,
+                            'race': rr.get(str(rid), '') if rid is not None else '', 'hero': hero})
+        # which game: Elite for sure (Elite-only races, badges or maps) / vanilla (a vanilla-only map, no Elite marks) /
+        # probably Elite (a map both have) / another mod (a map neither has). Relic's public list carries no version field.
+        if elite_sure({'mapname': mn, 'slotinfo': m.get('slotinfo', ''), 'matchhistorymember': races}): game, sure = 'elite', True
+        elif mn in VAN_MAPS and mn not in ELITE_MAPS and not any('elite' in w for w in b): game, sure = 'vanilla', True
+        elif mn in VAN_MAPS or mn in ELITE_MAPS or mn in (_ASSETS.get('maps') or {}): game, sure = 'elite', False
+        else: game, sure = 'other', False
+        mi = (_ASSETS.get('maps') or {}).get(mn) or {}
+        cap = mi.get('maxplayers') or (int(mn[0]) if mn[:1].isdigit() and mn[1:3] == 'p_' else None)
         out.append({'id': m.get('id'), 'name': (m.get('description') or '')[:64], 'map': mn, 'state': m.get('state'),
+                    'map_title': re.sub(r'^\(\d+p\)\s*', '', mi.get('name') or '') or mn.split('_', 1)[-1].replace('_', ' '),
+                    'minimap': mi.get('minimap') or '', 'cap': cap,
+                    'mode': {2: '1v1', 4: '2v2', 6: '3v3', 8: '4v4'}.get(cap, '') if cap else '',
                     'password': bool(m.get('passwordprotected')), 'max': m.get('maxplayers'), 'players': players,
+                    'free': max(0, cap - len(players)) if cap else None,
                     'observers': m.get('observernum') or 0, 'observers_max': m.get('observermax') or 0,
-                    'game': 'elite' if elite else 'vanilla' if vanilla else '', 'region': m.get('relayserver_region') or ''})
+                    'game': game, 'sure': sure, 'region': m.get('relayserver_region') or ''})
     out.sort(key=lambda r: (r['game'] != 'elite', -len(r['players']), r['id']))
     return out
 
@@ -1299,7 +1333,7 @@ class H(BaseHTTPRequestHandler):
             if u.path == '/ladder/api/mm/alive': return self.send(200, mm_alive(steam), cache=0)
             if u.path == '/ladder/api/mm/ruined': return self.send(200, mm_ruined(steam, d.get('lobby', '')), cache=0)
             if u.path == '/ladder/api/mm/poll':  return self.send(200, mm_poll(steam), cache=0)
-            if u.path == '/ladder/api/mm/host':  return self.send(200, mm_host(steam, d.get('lobby', ''), d.get('map')), cache=0)
+            if u.path == '/ladder/api/mm/host':  return self.send(200, mm_host(steam, d.get('lobby', ''), d.get('map'), d.get('room')), cache=0)
             if u.path == '/ladder/api/mm/leave': return self.send(200, mm_leave(steam), cache=0)
             return self.send(404, {'error': 'not found'}, cache=0)
         except Exception as e:

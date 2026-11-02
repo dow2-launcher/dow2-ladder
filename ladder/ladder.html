@@ -71,7 +71,21 @@ select { font: 600 14px Spectral, serif; color: var(--text); background: var(--p
 /* live: who is searching, matches */
 .live { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 4px 0 24px; }
 .box.rooms { margin: -10px 0 24px; } .box.rooms .rsub { padding: 8px 14px 0; font-size: 13px; color: var(--dim, #9a8f7a); }
-.tag.elite { color: #e9c46a; border-color: #8a6d2a; } .tag.van { color: #9fb8c8; border-color: #4a5a66; }
+.tag.elite { color: #e9c46a; border-color: #8a6d2a; } .tag.van { color: #9fb8c8; border-color: #4a5a66; } .tag.oth { color: #c9a0d8; border-color: #5d4566; }
+.rooms-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; padding: 12px 14px 14px; }
+.room { display: grid; grid-template-columns: 92px 1fr; gap: 12px; background: #15120e; border: 1px solid #2c251b; border-radius: 4px; padding: 10px; min-width: 0; }
+.room .mmap { width: 92px; height: 92px; border-radius: 3px; border: 1px solid #2c251b; background: #0e0c09 center/cover no-repeat; }
+.room .rh { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 2px; }
+.room .rn { font-weight: 600; color: var(--bone, #e8dcc4); overflow-wrap: anywhere; }
+.room .rmap { font-size: 12px; color: var(--dim, #9a8f7a); margin-bottom: 6px; }
+.room .teams { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; }
+.room .team { min-width: 0; } .room .team + .team { border-left: 1px solid #2c251b; padding-left: 10px; }
+.room .rp { display: flex; align-items: center; gap: 5px; font-size: 13px; line-height: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.room .rp img { width: 18px; height: 18px; object-fit: contain; flex: none; }
+.room .rp .nm { overflow: hidden; text-overflow: ellipsis; } .room .rp.host .nm { color: var(--gold-2, #f0d48f); }
+.room .rp.free { color: #6f6656; font-style: italic; }
+.room .rfoot { margin-top: 6px; font-size: 12px; color: var(--dim, #9a8f7a); }
+@media (max-width: 760px) { .rooms-grid { grid-template-columns: 1fr; } .room { grid-template-columns: 64px 1fr; } .room .mmap { width: 64px; height: 64px; } }
 .dbg-tgl { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--gold-2); opacity: .7; cursor: pointer; margin: 2px 0 6px; user-select: none; }
 .dbg-tgl input { accent-color: var(--gold); margin: 0; }
 .dbgx { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.5; color: var(--gold-2); opacity: .85; margin-top: 3px; word-break: break-word; }
@@ -218,7 +232,7 @@ async function loadStatus() {
 const I18N = {
   ru: { ingame: 'в DoW II', online: 'онлайн', queue: 'в очереди', playing: 'играют', cta: 'Встать в очередь', searching: 'Сейчас ищут', matches: 'Матчи',
         loading: 'Загрузка…', player: 'Игрок', rating: 'Рейтинг', games: 'Игр', maps: 'карт', anyMap: 'любая карта', anyOpp: 'любой соперник',
-        ratingDiff: 'рейтинга', waits: 'ждёт', nobody: 'Никто не ищет. Нажмите «Find a Game» в игре.', rooms: 'Открытые лобби', roomsSub: 'Кастомки, которые сейчас собираются в игре, — тот же список, что в браузере игр (Custom Games). Обновляется раз в 15 секунд.', noRooms: 'Сейчас никто не собирает игру.', pw: 'с паролем', obs: 'наблюдатели', vanilla: 'ваниль', noMatches: 'Сейчас матчей нет.',
+        ratingDiff: 'рейтинга', waits: 'ждёт', nobody: 'Никто не ищет. Нажмите «Find a Game» в игре.', rooms: 'Открытые лобби', roomsSub: 'Кастомки, которые сейчас собираются в игре, — тот же список, что в браузере игр (Custom Games). Обновляется раз в 15 секунд.', noRooms: 'Сейчас никто не собирает игру.', pw: 'с паролем', obs: 'наблюдатели', vanilla: 'ваниль', otherMod: 'другой мод', freeSlot: 'свободно', noMatches: 'Сейчас матчей нет.',
         hostMap: 'карта на выбор хоста', sec: 'с', min: 'мин', agoNow: 'только что', agoMin: 'мин назад', agoHour: 'ч назад', agoDay: 'дн назад', noPlayers: 'Пока нет игроков с 5+ матчами в этом режиме.', error: 'Ошибка загрузки.',
         note: (n, s) => `${n} игроков · сезон ${s} · рейтинг Glicko-2, минимум 5 матчей`, season: 'сезон',
         st: { creating: 'создаётся', lobby: 'в лобби', playing: 'идёт' },
@@ -230,7 +244,7 @@ const I18N = {
         watchers: 'зрители' },
   en: { ingame: 'in DoW II', online: 'online', queue: 'in queue', playing: 'playing', cta: 'Join the queue', searching: 'Searching now', matches: 'Matches',
         loading: 'Loading…', player: 'Player', rating: 'Rating', games: 'Games', maps: 'maps', anyMap: 'any map', anyOpp: 'any opponent',
-        ratingDiff: 'rating', waits: 'waiting', nobody: 'Nobody is searching. Press “Find a Game” in the game.', rooms: 'Open lobbies', roomsSub: 'Custom games being set up in the game right now - the same list as the game browser (Custom Games). Refreshed every 15 seconds.', noRooms: 'Nobody is setting up a game right now.', pw: 'password', obs: 'observers', vanilla: 'vanilla', noMatches: 'No matches right now.',
+        ratingDiff: 'rating', waits: 'waiting', nobody: 'Nobody is searching. Press “Find a Game” in the game.', rooms: 'Open lobbies', roomsSub: 'Custom games being set up in the game right now - the same list as the game browser (Custom Games). Refreshed every 15 seconds.', noRooms: 'Nobody is setting up a game right now.', pw: 'password', obs: 'observers', vanilla: 'vanilla', otherMod: 'other mod', freeSlot: 'open', noMatches: 'No matches right now.',
         hostMap: 'map picked by the host', sec: 's', min: 'min', agoNow: 'just now', agoMin: 'min ago', agoHour: 'h ago', agoDay: 'd ago', noPlayers: 'No players with 5+ games in this mode yet.', error: 'Loading error.',
         note: (n, s) => `${n} players · season ${s} · Glicko-2 rating, at least 5 games`, season: 'season',
         st: { creating: 'being created', lobby: 'in lobby', playing: 'in progress' },
@@ -297,19 +311,34 @@ async function loadLive() {
 
 // open lobbies (02.11.2026): /ladder/api/rooms = Relic's list of custom games being set up (findAdvertisements)
 const roomFlag = c => /^[a-z]{2}$/i.test(c || '') ? String.fromCodePoint(...[...c.toUpperCase()].map(x => 0x1F1A5 + x.charCodeAt(0))) : '';
+const R_ASSETS = '/elite/assets/';
+function roomCard(r) {
+  const gameTag = r.game === 'elite' ? `<span class="tag elite">Elite${r.sure === false ? '?' : ''}</span>`
+    : r.game === 'vanilla' ? `<span class="tag van">${T('vanilla')}${r.sure === false ? '?' : ''}</span>`
+    : r.game === 'other' ? `<span class="tag oth">${T('otherMod')}</span>` : '';
+  const cap = r.cap || (((r.map || '').match(/^(\d)p_/) || [])[1] | 0) || r.max || 0;
+  const pl = p => `<div class="rp${p.host ? ' host' : ''}" title="${esc((p.race ? RACE[p.race === 't_tau' ? 'tau' : p.race === 'chaos_marines' ? 'chaos_space_marines' : p.race] || p.race : '') + (p.host ? ' · host' : ''))}">`
+    + (p.race ? `<img src="${R_ASSETS}${p.hero != null ? 'heroes/' + p.race + '_' + p.hero : 'races/' + p.race}.png" alt="" onerror="this.src='${R_ASSETS}races/${p.race}.png'">` : '')
+    + `<span>${roomFlag(p.country)}</span><span class="nm">${esc(p.name)}</span>${p.rating ? ' <span class="rt">' + p.rating + '</span>' : ''}</div>`;
+  const per = cap ? Math.max(1, Math.round(cap / 2)) : 0;
+  const teams = [0, 1].map(t => {
+    const ps = (r.players || []).filter(p => (p.team | 0) === t);
+    const free = per ? Math.max(0, per - ps.length) : 0;
+    return `<div class="team">${ps.map(pl).join('')}${Array(free).fill(`<div class="rp free">${esc(T('freeSlot'))}</div>`).join('')}</div>`;
+  }).join('');
+  const others = (r.players || []).filter(p => (p.team | 0) > 1);
+  return `<div class="room"><div class="mmap" style="${r.minimap ? `background-image:url('${R_ASSETS}${esc(r.minimap)}')` : ''}"></div><div style="min-width:0">
+    <div class="rh">${r.mode ? `<span class="tag">${esc(r.mode)}</span>` : ''}${gameTag}${r.password ? '<span class="tag">🔒</span>' : ''}<span class="rn">${esc(r.name || '—')}</span></div>
+    <div class="rmap">${esc(r.map_title || '') || mapName(r.map)}${cap ? ' · ' + (r.players || []).length + '/' + cap : ''}</div>
+    <div class="teams">${teams}</div>${others.length ? '<div>' + others.map(pl).join('') + '</div>' : ''}
+    <div class="rfoot">${r.observers ? T('obs') + ': ' + r.observers + ' · ' : ''}${r.password ? T('pw') : ''}</div></div></div>`;
+}
 async function loadRooms() {
   try {
     const d = await (await fetch('/ladder/api/rooms', { cache: 'no-store' })).json();
     const R = d.rooms || [];
     $('#l-r').textContent = R.length;
-    $('#l-rooms').innerHTML = R.length ? R.map(r => {
-      const pl = (r.players || []).map(p => `${roomFlag(p.country)} ${p.host ? '<b>' : ''}${esc(p.name)}${p.host ? '</b>' : ''}${p.rating ? ' <span class="rt">' + p.rating + '</span>' : ''}`).join(', ');
-      const tags = (r.game === 'elite' ? '<span class="tag elite">Elite</span>' : r.game === 'vanilla' ? `<span class="tag van">${T('vanilla')}</span>` : '')
-        + (r.password ? `<span class="tag">🔒 ${T('pw')}</span>` : '');
-      return `<div class="li"><div class="top"><span>${tags}<span class="nm">${esc(r.name || '—')}</span></span>
-        <span class="meta">${(r.players || []).length}/${((r.map || '').match(/^(\d)p_/) || [])[1] || r.max || '?'}</span></div><div>${pl}</div>
-        <div class="meta">${mapName(r.map)}${r.observers ? ' · ' + T('obs') + ': ' + r.observers : ''}</div></div>`;
-    }).join('') : `<div class="empty">${T('noRooms')}</div>`;
+    $('#l-rooms').innerHTML = R.length ? '<div class="rooms-grid">' + R.map(roomCard).join('') + '</div>' : `<div class="empty">${T('noRooms')}</div>`;
   } catch (e) {}
 }
 
