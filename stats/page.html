@@ -126,6 +126,13 @@ svg.chart { width: 100%; height: 190px; display: block; }
 footer { text-align: center; color: var(--muted); font-size: 14px; margin-top: 40px; }
 footer .orn { margin-bottom: 14px; }
 .hidden { display: none !important; }
+/* a link straight to a player (the launcher's player menu): the dossier loads behind a preloader, not under the search */
+.pre { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; background: #0d0b09; transition: opacity .25s; }
+.pre.gone { opacity: 0; pointer-events: none; }
+.pre i { width: 44px; height: 44px; border: 3px solid rgba(212,175,85,.2); border-top-color: var(--gold); border-radius: 50%; animation: prespin .8s linear infinite; }
+.pre span { color: var(--muted); font-style: italic; }
+@keyframes prespin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .pre i { animation-duration: 2.4s; } }
 @media (max-width: 720px) {
   .prof { grid-template-columns: auto 1fr; }
   .rating { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--line); padding-top: 14px; }
@@ -139,6 +146,7 @@ footer .orn { margin-bottom: 14px; }
 </style>
 </head>
 <body>
+<div class="pre hidden" id="pre" role="status"><i></i><span id="preText"></span></div>
 <div class="wrap">
   <div class="top"><div class="lang"><button id="len">EN</button><button id="lru">RU</button></div></div>
   <header>
@@ -371,7 +379,18 @@ $('len').onclick = () => setLang('en'); $('lru').onclick = () => setLang('ru');
 let rz; window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => DATA && chart(DATA.series), 200); });
 window.onpopstate = () => { const m = location.pathname.match(/\/stats\/p\/(\d+)/); if (m) open(m[1], false); };
 applyLang();
-api('meta').then(m => { META = m; const p = location.pathname.match(/\/stats\/p\/(\d+)/); if (p) open(p[1], false); const q = new URLSearchParams(location.search).get('q'); if (q) { $('q').value = q; search(q); } });
+// a link straight to a player (/stats/p/<id>, or ?q= from the launcher's player menu): a preloader until the dossier is
+// there; with the id in the address it is opened by the id only - the q next to it is not searched again (that loaded
+// the player twice, with the search form in view meanwhile)
+const P0 = location.pathname.match(/\/stats\/p\/(\d+)/), Q0 = new URLSearchParams(location.search).get('q');
+const preOff = () => { $('pre').classList.add('gone'); setTimeout(() => $('pre').classList.add('hidden'), 300); };
+if (P0 || Q0) { $('preText').textContent = T[L].loading; $('pre').classList.remove('hidden'); }
+api('meta').then(async m => {
+  META = m;
+  if (Q0) $('q').value = Q0;
+  if (P0) await open(P0[1], false);
+  else if (Q0) await search(Q0);
+}).catch(() => {}).finally(() => { if (DATA) $('out').scrollIntoView({ block: 'start' }); preOff(); });
 </script>
 </body>
 </html>
