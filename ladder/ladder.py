@@ -886,6 +886,56 @@ def _steam_now():  # игроков DoW2: Retribution в Steam прямо сей
         except Exception: pass
     return STEAM_NOW['n']
 
+# ---------- open lobbies (02.11.2026, owner: the list of rooms on our site) ----------
+# Relic's public API lists the custom games being set up right now - the same list the game's browser shows:
+# community/advertisement/findAdvertisements?title=dow2r -> matches (id, description, mapname, passwordprotected,
+# maxplayers, matchmembers {profile_id, teamid}, observers, slotinfo = base64+zlib with the army badges) + avatars
+# {profile_id, name "/steam/<id64>", alias, country}. Fetched every 15 s; public answer without SteamIDs (like mm_live).
+ROOMS = {'ts': 0, 'rooms': [], 'error': ''}
+_ROOM_RATING = {}                                     # steam -> (time, rating, source): the ladder / Relic rating, 10 min
+ROOMS_URL = 'https://dow-api.reliclink.com/community/advertisement/findAdvertisements?title=dow2r'
+
+def _room_rating(steam):
+    hit = _ROOM_RATING.get(steam)
+    if hit and time.time() - hit[0] < 600: return hit[1], hit[2]
+    try: _pid, rating, _rd, _g, _n, src = _rating_info(steam, '1v1')
+    except Exception: rating, src = None, 'new'
+    r = (round(rating) if rating and src != 'new' else None, src)
+    _ROOM_RATING[steam] = (time.time(), r[0], r[1])
+    return r
+
+def _rooms_once():
+    with urllib.request.urlopen(urllib.request.Request(ROOMS_URL, headers={'User-Agent': 'dow2-ladder'}), timeout=15) as r:
+        d = json.load(r)
+    av = {a['profile_id']: a for a in d.get('avatars') or []}
+    out = []
+    for m in d.get('matches') or []:
+        b = badges(m)
+        mn = (m.get('mapname') or '').lower()
+        elite = elite_sure({'mapname': mn, 'slotinfo': m.get('slotinfo', ''), 'matchhistorymember': []})
+        vanilla = not elite and mn in VAN_MAPS and not any('elite' in w for w in b)
+        players = []
+        for x in m.get('matchmembers') or []:
+            a = av.get(x.get('profile_id')) or {}
+            steam = (a.get('name') or '').rsplit('/', 1)[-1] if (a.get('name') or '').startswith('/steam/') else ''
+            rating, src = _room_rating(steam) if steam else (None, 'new')
+            players.append({'name': a.get('alias') or 'Player', 'country': a.get('country') or '', 'team': x.get('teamid'),
+                            'host': x.get('profile_id') == m.get('host_profile_id'), 'rating': rating, 'rsrc': src})
+        out.append({'id': m.get('id'), 'name': (m.get('description') or '')[:64], 'map': mn, 'state': m.get('state'),
+                    'password': bool(m.get('passwordprotected')), 'max': m.get('maxplayers'), 'players': players,
+                    'observers': m.get('observernum') or 0, 'observers_max': m.get('observermax') or 0,
+                    'game': 'elite' if elite else 'vanilla' if vanilla else '', 'region': m.get('relayserver_region') or ''})
+    out.sort(key=lambda r: (r['game'] != 'elite', -len(r['players']), r['id']))
+    return out
+
+def _rooms_loop():
+    while True:
+        try:
+            ROOMS.update(ts=int(time.time()), rooms=_rooms_once(), error='')
+        except Exception as e:
+            ROOMS.update(error=type(e).__name__)
+        time.sleep(15)
+
 def mm_live(debug=False):  # публично: кто ищет и какие матчи создаются / идут (без SteamID). debug=1 — детали для отладки подбора
     now = time.time()
     with MM_LOCK:
@@ -1168,6 +1218,7 @@ class H(BaseHTTPRequestHandler):
             if u.path == '/ladder/api/stats': return self.send(200, stats())
             if u.path == '/ladder/api/seasons': return self.send(200, {'seasons': seasons(), 'current': current_season()})
             if u.path == '/ladder/api/mm/status': return self.send(200, mm_status(), cache=0)
+            if u.path == '/ladder/api/rooms': return self.send(200, ROOMS, cache=0)
             if u.path == '/ladder/api/mm/live': return self.send(200, mm_live(qs.get('debug', ['0'])[0] in ('1', 'true')), cache=0)
             if u.path == '/ladder/api/history':
                 g = lambda k: qs.get(k, [''])[0]
@@ -1290,6 +1341,7 @@ class Server(ThreadingHTTPServer):
 
 if __name__ == '__main__':
     threading.Thread(target=crawler, daemon=True).start()
+    threading.Thread(target=_rooms_loop, daemon=True).start()
     threading.Thread(target=_seasons_refresher, daemon=True).start()
     threading.Thread(target=_history_resolver, daemon=True).start()
     threading.Thread(target=stream.publisher, daemon=True).start()
