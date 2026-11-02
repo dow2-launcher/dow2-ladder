@@ -21,6 +21,7 @@
 # GET  msgs?room=&after=&limit=&before= -> {msgs: [...]}: the last `limit` (1000 at most and by default), the ones after
 #      an id (200 at most) or before one (paging up). One common stream: all = originals, ru/en = translated copies
 #      (text in the language of the asked tab); orig / lang / ru / en carry the original and the translations.
+# GET  whoami              -> the web chat page: who am I (session cookie csess, see sign-in)
 # POST say     {token, room, text, cid?} -> {ok, id, msg} | {ok: false, error[, retry_after ms][, retry]}
 # POST logout  {token}
 # POST mod     {admin, op: del|ban|unban, id|steam}   (admin = the fb-admin token)
@@ -134,8 +135,21 @@ def _user(steam):
     return {'steam': steam, 'name': u['name'], 'avatar': u['avatar']}
 
 # ---------- sign-in ----------
-def login_url(nonce):
-    ret = BASE + '/ladder/api/c/return?' + urllib.parse.urlencode({'nonce': nonce})
+# A web page (the chat page) passes to=/ladder/chat: after Steam it comes back to that page instead of the
+# "go back to the launcher" note, and gets a cross-subdomain session cookie. The launcher passes no `to`.
+def _safe_to(to):
+    return to if to and re.fullmatch(r'/ladder/[A-Za-z0-9/_-]*', to) else ''
+def _cookie_token(h):
+    for part in (h.headers.get('Cookie') or '').split(';'):
+        k, _, v = part.strip().partition('=')
+        if k == 'csess': return v
+    return ''
+COOKIE_SET = 'csess=%s; Domain=.fintebtc.de; Path=/; Max-Age=7776000; Secure; HttpOnly; SameSite=Lax'
+
+def login_url(nonce, to=''):
+    params = {'nonce': nonce}
+    if to: params['to'] = to
+    ret = BASE + '/ladder/api/c/return?' + urllib.parse.urlencode(params)
     q = {'openid.ns': 'http://specs.openid.net/auth/2.0', 'openid.mode': 'checkid_setup', 'openid.return_to': ret,
          'openid.realm': BASE + '/', 'openid.identity': 'http://specs.openid.net/auth/2.0/identifier_select',
          'openid.claimed_id': 'http://specs.openid.net/auth/2.0/identifier_select'}
@@ -363,19 +377,27 @@ def handle(h, method, u, d):
         if p == 'login':
             if not re.fullmatch(r'[A-Za-z0-9_-]{16,64}', qs.get('nonce', '')): return h.send(400, {'error': 'nonce'}, cache=0)
             log('login', ip=ip, nonce=qs['nonce'][:8], ua=h.headers.get('User-Agent', '')[:60])
-            h.send_response(302); h.send_header('Location', login_url(qs['nonce'])); h.send_header('Cache-Control', 'no-store')
+            h.send_response(302); h.send_header('Location', login_url(qs['nonce'], _safe_to(qs.get('to', '')))); h.send_header('Cache-Control', 'no-store')
             h.send_header('Content-Length', '0'); h.end_headers(); return
         if p == 'return':
             steam, err = openid_return(query=u.query)
+            to = _safe_to(qs.get('to', ''))
             log('return', ip=ip, nonce=qs.get('nonce', '')[:8], steam=steam or '-', error=err or '-')
             if err: return h.send_html(PAGE % ('Не получилось войти / Sign-in failed: %s' % html.escape(err)), cache=0)
             users.fetch_now(steam)
             name = html.escape(users.get(steam)['name'])
+            if to:                                           # web sign-in: hand back a cross-subdomain session cookie, then to the page
+                with db() as c:
+                    row = c.execute('SELECT token FROM pending WHERE nonce=?', (qs.get('nonce', '')[:64],)).fetchone()
+                if row:
+                    h.send_response(302); h.send_header('Location', to); h.send_header('Set-Cookie', COOKIE_SET % row[0])
+                    h.send_header('Cache-Control', 'no-store'); h.send_header('Content-Length', '0'); h.end_headers(); return
             return h.send_html(PAGE % ('Вы вошли как <b>%s</b>. Вернитесь в лаунчер.<br><br>Signed in as <b>%s</b>. Go back to the launcher.' % (name, name)), cache=0)
         if p == 'claim':
             r = claim(qs.get('nonce', ''))
             if not r.get('wait'): log('claim', ip=ip, nonce=qs.get('nonce', '')[:8], ok=r.get('ok'), steam=r.get('steam', '-'), error=r.get('error', '-'))
             return h.send(200, r, cache=0)
+        if p == 'whoami': return h.send(200, me({'token': _cookie_token(h)}), cache=0)   # web page: who am I (from the cookie)
         if p == 'online': return h.send(200, {'online': online()}, cache=0)
         if p == 'live': return h.send(200, LIVE(), cache=0)
         if p == 'msgs': return h.send(200, msgs(qs.get('room', 'all'), qs.get('after', '0'), qs.get('limit'), qs.get('before')), cache=0)
@@ -386,9 +408,14 @@ def handle(h, method, u, d):
             if steam: users.launcher_seen(steam, state)
             return stream.serve(h, ip, steam, lambda: users.launcher_seen(steam), lambda: missed(qs.get('after')), lambda: me_event(steam))
         return h.send(404, {'error': 'not found'}, cache=0)
-    if p == 'local': return h.send(200, local(d or {}, ip), cache=0)
+    # POST. The web page is signed in by cookie, the launcher by a token in the body — accept either.
+    d = d or {}
+    if not d.get('token'):
+        ct = _cookie_token(h)
+        if ct: d['token'] = ct
+    if p == 'local': return h.send(200, local(d, ip), cache=0)
     fn = {'hello': hello, 'say': say, 'me': me, 'logout': logout, 'mod': mod}.get(p)
     if not fn: return h.send(404, {'error': 'not found'}, cache=0)
-    return h.send(200, fn(d or {}), cache=0)
+    return h.send(200, fn(d), cache=0)
 
 init_db()

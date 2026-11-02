@@ -547,11 +547,24 @@ def _assign_watchers():  # под MM_LOCK: зрителей — в собира�
                 m['players'][w['steam']] = {'name': w.get('name') or 'Player', 'watcher': True}
                 break
 
-RELAY_ORDER = ['15.220.68.107', '116.202.106.150']   # owner 29.10: Warsaw (AWS), Germany, else Relic; Moscow off (players report small lags through it). 01.11: the lowest delay wins, the order only breaks a tie
+RELAYS_FILE = ROOT + '/data/relays.json'   # источник правды сети релеев (publish_relays.py от root подписывает Ed25519); сервис только читает
+_RELAYS = {'mtime': 0, 'ips': ['15.220.68.107', '116.202.106.150', '83.217.192.34'], 'doc': None}
+def _relays():   # кэш по mtime: правка relays.json применяется без рестарта; при сбое — последний валидный список
+    try:
+        st = os.stat(RELAYS_FILE)
+        if st.st_mtime != _RELAYS['mtime']:
+            d = json.load(open(RELAYS_FILE, encoding='utf-8'))
+            ips = [r['ip'] for r in d.get('relays', []) if r.get('ip')]
+            if ips: _RELAYS.update(mtime=st.st_mtime, ips=ips, doc=d)
+    except Exception:
+        pass
+    return _RELAYS
+def relay_order():   # список IP узлов в порядке приоритета (tie-break в _best_relay); добавление зеркала = правка relays.json
+    return _relays()['ips']
 
 def _best_relay(steams):
     # Relay 9: every player pinged our game servers (relay_ping {ip: ms}, -1 = no answer). The match goes to the first server
-    # of RELAY_ORDER that every player reaches; none =  (play on Relic). 0 ms counts as no answer: no server is that close
+    # of relays.json that every player reaches; none =  (play on Relic). 0 ms counts as no answer: no server is that close
     # over the internet, it is something on the player own PC (VPN, a blocking bypass, an antivirus) answering for it -
     # 29.10 a player from Ukraine "reached" Moscow that way and the match never connected. Someone without pings (an older
     # add-on): nothing is known about what he reaches - Relic too.
@@ -563,10 +576,11 @@ def _best_relay(steams):
     if picked: return picked[0]
     # 01.11.2026 (owner): the best server, not the first one - of the servers every player reaches, the one with the lowest
     # worst delay (TCP connect time to the game port, Relay.dll - not ICMP ping, which many VPNs and providers block);
-    # a tie goes by RELAY_ORDER
-    ok = [h for h in RELAY_ORDER if all(x.get(h, -1) > 0 for x in pings)]
+    # a tie goes by relays.json
+    ro = relay_order()
+    ok = [h for h in ro if all(x.get(h, -1) > 0 for x in pings)]
     if not ok: return ''
-    return min(ok, key=lambda h: (max(x[h] for x in pings), RELAY_ORDER.index(h)))
+    return min(ok, key=lambda h: (max(x[h] for x in pings), ro.index(h)))
 
 def _player_view(p):  # под MM_LOCK: что вернуть игроку в poll
     if p['mode'] == WATCH and p['state'] == 'searching':
@@ -574,7 +588,8 @@ def _player_view(p):  # под MM_LOCK: что вернуть игроку в po
     if p['state'] == 'searching' and p['mode'] == WATCH:
         return {'state': 'searching', 'mode': WATCH, 'queue': _counts()}
     if p['state'] == 'searching':
-        v = {'state': 'searching', 'mode': p['mode'], 'rating': round(p['rating']), 'queue': _counts()}
+        v = {'state': 'searching', 'mode': p['mode'], 'rating': round(p['rating']), 'queue': _counts(),
+             'relays': relay_order(), 'relays_ts': (_relays().get('doc') or {}).get('ts', 0)}   # MMFind-push: узлы для пинга (вариант 1); подписанный список — /ladder/api/relays
         if (p.get('pool') or '').endswith('|direct'):   # MMFind 0.35: alone in my own pool = I make my room while searching
             v['alone'] = int(not any(q is not p and q.get('state') == 'searching' and q.get('pool') == p.get('pool') and q.get('mode') == p['mode'] for q in MM.values()))
         return v
@@ -1268,10 +1283,19 @@ class H(BaseHTTPRequestHandler):
                         return self.send_html(f.read())
                 except Exception:
                     return self.send(500, {'error': 'page'})
+            if u.path in ('/ladder/chat', '/ladder/chat/'):
+                try:
+                    with open(os.path.dirname(os.path.abspath(__file__)) + '/chat.html', 'rb') as f:
+                        return self.send_html(f.read(), cache=30)
+                except Exception:
+                    return self.send(500, {'error': 'page'})
             if u.path == '/ladder/api/stats': return self.send(200, stats())
             if u.path == '/ladder/api/seasons': return self.send(200, {'seasons': seasons(), 'current': current_season()})
             if u.path == '/ladder/api/mm/status': return self.send(200, mm_status(), cache=0)
             if u.path == '/ladder/api/rooms': return self.send(200, ROOMS, cache=0)
+            if u.path == '/ladder/api/relays':
+                d = _relays().get('doc') or {'v': 1, 'relays': [{'ip': ip} for ip in relay_order()], 'ts': 0}
+                return self.send(200, d, cache=30)
             if u.path == '/ladder/api/mm/live': return self.send(200, mm_live(qs.get('debug', ['0'])[0] in ('1', 'true')), cache=0)
             if u.path == '/ladder/api/history':
                 g = lambda k: qs.get(k, [''])[0]

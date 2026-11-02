@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Чат — Elite Mod</title>
+<meta name="description" content="Общий чат игроков Dawn of War II: Retribution (Elite). Вход через Steam.">
+<style>
+@font-face { font-family: Cinzel; src: url(/elite/fonts/cinzel-700.ttf); font-weight: 700; font-display: swap; }
+@font-face { font-family: Cinzel; src: url(/elite/fonts/cinzel-900.ttf); font-weight: 900; font-display: swap; }
+@font-face { font-family: Spectral; src: url(/elite/fonts/spectral-400.ttf); font-weight: 400; font-display: swap; }
+@font-face { font-family: Spectral; src: url(/elite/fonts/spectral-600.ttf); font-weight: 600; font-display: swap; }
+:root {
+  --bg:#0d0b09; --panel:#16130f; --panel2:#1c1813; --line:#3a3124; --gold:#d9b25f; --gold2:#f0d48f;
+  --text:#e6dccb; --muted:#a39782; --red:#c42a24; --green:#6fae53;
+}
+* { box-sizing:border-box; }
+html, body { margin:0; height:100%; }
+body { background:var(--bg); color:var(--text); font:16px/1.5 Spectral,Georgia,serif;
+  background-image:radial-gradient(ellipse at 50% -10%, #2a1d0933 0%, transparent 60%); -webkit-text-size-adjust:100%; }
+a { color:var(--gold2); text-decoration:none; }
+.wrap { max-width:760px; margin:0 auto; min-height:100%; display:flex; flex-direction:column; padding:0 14px; }
+header { display:flex; align-items:center; gap:12px; padding:16px 2px 10px; flex-wrap:wrap; }
+h1 { margin:0; font:900 clamp(22px,5vw,30px) Cinzel,serif; letter-spacing:.04em; color:var(--gold2); text-shadow:0 2px 0 #5a3f12; }
+header .back { margin-left:auto; font:700 13px Cinzel,serif; letter-spacing:.05em; color:var(--muted); }
+.me { display:flex; align-items:center; gap:10px; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:8px 12px; margin-bottom:10px; }
+.me img { width:36px; height:36px; border-radius:4px; object-fit:cover; background:#000; }
+.me .nm { font-weight:600; color:var(--gold2); }
+.me .rt { color:var(--muted); font-size:14px; }
+.me .out { margin-left:auto; background:none; border:1px solid var(--line); color:var(--muted); border-radius:4px; padding:6px 12px; cursor:pointer; font:inherit; }
+.me .out:hover { color:var(--text); border-color:#5a4a2e; }
+.online { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:8px 10px; margin-bottom:10px; }
+.ohdr { font:700 13px Cinzel,serif; letter-spacing:.04em; color:var(--gold2); margin-bottom:7px; display:flex; align-items:center; gap:7px; }
+.ohdr .dot { width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 6px var(--green); flex:none; }
+.olist { display:flex; flex-wrap:wrap; gap:6px; max-height:96px; overflow-y:auto; }
+.ou { display:inline-flex; align-items:center; gap:6px; background:var(--panel2); border:1px solid #2c2619; border-radius:20px; padding:3px 11px 3px 3px; font-size:13px; max-width:100%; }
+.ou img { width:22px; height:22px; border-radius:50%; object-fit:cover; background:#000; flex:none; }
+.ou .on { color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:150px; }
+.ou .rt { color:var(--muted); font-size:12px; flex:none; }
+.ou.in { border-color:#3a5a2e; }
+.ou.in .on { color:#a7d389; }
+.nk { cursor:pointer; }
+.nk:hover { text-decoration:underline; color:var(--gold2); }
+.ou { cursor:pointer; }
+.ou:hover { border-color:#5a4a2e; }
+.tabs { display:flex; gap:0; border:1px solid #5a4a2e; border-radius:5px; overflow:hidden; width:max-content; margin-bottom:10px; }
+.tabs button { font:700 14px Cinzel,serif; letter-spacing:.05em; color:var(--muted); background:#0e0c09; border:0; padding:8px 20px; cursor:pointer; }
+.tabs button + button { border-left:1px solid #3a3124; }
+.tabs button.on { background:linear-gradient(#3a2a12,#22190c); color:var(--gold2); box-shadow:inset 0 -2px 0 var(--gold); }
+.msgs { flex:1; min-height:240px; overflow-y:auto; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:12px; }
+.m { display:flex; gap:10px; padding:7px 0; }
+.m + .m { border-top:1px solid #241f17; }
+.m img { width:34px; height:34px; border-radius:4px; object-fit:cover; background:#000; flex:none; }
+.m .b { min-width:0; }
+.m .h { font-size:13px; color:var(--muted); margin-bottom:1px; }
+.m .h b { color:var(--gold2); font-weight:600; }
+.m .t { overflow-wrap:anywhere; white-space:pre-wrap; }
+.m .t .at { color:var(--gold2); }
+.empty { color:var(--muted); text-align:center; padding:30px 0; }
+.older { color:var(--muted); text-align:center; font-size:12px; padding:2px 0 8px; opacity:.7; }
+.foot { padding:10px 0 18px; position:sticky; bottom:0; background:linear-gradient(transparent, var(--bg) 24px); }
+.send { display:flex; gap:8px; }
+.send textarea { flex:1; resize:none; font:16px/1.4 Spectral,serif; color:var(--text); background:var(--panel2); border:1px solid #5a4a2e; border-radius:5px; padding:10px 12px; }
+.send button { font:700 14px Cinzel,serif; letter-spacing:.04em; color:#1a1206; background:linear-gradient(var(--gold2),var(--gold)); border:1px solid #c79b44; border-radius:5px; padding:0 20px; cursor:pointer; }
+.send button:disabled { opacity:.5; cursor:default; }
+.signin { text-align:center; padding:14px; background:var(--panel); border:1px solid var(--line); border-radius:6px; }
+.signin p { margin:0 0 10px; color:var(--muted); }
+.steam { display:inline-flex; align-items:center; gap:9px; font:700 15px Cinzel,serif; letter-spacing:.04em; color:#dfe7ef;
+  background:linear-gradient(#2a4155,#1b2b38); border:1px solid #3d5266; border-radius:5px; padding:11px 22px; cursor:pointer; }
+.steam:hover { border-color:#5b7a93; filter:brightness(1.08); }
+.steam svg { width:18px; height:18px; fill:currentColor; }
+.toast { position:fixed; left:50%; bottom:84px; transform:translateX(-50%); background:#2a1813; border:1px solid var(--red);
+  color:#f3d9b7; padding:10px 16px; border-radius:6px; max-width:90%; text-align:center; opacity:0; transition:opacity .2s; pointer-events:none; z-index:10; }
+.toast.on { opacity:1; }
+.toast.ok { border-color:var(--green); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Общий чат</h1>
+    <a class="back" href="/ladder/">← Ладдер</a>
+  </header>
+
+  <div id="meBox" class="me" style="display:none"></div>
+
+  <div id="online" class="online" style="display:none"></div>
+
+  <div class="tabs" id="tabs">
+    <button data-room="all" class="on">Общий</button>
+    <button data-room="ru">RU</button>
+    <button data-room="en">EN</button>
+  </div>
+
+  <div class="msgs" id="msgs"><div class="empty">Загрузка…</div></div>
+
+  <div class="foot">
+    <div id="signin" class="signin" style="display:none">
+      <p>Войдите через Steam, чтобы писать в чат.</p>
+      <button class="steam" id="steamBtn">
+        <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 0 0-9.9 8.6l5.3 2.2a2.8 2.8 0 0 1 1.6-.5h.1l2.4-3.4v-.1a3.7 3.7 0 1 1 3.7 3.7h-.1l-3.4 2.4v.1a2.8 2.8 0 0 1-5.5.8L2 18.2A10 10 0 1 0 12 2zM8.6 17.2l-1.3-.5a2.1 2.1 0 0 0 3.9-.2 2.1 2.1 0 0 0-2.8-2l1.3.6a1.5 1.5 0 1 1-1.1 2.1zm8.3-6.3a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zm0-.8a1.7 1.7 0 1 1 0-3.4 1.7 1.7 0 0 1 0 3.4z"/></svg>
+        Войти через Steam
+      </button>
+    </div>
+    <div id="composer" class="send" style="display:none">
+      <textarea id="txt" rows="2" maxlength="500" placeholder="Сообщение… (Enter — отправить, Shift+Enter — перенос)"></textarea>
+      <button id="sendBtn">Отправить</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const api = (path, opt) => fetch('/ladder/api/c/' + path, Object.assign({ credentials: 'same-origin', cache: 'no-store' }, opt)).then(r => r.json());
+let toastT;
+function toast(msg, ok) { const t = $('toast'); t.textContent = msg; t.className = 'toast on' + (ok ? ' ok' : ''); clearTimeout(toastT); toastT = setTimeout(() => t.className = 'toast', 3500); }
+
+const PAGE = 20;   // last 20 on first load; older pulled in on scroll-up
+const CH = { room: 'all', me: null, last: {}, first: {}, lists: {}, noMore: {}, busy: {} };
+try { CH.room = localStorage.getItem('chRoom') || 'all'; } catch (e) {}
+
+function avatar(src) { return src ? `<img src="${esc(src)}" alt="" loading="lazy">` : `<img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E" alt="">`; }
+function when(ts) { const d = new Date(ts * 1000); const now = new Date(); const t = d.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
+  return d.toDateString() === now.toDateString() ? t : d.toLocaleDateString('ru', { day: '2-digit', month: '2-digit' }) + ' ' + t; }
+function body(text) { return esc(text).replace(/(^|\s)(@[^\s@]{1,32})/g, (m, s, a) => s + '<span class="at">' + a + '</span>'); }
+
+function renderMe() {
+  const m = CH.me && CH.me.signed_in ? CH.me : null;
+  $('meBox').style.display = m ? 'flex' : 'none';
+  $('signin').style.display = m ? 'none' : 'block';
+  $('composer').style.display = m ? 'flex' : 'none';
+  if (m) {
+    const rt = m.rating ? `<span class="rt">${Number(m.rating) | 0} 1v1</span>` : '';
+    const games = m.stats && m.stats.games ? `<span class="rt"> · ${m.stats.games} игр</span>` : '';
+    $('meBox').innerHTML = avatar(m.avatar) + `<div><div class="nm">${esc(m.name || m.steam)}</div>${rt}${games}</div>`
+      + `<button class="out" id="outBtn">Выйти</button>`;
+    $('outBtn').onclick = logout;
+  }
+}
+
+function renderOnline(list) {
+  const box = $('online');
+  if (!list || !list.length) { box.style.display = 'none'; return; }
+  const chips = list.map(u => {
+    const ingame = u.state && u.state !== 'menu';   // 'game'/'match'/… = в игре, 'menu' = в меню
+    const rt = u.rating ? `<span class="rt">${Number(u.rating) | 0}</span>` : '';
+    const tip = (u.name || u.steam) + (u.rating ? ' · ' + (Number(u.rating) | 0) + ' 1v1' : '') + (ingame ? ' · в игре' : '');
+    return `<span class="ou${ingame ? ' in' : ''}" data-nm="${esc(u.name || 'Player')}" title="${esc(tip)} · клик — ответить">${avatar(u.avatar)}<span class="on">${esc(u.name || 'Player')}</span>${rt}</span>`;
+  }).join('');
+  box.innerHTML = `<div class="ohdr"><span class="dot"></span>Онлайн · ${list.length}</div><div class="olist">${chips}</div>`;
+  box.style.display = 'block';
+}
+
+async function pingOnline() {
+  let list;
+  if (CH.me && CH.me.signed_in) {   // signed-in: hello registers our presence AND returns the list
+    try { const r = await api('hello', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state: 'menu' }) }); list = r && r.online; } catch (e) {}
+  }
+  if (!list) { try { const r = await api('online'); list = r && r.online; } catch (e) {} }
+  if (list) renderOnline(list);
+}
+
+function renderMsgs(opts) {
+  opts = opts || {};
+  const list = CH.lists[CH.room] || [];
+  const box = $('msgs');
+  const atEnd = box.scrollTop + box.clientHeight > box.scrollHeight - 40;
+  const prevH = box.scrollHeight, prevTop = box.scrollTop;
+  const top = CH.noMore[CH.room] || !list.length ? '' : '<div class="older" id="older">↑ прокрутите вверх — больше истории</div>';
+  box.innerHTML = list.length ? top + list.map(x =>
+    `<div class="m">${avatar(x.avatar)}<div class="b"><div class="h"><b class="nk" data-nm="${esc(x.name || 'Player')}">${esc(x.name || 'Player')}</b> · ${when(x.ts)}</div><div class="t">${body(x.text)}</div></div></div>`
+  ).join('') : `<div class="empty">Пока никто не писал. Будьте первым.</div>`;
+  if (opts.keepTop) box.scrollTop = box.scrollHeight - prevH + prevTop;   // prepended older: hold the view steady
+  else if (opts.toEnd || atEnd) box.scrollTop = box.scrollHeight;
+}
+
+// new messages (first load with ?limit, then polling with ?after)
+async function load(room) {
+  const r = room || CH.room;
+  const q = CH.last[r] ? `after=${CH.last[r]}` : `after=0&limit=${PAGE}`;
+  let d; try { d = await api(`msgs?room=${r}&${q}`); } catch (e) { return; }
+  if (!d || !d.msgs) return;
+  const firstLoad = !CH.last[r];
+  const list = CH.lists[r] || (CH.lists[r] = []);
+  let added = false;
+  d.msgs.forEach(m => {
+    if (!list.some(x => x.id === m.id)) { list.push(m); added = true; }
+    CH.last[r] = Math.max(CH.last[r] || 0, m.id);
+    CH.first[r] = CH.first[r] ? Math.min(CH.first[r], m.id) : m.id;
+  });
+  if (firstLoad && d.msgs.length < PAGE) CH.noMore[r] = true;   // whole history already fits in the first page
+  if (added && r === CH.room) renderMsgs();
+}
+
+// scroll-up paging: pull the PAGE messages just before the oldest we hold
+async function loadOlder(r) {
+  r = r || CH.room;
+  if (CH.busy[r] || CH.noMore[r] || !CH.first[r]) return;
+  CH.busy[r] = true;
+  let d; try { d = await api(`msgs?room=${r}&before=${CH.first[r]}&limit=${PAGE}`); } catch (e) { CH.busy[r] = false; return; }
+  const list = CH.lists[r] || (CH.lists[r] = []);
+  const older = (d && d.msgs || []).filter(m => !list.some(x => x.id === m.id));
+  if (older.length) {
+    CH.lists[r] = older.concat(list);
+    CH.first[r] = Math.min(CH.first[r], ...older.map(m => m.id));
+    if (r === CH.room) renderMsgs({ keepTop: true });
+  }
+  if (!d || !d.msgs || d.msgs.length < PAGE) CH.noMore[r] = true;
+  CH.busy[r] = false;
+}
+
+async function send() {
+  const el = $('txt'), text = el.value.trim();
+  if (!text) return;
+  $('sendBtn').disabled = true; el.value = '';
+  try {
+    const r = await api('say', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ room: CH.room, text }) });
+    if (r && r.ok) { await load(CH.room); $('msgs').scrollTop = $('msgs').scrollHeight; }
+    else { el.value = text; toast((r && r.error) || 'Не отправлено'); }
+  } catch (e) { el.value = text; toast('Сеть недоступна'); }
+  $('sendBtn').disabled = false; el.focus();
+}
+
+function signIn() {
+  let nonce = ''; const a = new Uint8Array(24);
+  (crypto.getRandomValues ? crypto.getRandomValues(a) : a).forEach(b => nonce += b.toString(16).padStart(2, '0'));
+  if (nonce.length < 16) nonce = String(Date.now()) + Math.random().toString(16).slice(2);
+  location.href = '/ladder/api/c/login?nonce=' + nonce + '&to=' + encodeURIComponent('/ladder/chat');
+}
+async function logout() {
+  try { await api('logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); } catch (e) {}
+  CH.me = null; renderMe(); toast('Вы вышли', true);
+}
+
+// tabs
+document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
+  CH.room = b.dataset.room; try { localStorage.setItem('chRoom', CH.room); } catch (e) {}
+  document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x === b));
+  renderMsgs({ toEnd: true }); load();
+});
+$('msgs').addEventListener('scroll', () => { if ($('msgs').scrollTop < 60) loadOlder(CH.room); });
+document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.room === CH.room));
+
+$('steamBtn').onclick = signIn;
+$('sendBtn').onclick = send;
+$('txt').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
+function mention(nm) {
+  if (!(CH.me && CH.me.signed_in)) { toast('Войдите, чтобы писать'); return; }
+  const el = $('txt'), tag = '@' + nm + ' ';
+  const a = (el.selectionStart != null) ? el.selectionStart : el.value.length;
+  const b = (el.selectionEnd != null) ? el.selectionEnd : el.value.length;
+  el.value = el.value.slice(0, a) + tag + el.value.slice(b);
+  const pos = a + tag.length; try { el.setSelectionRange(pos, pos); } catch (_) {}
+  el.focus();
+}
+document.addEventListener('click', e => {
+  const t = e.target.closest && e.target.closest('[data-nm]');
+  if (t) { e.preventDefault(); mention(t.getAttribute('data-nm')); }
+});
+
+async function boot() {
+  try { CH.me = await api('whoami'); } catch (e) {}
+  renderMe();
+  await load(CH.room);
+  renderMsgs({ toEnd: true });
+  pingOnline();
+  setInterval(() => { load(); if (CH.room !== 'all') load('all'); }, 5000);
+  setInterval(pingOnline, 25000);
+}
+boot();
+</script>
+</body>
+</html>
