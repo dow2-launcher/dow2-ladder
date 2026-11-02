@@ -519,7 +519,8 @@ def _try_match(mode):  # под MM_LOCK: нестрогий подбор с пр
         guest_team = [grp[i]['steam'] for i in range(len(grp)) if i not in best_split]
         MM_SEQ[0] += 1; mid = 'm%d' % MM_SEQ[0]
         relic = [p for p in grp if not p.get('own')]            # смешанный состав: хост — игрок без нашего сервера (Relic),
-        host_steam = min(relic or grp, key=lambda p: p['ts'])['steam']  # Relay 8 у остальных уводит их к нему на Relic; иначе — кто дольше ждёт
+        pre = [p for p in grp if p.get('room')] if (anchor.get('pool') or '').endswith('|direct') else []   # 0.35: whoever already has a room
+        host_steam = min(pre or relic or grp, key=lambda p: p['ts'])['steam']  # Relay 8 у остальных уводит их к нему на Relic; иначе — кто дольше ждёт
         if host_steam not in host_team:  # хост всегда в host-команде первым: меняем команды местами, а не переносим его
             host_team, guest_team = guest_team, host_team
         host_team.remove(host_steam); host_team.insert(0, host_steam)
@@ -529,6 +530,7 @@ def _try_match(mode):  # под MM_LOCK: нестрогий подбор с пр
         slots = {s_: i for i, s_ in enumerate(host_team)}; slots.update({s_: 4 + i for i, s_ in enumerate(guest_team)})
         MM_MATCHES[mid] = {'id': mid, 'mode': mode, 'host': host_team, 'guest': guest_team, 'slots': slots, 'watchers': [], 'pool': anchor.get('pool', ''),
                            'host_steam': host_steam, 'lobby': None, 'created': time.time(), 'map': mmap,
+                           'room': next((p['room'] for p in grp if p['steam'] == host_steam and p.get('room')), None),
                            'state': 'creating', 'started': None,
                            'players': {p['steam']: {'name': p.get('name') or 'Player', 'rating': round(p['rating']), 'rsrc': p.get('rsrc', 'ladder'),
                                                     'race': p.get('race'), 'hero': p.get('hero')} for p in grp}}
@@ -572,7 +574,10 @@ def _player_view(p):  # под MM_LOCK: что вернуть игроку в po
     if p['state'] == 'searching' and p['mode'] == WATCH:
         return {'state': 'searching', 'mode': WATCH, 'queue': _counts()}
     if p['state'] == 'searching':
-        return {'state': 'searching', 'mode': p['mode'], 'rating': round(p['rating']), 'queue': _counts()}
+        v = {'state': 'searching', 'mode': p['mode'], 'rating': round(p['rating']), 'queue': _counts()}
+        if (p.get('pool') or '').endswith('|direct'):   # MMFind 0.35: alone in my own pool = I make my room while searching
+            v['alone'] = int(not any(q is not p and q.get('state') == 'searching' and q.get('pool') == p.get('pool') and q.get('mode') == p['mode'] for q in MM.values()))
+        return v
     m = MM_MATCHES.get(p['match'])
     if not m:
         p.update(state='searching', match=None, role=None)
@@ -652,7 +657,7 @@ def mm_join(steam, mode, d=None):
                      'pid': pid, 'name': name or _clean(d.get('name')), 'state': 'searching', 'match': None, 'role': None,
                      'rsrc': rsrc, 'race': _clean(d.get('race'), 32), 'hero': _clean(d.get('hero'), 32), 'maps': maps, 'max_diff': max_diff,
                      'ts': now, 'seen': now, 'pool': '%s|%s%s' % (_clean(d.get('group'), 24) or '', _game(d), '|direct' if d.get('direct') else ''),   # one queue per game (01.11: vanilla and Elite never meet); 02.11: MMFind 0.34 fast automatch (experiment) only with its own kind
-                     'game': _game(d),
+                     'game': _game(d), 'room': str(int(d['room'])) if str(d.get('room') or '').isdigit() else '',
                     
                      'own': bool(d.get('own_server')), 'ping': _relay_ping(d.get('relay_ping')) if d.get('own_server') else None,
                      'group': _clean(d.get('group'), 24) or '', 'compat': bool(d.get('relay_compat')),
@@ -682,6 +687,19 @@ def mm_poll(steam):
             return {'state': 'idle'}
         p['seen'] = time.time()
         return _player_view(p)
+
+def mm_room(steam, room):
+    # MMFind 0.35 fast automatch: the room a searching player made for himself (private, invisible) - the guests of his match
+    # get it in their "matched" answer at once; a host whose match exists already gets it into the match too
+    steam = str(steam)
+    if not str(room or '').isdigit(): return {'ok': False}
+    with MM_LOCK:
+        p = MM.get(steam)
+        if not p: return {'ok': False}
+        p['room'] = str(int(room)); p['seen'] = time.time()
+        m = MM_MATCHES.get(p.get('match') or '')
+        if m and p.get('role') == 'host' and not m.get('room'): m['room'] = p['room']
+        return {'ok': True}
 
 def mm_host(steam, lobby, mapname=None, room=None):
     steam = str(steam)
@@ -1333,6 +1351,7 @@ class H(BaseHTTPRequestHandler):
             if u.path == '/ladder/api/mm/alive': return self.send(200, mm_alive(steam), cache=0)
             if u.path == '/ladder/api/mm/ruined': return self.send(200, mm_ruined(steam, d.get('lobby', '')), cache=0)
             if u.path == '/ladder/api/mm/poll':  return self.send(200, mm_poll(steam), cache=0)
+            if u.path == '/ladder/api/mm/room':  return self.send(200, mm_room(steam, d.get('room')), cache=0)
             if u.path == '/ladder/api/mm/host':  return self.send(200, mm_host(steam, d.get('lobby', ''), d.get('map'), d.get('room')), cache=0)
             if u.path == '/ladder/api/mm/leave': return self.send(200, mm_leave(steam), cache=0)
             return self.send(404, {'error': 'not found'}, cache=0)
