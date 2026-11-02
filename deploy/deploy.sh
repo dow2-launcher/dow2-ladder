@@ -89,7 +89,7 @@ if has gameserver/; then
     live=$(ssh -o BatchMode=yes $h "ss -tn state established \"( sport = :47100 or sport = :47000 )\" | tail -n +2 | wc -l" 2>/dev/null || echo 99)
     if [ "${live:-99}" -gt 0 ]; then pending="$pending
 gameserver/"; continue; fi
-    scp -q gameserver/battle_relay.py $h:/srv/dow2battle/battle_relay.py && ssh $h "chmod 644 /srv/dow2battle/battle_relay.py; systemctl restart dow2-battle" && done_parts="$done_parts сервер-$h"
+    scp -q gameserver/battle_relay.py gameserver/udp_gateway.py $h:/srv/dow2battle/ && ssh $h "chmod 644 /srv/dow2battle/battle_relay.py /srv/dow2battle/udp_gateway.py; systemctl restart dow2-battle dow2-udpgw" && done_parts="$done_parts сервер-$h"
   done
   pending=$(echo "$pending" | sort -u)
 fi

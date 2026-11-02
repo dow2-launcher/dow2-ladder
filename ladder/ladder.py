@@ -590,8 +590,7 @@ def _player_view(p):  # под MM_LOCK: что вернуть игроку в po
     if p['state'] == 'searching':
         v = {'state': 'searching', 'mode': p['mode'], 'rating': round(p['rating']), 'queue': _counts(),
              'relays': relay_order(), 'relays_ts': (_relays().get('doc') or {}).get('ts', 0)}   # MMFind-push: узлы для пинга (вариант 1); подписанный список — /ladder/api/relays
-        if (p.get('pool') or '').endswith('|direct'):   # MMFind 0.35: alone in my own pool = I make my room while searching
-            v['alone'] = int(not any(q is not p and q.get('state') == 'searching' and q.get('pool') == p.get('pool') and q.get('mode') == p['mode'] for q in MM.values()))
+        v['alone'] = 0                                   # 02.11 evening: fast automatch off - MMFind 0.35+ never makes a private room while searching
         return v
     m = MM_MATCHES.get(p['match'])
     if not m:
@@ -671,7 +670,7 @@ def mm_join(steam, mode, d=None):
         MM[steam] = {'jts': now, 'steam': steam, 'mode': mode, 'rating': rating, 'rd': rd, 'games': games, 'ruiner': _ruin_blocked(steam),
                      'pid': pid, 'name': name or _clean(d.get('name')), 'state': 'searching', 'match': None, 'role': None,
                      'rsrc': rsrc, 'race': _clean(d.get('race'), 32), 'hero': _clean(d.get('hero'), 32), 'maps': maps, 'max_diff': max_diff,
-                     'ts': now, 'seen': now, 'pool': '%s|%s%s' % (_clean(d.get('group'), 24) or '', _game(d), '|direct' if d.get('direct') else ''),   # one queue per game (01.11: vanilla and Elite never meet); 02.11: MMFind 0.34 fast automatch (experiment) only with its own kind
+                     'ts': now, 'seen': now, 'pool': '%s|%s' % (_clean(d.get('group'), 24) or '', _game(d)),   # 02.11 evening: the fast automatch (private rooms) is OFF - owner: «убираем»; a "direct" search goes into the usual pool   # one queue per game (01.11: vanilla and Elite never meet); 02.11: MMFind 0.34 fast automatch (experiment) only with its own kind
                      'game': _game(d), 'room': str(int(d['room'])) if str(d.get('room') or '').isdigit() else '',
                     
                      'own': bool(d.get('own_server')), 'ping': _relay_ping(d.get('relay_ping')) if d.get('own_server') else None,
