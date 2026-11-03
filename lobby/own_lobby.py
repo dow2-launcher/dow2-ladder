@@ -7,10 +7,19 @@ Relic's and send those connections here (rts.fintebtc.de:47443). This server:
 - passes everything on to Relic as it is - login, news, chat, friends, Relic's custom games and its automatch: one TLS connection to
   Relic per game connection, Relic's certificate checked against Relic's own root (relic_ca.pem, the one pinned in DOW2.exe);
 - strips Relic's telemetry credentials (RL_TELEMKINESIS*) from the login answer: never logged, never stored, never passed on;
-- when OWN_ROOMS is on (data/own_rooms.on) hosts the PRIVATE rooms itself (the fast automatch makes those): ids from our own range
-  (2 000 000 000+), the room's relay is our game server (battle_relay.py, native connection on :47100), joins, peers, start and
-  the match result, which goes into the ladder's database as a match of its own (source "ownlobby") - Relic does not know our ids,
-  so its reportMatch is not called for them. Public rooms (the Custom Games list) stay on Relic: everybody can see and join them;
+- v2 (03.11.2026, owner: "the automatch fully on OUR servers, fast and without friends" - no private rooms any more): with
+  data/own_mm.on the AUTOMATCH rooms live here. MMFind's host makes an ordinary Custom Games room named MM-<match>-<random>; when
+  the ladder's match <match> exists and every one of its players and watchers is signed in through this server (OwnLobby.dll),
+  the room is hosted here: ids from our own range (2 000 000 000+), the room's relay is our game server (the one the ladder picked
+  for the match if it is one of ours, battle_relay.py native connection on :47100), joins, peers, start and the result, which goes
+  into the ladder's database as a match of its own (source "ownlobby") - Relic never hears of it. The room is shown in the Custom
+  Games list (findAdvertisements, Relic's answer + ours) only to the players and watchers of that match (data/list_all.on: to
+  everyone signed in here), so nobody else can see or join it - and nobody needs to be anybody's friend.
+  Anything else (other names, a match with a player who is not here, the ladder not answering) goes to Relic as it is: the
+  automatch then runs on Relic's rooms exactly as without this server.
+  NOTE: the game hosts EVERY room with visible=0 and opens it with advertisement/update visible=1 a moment later, so visible=0 at
+  host time does not mean "private". The old v1 rule (data/own_rooms.on: every visible=0 host kept here) hid ordinary custom
+  games and automatch rooms of OwnLobby players from Relic (02.11.2026 evening: matches m1-m3 cancelled) - it is gone;
 - with data/trace.on writes a protocol trace (data/trace.jsonl, 600) with session ids, tickets and keys masked.
 Session ids and Steam tickets pass through memory only. Usage: own_lobby.py   (env LOBBY_DATA, LOBBY_PORT, LOBBY_RELAYS, LADDER_DB)
 """
@@ -73,7 +82,7 @@ def remember_login(body, ip):
     try:
         me = j[3][0]
         info = {'pid': int(me[1]), 'steam': str(me[2]).replace('/steam/', ''), 'alias': str(me[4]), 'sg': int(me[6]), 'ip': ip, 'seen': time.time(),
-                'inj': 0, 'pending': [], 'pend_seq': None, 'pend_n': 0, 'wake': asyncio.Event()}
+                'inj': 0, 'pending': [], 'pend_seq': None, 'pend_n': 0, 'wake': asyncio.Event(), 'conns': set()}
     except Exception:
         return
     SESSIONS[j[1]] = info
@@ -164,21 +173,93 @@ def member_row(r, pid):
     return [r['mid'], pid, m.get('race', -1), m.get('sg', 0), m.get('team', 0), -1]
 
 
-def own_call(call, p, sess):
+# ---------------- v2: which automatch rooms live here ----------------
+LADDER_LIVE = os.environ.get('LADDER_LIVE', 'http://127.0.0.1:8217/ladder/api/mm/live?debug=1')   # the ladder's matches (same host)
+MM_NAME = re.compile(r'^MM-(m\d+)-')            # MMFind names its room MM-<ladder match>-<random>
+SESSION_FRESH = 150                              # a session that polled readSession this recently is "signed in here"
+
+
+def fetch_live():
+    import urllib.request
+    with urllib.request.urlopen(LADDER_LIVE, timeout=3) as f: return json.load(f)
+
+
+async def mm_decision(p, sess):
+    """the automatch room being hosted (p) lives here when: own_mm.on, its name is MM-<match>-..., the ladder has that match with
+    the host in it, and every player and watcher of the match is signed in through this server. Returns {match, steams, relay}
+    or None (= the room goes to Relic as it is, the automatch then runs there as without us)"""
+    if not flag('own_mm.on') or not sess: return None
+    m = MM_NAME.match(p.get('description') or '')
+    if not m: return None
+    t0 = time.time()
+    try: live = await asyncio.get_running_loop().run_in_executor(None, fetch_live)
+    except Exception as e:
+        log('room %s: the ladder does not answer (%r) - Relic' % (p.get('description'), e)); return None
+    match = next((x for x in live.get('matches', []) if x.get('id') == m.group(1)), None)
+    if not match:
+        log('room %s: no such match at the ladder - Relic' % p.get('description')); return None
+    steams = [str(x.get('steam')) for x in match.get('team1', []) + match.get('team2', []) + match.get('watchers', []) if x.get('steam')]
+    if str(sess['steam']) not in steams:
+        log('room %s: its host is not a player of the match - Relic' % p.get('description')); return None
+    # signed in here = the game holds a connection to us right now (its readSession long poll never lets go while it runs) and
+    # spoke recently; a session of a game that was closed stays in SESSIONS for hours, so 'seen' alone is not enough (03.11 test)
+    now = time.time(); here = {str(s['steam']) for s in SESSIONS.values() if s['conns'] and now - s['seen'] < SESSION_FRESH}
+    missing = [s for s in steams if s not in here]
+    if missing:
+        log('room %s: %d of %d people of the match are not signed in here - Relic' % (p.get('description'), len(missing), len(steams))); return None
+    log('room %s: all %d people of the match are here - our room (ladder %d ms)' % (p.get('description'), len(steams), (time.time() - t0) * 1000))
+    return {'match': m.group(1), 'steams': set(steams), 'relay': match.get('relay') or ''}
+
+
+def relay_for(ip):
+    """the ladder's game server for the match (picked by the players' pings) when it is one of ours, else the first one alive"""
+    for hp in RELAYS:
+        if hp[0] == ip and RELAY_UP.get(hp, True): return hp
+    return pick_relay()
+
+
+def ad_of(r):
+    """our room as an entry of findAdvertisements, in Relic's shape (captured 03.11.2026):
+    [mid, "<steam lobby id>", host, owner, map, 0, description, 1, map, options, passworded, maxplayers, 1, slotinfo, 1, 0, 1, [[mid, pid, -1, sg, 0, 0], ...]]"""
+    p = r['params']
+    rows = [[r['mid'], pid, -1, m.get('sg', 0), 0, 0] for pid, m in r['members'].items()]
+    try: mx = int(p.get('maxplayers') or 8)
+    except ValueError: mx = 8
+    return [r['mid'], str(r.get('lobby_id') or '0'), r['host'], r['host'], p.get('mapname', ''), 0, p.get('description', ''), 1,
+            p.get('mapname', ''), p.get('options', ''), 1 if p.get('passworded') == '1' else 0, mx, 1, p.get('slotinfo', ''), 1, 0, 1, rows]
+
+
+def inject_ads(body, sess, params):
+    """Relic's Custom Games list + our automatch rooms for the people of their match (list_all.on: for everyone signed in here)"""
+    if not sess: return body
+    mine = [r for r in ROOMS.values() if r.get('kind') == 'mm' and r['state'] == 'lobby'
+            and (str(sess['steam']) in r['steams'] or flag('list_all.on'))
+            and (r['params'].get('modname') or '').lower() == (params.get('modName') or '').lower()]
+    if not mine: return body
+    try: j = json.loads(body)
+    except Exception: return body
+    if not (isinstance(j, list) and len(j) >= 2 and j[0] == 0 and isinstance(j[1], list)): return body
+    have = {a[0] for a in j[1] if isinstance(a, list) and a}
+    add = [ad_of(r) for r in mine if r['mid'] not in have]
+    j[1] = add + j[1]
+    return json.dumps(j, separators=(',', ':')).encode()
+
+
+def own_call(call, p, sess, mm=None):
     """our answer (a JSON value) for a call about one of our rooms, or None = pass it on to Relic"""
-    if not flag('own_rooms.on') or not sess: return None
+    if not sess: return None
     svc, _, fn = call.partition('/')
     if svc not in ('advertisement', 'party'): return None
     mid = p.get('advertisementid') or p.get('matchID') or p.get('match_id') or p.get('matchid')
     if fn == 'host' and str(p.get('advertisementid')) == '-1':
-        if p.get('visible', '1') != '0': return None                   # public rooms stay on Relic: everybody sees them
-        if p.get('description') == 'SESSION_MATCH_KEY': return None     # the party of the game's own (Relic) automatch screen
-        mid = next_mid(); ip, port = pick_relay(); now = time.time()
+        if not mm: return None                                         # everything but our automatch rooms: Relic
+        mid = next_mid(); ip, port = relay_for(mm['relay']); now = time.time()
         r = ROOMS[mid] = {'mid': mid, 'host': sess['pid'], 'host_alias': sess['alias'], 'relay': [ip, port], 'state': 'lobby',
+                          'kind': 'mm', 'match': mm['match'], 'steams': mm['steams'],
                           'params': {k: v for k, v in p.items() if k.lower() not in SECRET_PARAMS},
                           'members': {sess['pid']: {'sg': sess['sg'], 'steam': sess['steam'], 'alias': sess['alias'], 'race': -1, 'team': 0}},
                           'created': now, 'seen': now, 'reports': {}, 'started': None, 'lobby_id': None}
-        log('room %d hosted by pid=%d (%s), relay %s:%d' % (mid, sess['pid'], sess['alias'], ip, port))
+        log('room %d (%s, ladder %s) hosted by pid=%d (%s), relay %s:%d' % (mid, p.get('description'), mm['match'], sess['pid'], sess['alias'], ip, port))
         return [0, mid, 'authtoken', ip, port, [member_row(r, sess['pid'])]]
     if not ours(mid): return None
     mid = int(mid); r = ROOMS.get(mid)
@@ -354,6 +435,7 @@ def response(status, hdr_lines, body):
 
 
 async def handle(r, w):
+    conn_key = object(); my_sessions = []
     peer = w.get_extra_info('peername'); ip = peer[0] if peer else '?'
     STATS['conn'] += 1; up = Upstream()
     try:
@@ -369,6 +451,7 @@ async def handle(r, w):
                 params.update(urllib.parse.parse_qsl(body.decode('latin-1'), keep_blank_values=True))
             call = path[6:] if path.startswith('/game/') else path
             sess = session_of(params)
+            if sess is not None and conn_key not in sess['conns']: sess['conns'].add(conn_key); my_sessions.append(sess)
             t0 = time.time()
             if call == 'login/readSession' and sess is not None:
                 try: status, rlines, rbody = await read_session(sess, params, first, lines, body, up)
@@ -377,7 +460,11 @@ async def handle(r, w):
                 w.write(response(status, rlines, rbody)); await w.drain()
                 if rbody[:1].isdigit() and not rbody.endswith(b',[[]]'): trace(ip=ip, pid=sess['pid'], call=call, p=mask_params(params), a=rbody.decode('utf-8', 'replace')[:3000])
                 continue
-            try: ans = own_call(call, params, sess)
+            mm = None
+            if call == 'advertisement/host' and str(params.get('advertisementid')) == '-1':
+                try: mm = await mm_decision(params, sess)
+                except Exception as e: log('mm_decision failed: %r' % e)
+            try: ans = own_call(call, params, sess, mm)
             except Exception as e:
                 log('own_call %s failed: %r' % (call, e)); ans = None
             if ans is not None:
@@ -396,6 +483,9 @@ async def handle(r, w):
                     rbody = TELEM_RE.sub(rb'\1\2', rbody)
                     rbody = rbody.replace(b'["RL_TELEMSERVICE","1"]', b'["RL_TELEMSERVICE","0"]')
                     if call in ('login/platformlogin', 'login/login'): sess = remember_login(rbody, ip) or sess
+                if call == 'advertisement/findAdvertisements' and status[9:12] == '200':
+                    try: rbody = inject_ads(rbody, sess, params)
+                    except Exception as e: log('inject_ads failed: %r' % e)
                 w.write(response(status, rlines, rbody))
                 trace(ip=ip, pid=sess and sess['pid'], call=call, p=mask_params(params), st=status[9:12], ms=round((time.time() - t0) * 1000),
                       a=mask_body(call, rbody))
@@ -404,6 +494,7 @@ async def handle(r, w):
     except Exception as e:
         log('connection from %s: %r' % (ip, e))
     finally:
+        for x in my_sessions: x['conns'].discard(conn_key)
         up.close()
         try: w.close()
         except Exception: pass
@@ -441,10 +532,10 @@ async def read_session(s, params, first, lines, body, up):
 async def status(r, w):
     try:
         await r.readuntil(b'\r\n\r\n')
-        rooms = [{'mid': x['mid'], 'host': x['host'], 'state': x['state'], 'relay': '%s:%d' % tuple(x['relay']), 'map': x['params'].get('mapname'),
+        rooms = [{'mid': x['mid'], 'match': x.get('match'), 'name': x['params'].get('description'), 'host': x['host'], 'state': x['state'], 'relay': '%s:%d' % tuple(x['relay']), 'map': x['params'].get('mapname'),
                   'members': {str(k): {kk: vv for kk, vv in v.items() if kk != 'steam'} for k, v in x['members'].items()},
                   'reports': len(x['reports']), 'stored': bool(x.get('stored'))} for x in ROOMS.values()]
-        b = json.dumps({'own_rooms': flag('own_rooms.on'), 'trace': flag('trace.on'), 'sessions': len(SESSIONS), 'stats': STATS,
+        b = json.dumps({'own_mm': flag('own_mm.on'), 'list_all': flag('list_all.on'), 'trace': flag('trace.on'), 'sessions': len(SESSIONS), 'stats': STATS,
                         'relays': {'%s:%d' % k: v for k, v in RELAY_UP.items()}, 'rooms': rooms}).encode()
         w.write(b'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: %d\r\n\r\n' % len(b) + b)
         await w.drain()
@@ -457,7 +548,7 @@ async def main():
     srv = await asyncio.start_server(handle, '0.0.0.0', PORT, ssl=server_ctx(), limit=4 << 20)
     st = await asyncio.start_server(status, '127.0.0.1', STATUS_PORT)
     asyncio.ensure_future(relay_prober())
-    log('own lobby on :%d (own rooms %s, trace %s), relays %s' % (PORT, 'ON' if flag('own_rooms.on') else 'off', 'on' if flag('trace.on') else 'off',
+    log('own lobby on :%d (automatch rooms %s, trace %s), relays %s' % (PORT, 'ON' if flag('own_mm.on') else 'off', 'on' if flag('trace.on') else 'off',
                                                                  ', '.join('%s:%d' % x for x in RELAYS)))
     async with srv, st: await asyncio.gather(srv.serve_forever(), st.serve_forever())
 
