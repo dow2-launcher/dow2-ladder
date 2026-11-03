@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-"""relic-egress - the DWR3 bridge's TCP to Relic relays leaves a Moscow node through iggy (xray-relic), not from Russia.
+"""relic-egress - the DWR3 bridge's TCP to Relic relays leaves a Moscow node through iggy, not from Russia.
 
-  relic-egress watch   loop (relic-egress.service): every CHECK s - xray-relic active, the tunnel answers end to end
-                       (127.0.0.1:12348 -> VLESS -> iggy's battle_relay "DWRQ" -> Y/N) and dow2-battle runs -> the rule is
-                       there (with the uid dow2-battle runs as now: DynamicUser, it may change on a restart); FAILS checks in
-                       a row failed -> the rule goes (new bridges go straight to Relic as before, nothing breaks).
-  relic-egress down    remove the rule (xray-relic ExecStopPost, relic-egress.service ExecStopPost)
-  relic-egress status  print the rule and a check
+Two ways to iggy, first that works:
+  du    du-egress (127.0.0.1:12349): our UDP tunnel (DU) to udp_gateway on iggy, iggy's battle_relay bridges to Relic;
+        check: du-egress active and a DU PING to iggy:47100 answered
+  vless xray-relic (127.0.0.1:12347): VLESS gRPC REALITY to iggy, Relic is opened from there;
+        check: xray-relic active and "DWRQ" + sid through 127.0.0.1:12348 -> iggy's battle_relay answers Y/N
+  none  no rule: bridges go straight to Relic as before
+
+  relic-egress watch        loop (relic-egress.service): every CHECK s; a way counts as down after FAILS failed checks in a
+                            row; the rule always carries the uid dow2-battle runs as now (DynamicUser, may change on a restart)
+  relic-egress down [port]  remove the rule (only if it points to that port, when given) - ExecStopPost of the services
+  relic-egress status       the rule, the checks, the uid
 
 Rule (nat OUTPUT, only new connections; open bridges are never touched):
   -A OUTPUT -p tcp -j RELIC_EGRESS
@@ -14,7 +19,7 @@ Rule (nat OUTPUT, only new connections; open bridges are never touched):
 """
 import os, socket, subprocess, sys, time
 
-CHAIN, PORT, CHECK_PORT = 'RELIC_EGRESS', 12347, 12348
+CHAIN, PORT, CHECK_PORT, DU_PORT, GW = 'RELIC_EGRESS', 12347, 12348, 12349, ('116.202.106.150', 47100)
 CHECK, FAILS = 10, 3
 
 
@@ -43,8 +48,21 @@ def tunnel_ok():
     except Exception: return False
 
 
-def rule(uid):
-    return ['-p', 'tcp', '--dport', '27000:27099', '-m', 'owner', '--uid-owner', str(uid), '-j', 'REDIRECT', '--to-ports', str(PORT)]
+def du_ok():
+    try:
+        u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); u.settimeout(2); cid = os.urandom(4)
+        for _ in range(2):
+            u.sendto(b'DU\x06' + cid + b'chk', GW)
+            try:
+                d = u.recv(64)
+                if d[:3] == b'DU\x07' and d[3:7] == cid: return True
+            except socket.timeout: pass
+    except Exception: pass
+    return False
+
+
+def rule(uid, port):
+    return ['-p', 'tcp', '--dport', '27000:27099', '-m', 'owner', '--uid-owner', str(uid), '-j', 'REDIRECT', '--to-ports', str(port)]
 
 
 def current():
@@ -52,11 +70,11 @@ def current():
     return [l for l in out.splitlines() if l.startswith('-A ')]
 
 
-def up(uid):
+def up(uid, port, name):
     if not ipt('-S', CHAIN, check=True): ipt('-N', CHAIN)
-    want = rule(uid)
-    if not ipt('-C', CHAIN, *want, check=True):
-        ipt('-F', CHAIN); ipt('-A', CHAIN, *want); log(f'rule up: uid {uid} 27000-27099 -> :{PORT} (via iggy)')
+    want = rule(uid, port)
+    if not ipt('-C', CHAIN, *want, check=True) or len(current()) != 1:
+        ipt('-F', CHAIN); ipt('-A', CHAIN, *want); log(f'rule up: uid {uid} 27000-27099 -> :{port} ({name} via iggy)')
     if not ipt('-C', 'OUTPUT', '-p', 'tcp', '-j', CHAIN, check=True): ipt('-A', 'OUTPUT', '-p', 'tcp', '-j', CHAIN)
 
 
@@ -71,18 +89,24 @@ def log(m): print(m, flush=True)
 
 
 def watch():
-    bad = FAILS                                   # start as "down" until the first good check
+    bad = {'du': FAILS, 'vless': FAILS}           # each way "down" until its first good check
+    ways = [('du', 'du-egress', du_ok, DU_PORT), ('vless', 'xray-relic', tunnel_ok, PORT)]
     while True:
-        uid = battle_uid() if active('xray-relic') else None
-        ok = uid is not None and tunnel_ok()
-        bad = 0 if ok else bad + 1
-        if ok: up(uid)
-        elif bad >= FAILS or not active('xray-relic'): down('xray-relic inactive' if not active('xray-relic') else f'{bad} checks failed')
+        uid = battle_uid()
+        for name, unit, ok, port in ways:
+            if not active(unit): bad[name] = FAILS
+            else: bad[name] = 0 if ok() else bad[name] + 1
+        pick = next(((n, p) for n, u, o, p in ways if bad[n] < FAILS), None)
+        if uid is not None and pick: up(uid, pick[1], pick[0])
+        else: down('no way to iggy works' if uid is not None else 'dow2-battle not running')
         time.sleep(CHECK)
 
 
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else 'status'
     if cmd == 'watch': watch()
-    elif cmd == 'down': down(' '.join(sys.argv[2:]))
-    else: print('\n'.join(current()) or 'no rule', '| tunnel', 'ok' if tunnel_ok() else 'FAIL', '| battle uid', battle_uid())
+    elif cmd == 'down':
+        port = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2].isdigit() else None
+        if port is None or any(f'--to-ports {port}' in l for l in current()): down(' '.join(sys.argv[2:]))
+    else: print('\n'.join(current()) or 'no rule', '| du', 'ok' if du_ok() else 'FAIL', '| vless', 'ok' if tunnel_ok() else 'FAIL',
+                '| battle uid', battle_uid())

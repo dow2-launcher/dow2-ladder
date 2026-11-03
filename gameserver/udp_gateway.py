@@ -33,6 +33,7 @@ BR = (BR[0], int(BR[1]))
 MAXP = 1200            # payload bytes per packet
 WINDOW = 512           # packets in flight
 PER_IP = 16            # connections per address
+TRUSTED = set(os.environ.get('UDPGW_TRUSTED', '83.217.192.34,91.107.122.186').split(','))   # our Moscow nodes (du_egress, 03.11.2026): all their bridges come from one address - no per-address limit
 IDLE = 30.0
 SYN, SYNACK, DATA, ACK, FIN, PING, PONG, DATA2, ACK2 = 1, 2, 3, 4, 5, 6, 7, 8, 9
 VERSION = 2            # the newest we speak: 2 = DATA2 with copies
@@ -172,7 +173,7 @@ class Gateway(asyncio.DatagramProtocol):
         if c and c.addr[0] != addr[0]: return                   # an id is bound to its address (the port may change: NAT)
         if t == SYN:
             if not c:
-                if sum(1 for x in self.conns.values() if x.addr[0] == addr[0]) >= PER_IP: return
+                if addr[0] not in TRUSTED and sum(1 for x in self.conns.values() if x.addr[0] == addr[0]) >= PER_IP: return
                 c = self.conns[cid] = Conn(self, cid, addr, min(VERSION, body[0]) if body else 1); c.started = time.time()
                 asyncio.ensure_future(c.run())
             elif c.ready: c.out(c.synack())

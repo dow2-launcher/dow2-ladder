@@ -1,0 +1,19 @@
+[Unit]
+Description=DWR3 bridge -> Relic via iggy over our UDP tunnel (DU to udp_gateway on iggy); relic-egress points the redirect here
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+DynamicUser=yes
+ExecStart=/usr/bin/python3 /usr/local/lib/du_egress.py 12349 116.202.106.150:47100
+ExecStopPost=+/usr/local/sbin/relic-egress down 12349 du-egress stopped
+Restart=always
+RestartSec=2
+LimitNOFILE=65536
+ProtectSystem=strict
+ProtectHome=yes
+NoNewPrivileges=yes
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

@@ -2,11 +2,29 @@
 
 Russian players on the forwarding path: player -> Moscow node (UDP, udp_gateway) -> battle_relay DWR3 bridge -> TCP to the
 Relic relay in the US (27000-27099). That last TCP, opened from Russia, degrades after a few minutes (DPI on the way, not
-our servers). Now on both Moscow nodes (timeweb 83.217.192.34, ru.pivolan 91.107.122.186) the bridge's TCP to Relic leaves
-through a VLESS gRPC REALITY tunnel to iggy (116.202.106.150, Hetzner) - Relic sees iggy. battle_relay.py is not changed.
+our servers). Now on both Moscow nodes (timeweb 83.217.192.34, ru.pivolan 91.107.122.186) the bridge's TCP to Relic is
+redirected to iggy (116.202.106.150, Hetzner) - Relic sees iggy. battle_relay.py is not changed.
 
-    battle_relay (uid of dow2-battle) --TCP 27000-27099--> iptables nat REDIRECT :12347 --> xray-relic (dokodemo, followRedirect)
+**Main way - DU (owner's choice, 03.11.2026 evening):**
+
+    battle_relay (uid dow2-battle) --TCP 27000-27099--> iptables nat REDIRECT :12349 --> du-egress (du_egress.py)
+      --our UDP tunnel (DU v2, copies)--> iggy udp_gateway :47100 --> iggy battle_relay, preamble "DWR3"+IP+port --TCP--> Relic
+
+  du_egress.py reads the wanted Relic address (SO_ORIGINAL_DST), opens DU to iggy (SYN version 2, 1.5 s), sends
+  "DWR3" + IPv4 + port BE and carries the bytes (the same delivery as udp_gateway/Relay.dll 20: seq/ack/sack, RTO from the
+  round trip min 60 ms, fast resend on 2 duplicate acks, keepalive ACK 1 s, 30 s silence = end, DATA2/ACK2 copies).
+  No SYNACK within 1.5 s -> that connection goes straight to Relic over TCP. Log: `journalctl -u du-egress` (open/close and
+  every 60 s: srtt, resent, lost_in, copies, filled). udp_gateway: our Moscow addresses have no per-address limit (UDPGW_TRUSTED).
+  `du-egress.service` -> /etc/systemd/system, `du_egress.py` -> /usr/local/lib.
+
+**Reserve - VLESS:**
+
+    battle_relay --TCP--> REDIRECT :12347 --> xray-relic (dokodemo, followRedirect)
       --VLESS gRPC REALITY--> iggy:8443 (xray, inbound tg-reality, client email bridge-msk) --freedom--> Relic relay
+
+**relic-egress** (watcher, every 10 s) keeps ONE rule pointing at the first way that works: DU (du-egress active + DU PING to
+iggy:47100 answered) -> VLESS (xray-relic active + "DWRQ" through 12348 to iggy's battle_relay) -> none (straight to Relic).
+A way is down after 3 failed checks. Stopping du-egress / xray-relic removes a rule pointing at it at once (ExecStopPost).
 
 Files here (installed by hand, like gameserver/tcp):
 - `xray-relic.service` -> /etc/systemd/system; xray binary /opt/xray-relic/xray (copied from iggy, 26.3.27). DynamicUser,
@@ -42,8 +60,10 @@ reconnected; ~50% "loss" there is that, the same on both paths.) TCP connect Mos
 Chosen: VLESS - stable, no code change. The UDP variant (Moscow udp_gateway -> iggy over DU) needs code in
 udp_gateway/battle_relay and gave the same stability.
 
-## Rollback
-    systemctl disable --now relic-egress xray-relic     # removes the rule; new bridges go straight to Relic
+## Rollback (one command each)
+    systemctl disable --now du-egress                   # back to VLESS (the watcher switches within 10 s)
+    systemctl disable --now relic-egress                # no rule at all: new bridges go straight to Relic
+    systemctl disable --now relic-egress du-egress xray-relic   # everything off
     # optional: rm /etc/systemd/system/{xray-relic,relic-egress}.service /usr/local/sbin/{relic-egress,xray-relic-config}; rm -r /etc/xray-relic /opt/xray-relic
     # iggy: remove the client email bridge-msk from inbound tg-reality (/usr/local/etc/xray/config.json, backup
     # config.json.bak.pre-bridge-msk-*), xray -test, systemctl restart xray
