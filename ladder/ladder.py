@@ -722,7 +722,7 @@ def mm_poll(steam):
         p = MM.get(steam)
         if not p:
             c = MM_CANCELLED.get(steam)
-            if c and time.time() - c['t'] < 300: return {'state': 'cancelled', 'match': c['match'], 'by': c['by'], **({'again': bool(c.get('again'))} if 'again' in c else {})}
+            if c and time.time() - c['t'] < 300: return {'state': 'cancelled', 'match': c['match'], 'by': c['by'], **({'again': bool(c.get('again')), 'native': True} if 'again' in c else {})}
             for m in MM_PLAYING.values():
                 if steam in m['host'] + m['guest'] + m.get('watchers', []):
                     return {'state': 'playing', 'match': m['id'], **({'native': True, 'lobby': m.get('lobby')} if m.get('native') else {})}
@@ -1198,7 +1198,7 @@ def _nm_fail(m, culprits, why):  # under MM_LOCK: a native match that did not co
         if s in back:
             p.update(state='searching', match=None, role=None)        # keeps his ts: first in the queue again
         else:
-            MM.pop(s, None); MM_CANCELLED[s] = {'by': why, 'match': m['id'], 't': now, 'again': s not in culprits}
+            MM.pop(s, None); MM_CANCELLED[s] = {'by': why, 'match': m['id'], 't': now, 'again': s not in culprits, 'native': True}
     _try_match(m['mode'])
 
 def _nm_timeouts(now):  # under MM_LOCK
@@ -1339,6 +1339,10 @@ def mm_native(steam, d):
     if not st.get('here'): return {'native': False, 'why': 'not signed in through our lobby server'}
     with MM_LOCK:
         NM_HINTS[steam] = {'t': time.time(), 'd': d}
+        now = time.time()                                # he is about to search: his previous match is over (MMFind's poll must not
+        for mid, m in list(MM_PLAYING.items()):          # take an old "playing" for this new search)
+            if steam in m['host'] + m['guest'] + m.get('watchers', []): _end_match(mid, m, now)
+        MM_CANCELLED.pop(steam, None)
         for s in [s for s, h in NM_HINTS.items() if time.time() - h['t'] > 900]: NM_HINTS.pop(s, None)
     return {'native': True}
 
