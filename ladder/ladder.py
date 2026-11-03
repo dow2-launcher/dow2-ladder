@@ -167,6 +167,7 @@ def save_profiles(stat_groups, elite=False):
                              ON CONFLICT(profile_id) DO UPDATE SET alias=excluded.alias, steam=excluded.steam,
                              country=excluded.country, elite_seen=max(elite_seen,excluded.elite_seen), updated=excluded.updated''', r)
 
+NEW_MATCHES = [0]                                       # matches stored so far (the crawler asks for a recompute when it grows)
 def store_matches(ms):
     newpids = set()
     with _db_lock, db() as c:
@@ -180,6 +181,7 @@ def store_matches(ms):
             c.execute('INSERT OR REPLACE INTO matches VALUES (?,?,?,?,?,?)',
                       (mid, m['startgametime'], el, mode or '', season_of(m['startgametime']),
                        json.dumps(m, separators=(',', ':'))))
+            NEW_MATCHES[0] += 1
             for x in mem:
                 c.execute('INSERT OR IGNORE INTO members VALUES (?,?,?)', (x['profile_id'], mid, m['startgametime']))
                 newpids.add(x['profile_id'])
@@ -229,9 +231,32 @@ def seed_frontier():
             c.execute('INSERT OR IGNORE INTO frontier (profile_id,added) VALUES (?,?)', (p, now))
     print('ladder: seeded frontier with %d profiles' % len(seeds))
 
+# 03.11.2026 (players: "the match does not show in the ladder"): the crawler walks ~140k profiles - a whole round takes hours, so a
+# player's new match came in only when his turn came (ZHDH: match over 09:57, his profile fetched 10:36), and the rating later still.
+# Now: (1) the result of a ladder match the history resolver gets from Relic goes into the matches at once (_history_resolver);
+# (2) the players of the last 3 hours of ladder matches and the people in the launcher / game right now are fetched out of turn
+# every 2 minutes (custom games too); (3) a new match asks for the rating recompute within a minute instead of 10.
+RECOMPUTE_SOON = [0]
+def _hot_pids():
+    now = time.time(); pids = set()
+    try:
+        with db() as c:
+            for (pl,) in c.execute('SELECT players FROM mm_history WHERE started > ?', (int(now) - 3 * 3600,)):
+                pids.update(p.get('pid') for p in json.loads(pl) if p.get('pid'))
+            steams = []
+            try:
+                with users.LOCK: steams = users.online(now)
+            except Exception: pass
+            for i in range(0, len(steams), 200):
+                part = steams[i:i + 200]
+                pids.update(r[0] for r in c.execute('SELECT profile_id FROM profiles WHERE steam IN (%s)' % ','.join('?' * len(part)), part))
+    except Exception as e:
+        print('hot pids error:', e, flush=True)
+    return sorted(p for p in pids if p)
+
 def crawler():
     seed_frontier()
-    last_recompute = 0
+    last_recompute = 0; last_hot = 0
     # посчитать рейтинг сразу на старте, если его ещё нет (не ждать завершения кроула)
     try:
         with db() as c:
@@ -247,11 +272,19 @@ def crawler():
                 due = [r[0] for r in c.execute('SELECT profile_id FROM frontier ORDER BY fetched ASC, added ASC LIMIT 10')]
             if not due:
                 time.sleep(30); continue
+            if time.time() - last_hot > 120:                   # the active players out of turn (see above)
+                last_hot = time.time(); hot = _hot_pids(); before = NEW_MATCHES[0]
+                for i in range(0, len(hot), 10):
+                    crawl_chunk(hot[i:i + 10]); time.sleep(1.2)
+                if NEW_MATCHES[0] > before and RECOMPUTE_SOON[0] == 0: RECOMPUTE_SOON[0] = time.time()
             crawl_chunk(due)
             with db() as c:
                 un = c.execute('SELECT COUNT(*) FROM frontier WHERE fetched=0').fetchone()[0]
-            # пересчёт рейтинга текущего сезона: периодически (раз в 10 мин) и при полном завершении круга
-            if un == 0 or time.time() - last_recompute > 600:
+            # пересчёт рейтинга текущего сезона: периодически (раз в 10 мин), при полном завершении круга, и через минуту после
+            # нового матча активного игрока (RECOMPUTE_SOON)
+            soon = RECOMPUTE_SOON[0] and time.time() - RECOMPUTE_SOON[0] > 60 and time.time() - last_recompute > 60
+            if un == 0 or time.time() - last_recompute > 600 or soon:
+                RECOMPUTE_SOON[0] = 0
                 recompute(season_of(time.time())); last_recompute = time.time()
                 if un == 0:
                     with _db_lock, db() as c:
@@ -441,6 +474,7 @@ def _drop(steam):  # под MM_LOCK: убрать игрока; если был 
                 if m.get('lobby'):
                     try:
                         with _db_lock, db() as c: c.execute('DELETE FROM mm_history WHERE lobby = ? AND result IS NULL', (m['lobby'],))
+                        print('mm: %s cancelled from the lobby by %s within 3 min of Start - its history row removed' % (m['lobby'], steam), flush=True)
                     except Exception: pass
                 _cancel_match(m, steam, (m['players'].get(steam) or {}).get('name'))
 
@@ -767,7 +801,7 @@ def mm_started(steam):  # хост нажал Start: матч переходит
         m['state'] = 'playing'; m['started'] = time.time()
         MM_PLAYING[m['id']] = m
         try: _history_add(m)
-        except Exception: pass
+        except Exception as e: print('mm: history row for %s not written: %r' % (m.get('lobby'), e), flush=True)   # 03.11: no rows since 02.11 18:53
         for s in m['host'] + m['guest'] + m.get('watchers', []):
             MM.pop(s, None)                 # игроки и зрители ушли в бой — из очереди их убираем
         MM_MATCHES.pop(m['id'], None)
@@ -845,7 +879,8 @@ with db() as c:
     ''')
 
 def _history_add(m):  # под MM_LOCK, в момент старта: кто, за какую сторону, рейтинг на входе
-    if not m.get('lobby') or m.get('bots'): return          # тесты против компьютера (TestBots) — не матчи ладдера
+    if not m.get('lobby') or m.get('bots'):                # тесты против компьютера (TestBots) — не матчи ладдера
+        print('mm: %s started without a lobby name / with bots - no history row' % m.get('id'), flush=True); return
     if (m.get('pool') or '').split('|')[0]: return         # тестовая группа (MMFind TestGroup) — не матчи ладдера
     pl = []
     for team, side in ((1, m['host']), (2, m['guest'])):
@@ -888,6 +923,11 @@ def _history_resolver():
                                                    'race': r.get('race_id'), 'hero': hero,
                                                    'stats': {k: cn.get(k) for k in ('ukill', 'uprod', 'plost', 'pseized', 'hkill', 'hlost', 'mvp', 'sbuilt')}})
                         upd['result'] = json.dumps(res, ensure_ascii=False)
+                        try:                                    # into the ladder's matches at once, rated within a minute
+                            store_matches([j])
+                            if RECOMPUTE_SOON[0] == 0: RECOMPUTE_SOON[0] = time.time()
+                        except Exception as e:
+                            print('history: store_matches failed:', e, flush=True)
                         if not ended: upd['ended'] = (j.get('completiontime') or now)
                         with MM_LOCK:
                             for mid, m in list(MM_PLAYING.items()):
