@@ -402,6 +402,7 @@ def to_ladder(r):
 LADDER_URL = os.environ.get('LADDER_URL', 'http://127.0.0.1:8217')
 NM_TOKEN_FILE = os.environ.get('NM_TOKEN_FILE', '/srv/ladder/data/nm_token')
 NM_POLLS = {}                     # pollID -> our record of one search of one game
+NM_WAKE = asyncio.Event()         # nm_syncer: sync at once (a search was just matched)
 NM_SEQ = [int(time.time()) % 100000 * 100]
 NM_MODE = {1: '1v1', 2: '2v2', 3: '3v3'}            # match types: 1 head to head, 2 two on two, 3 team battle
 NM_DEAD = 35                      # s without automatch/polling (the game polls every ~11 s while searching): his game is gone
@@ -453,7 +454,11 @@ def nm_answer(x, pid=None):
     url = ''
     if not me_host and mid: url = '/' + ((ROOMS.get(mid) or {}).get('relay') or [v.get('relay') or 'relay'])[0]
     return [0, x['poll'], rows, v['host_pid'], mid, v['map'] if me_host else '', v['team'], 0, me['race'], x['sid'],
-            url, str(v['teams']), str(v['size']), v['pids']]
+            url, str(v['teams']), str(v['size']), sorted(v['pids'])]
+    # the pid list ASCENDING (stands 03.11.2026): OnHostAutomatch 0x5fc4d0 sorts its stored list of the match in place and compares
+    # it (0x5ff070) with the list of every later answer / push as sent - any other order = "already in a game as the host,
+    # disconnecting now" the moment a poll answer reaches the host after the guest is in the room (with the stock 11 s poll: at
+    # random, in about 8 s of every 11; with MMFind 0.39's 1 s poll: every time)
 
 
 def nm_push(x, pid):
@@ -505,7 +510,9 @@ def nm_cancelled(x, v):
 
 async def nm_syncer():
     while True:
-        await asyncio.sleep(0.5)
+        try: await asyncio.wait_for(NM_WAKE.wait(), 0.5)            # 0.5 s, or at once when a search was just matched
+        except asyncio.TimeoutError: pass
+        NM_WAKE.clear()
         now = time.time()
         for x in NM_POLLS.values():                                           # the game polls every ~11 s in every state, even in the room
             if x['state'] in ('searching', 'matched') and now - x['polled'] > NM_DEAD:
@@ -580,6 +587,7 @@ async def nm_call(fn, p, sess):
             return NM_REFUSED
         x['joined'] = True                                                   # from now on nm/sync keeps it up to date
         nm_apply(x, v)
+        if v.get('state') == 'matched': NM_WAKE.set()                       # the others of this match (the host first) get theirs now, not in 0.5 s
         return nm_answer(x)
     x = nm_search(p)
     if fn == 'polling':
