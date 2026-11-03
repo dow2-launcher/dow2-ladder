@@ -313,7 +313,7 @@ async function loadLive() {
 const roomFlag = c => /^[a-z]{2}$/i.test(c || '') ? String.fromCodePoint(...[...c.toUpperCase()].map(x => 0x1F1A5 + x.charCodeAt(0))) : '';
 const R_ASSETS = '/elite/assets/';
 function roomCard(r) {
-  // r.version / r.mod (03.11.2026): the game's own mod name and version when our lobby server saw the room (r.exact), else a guess
+  // r.version / r.mod (03.11.2026): the mod name and version of the Relic query that listed the room (r.exact = scan, relic_scan), else a guess
   const ver = r.version ? ' ' + esc(r.version) : '';
   const gameTag = r.game === 'elite' ? `<span class="tag elite">Elite${ver}${r.sure === false ? '?' : ''}</span>`
     : r.game === 'vanilla' ? `<span class="tag van">${T('vanilla')}${ver}${r.sure === false ? '?' : ''}</span>`

@@ -1049,15 +1049,20 @@ def _room_rating(steam):
     _ROOM_RATING[steam] = (time.time(), r[0], r[1])
     return r
 
+ADS_EXACT = os.environ.get('ADS_EXACT', '/srv/ladder/data/ads_exact.json')
+ADS_EXACT_FRESH = 120                                  # s: an older scan is not used (the scanner is paused - the guess as before)
+
 def _ads_meta():
-    # 03.11.2026 (owner: "the game sees only the lobbies that suit it - use that"): own_lobby notes for each room id the game's own
-    # mod fields - the filter of the game's findAdvertisements that Relic answered with this room, or the host's own advert
-    # (own_lobby.py, ADS_META). {} when own_lobby is away: the guess below as before
+    # 03.11.2026 (owner): the exact game of a room from Relic itself - relic_scan (tools/relicscan, on prod_gpu) asks Relic's
+    # findAdvertisements every 30 s with the stand account, once as vanilla DOW2 3.19 and once as Elite 3.2 (Relic answers only the
+    # rooms of the asking game); room id -> the mod fields of the query that listed it (src 'scan'). 'other' = rooms of the public
+    # list at that scan in neither answer: another mod or version. ({}, set()) when the scan is old or missing: the guess below
     try:
-        with urllib.request.urlopen(NM_LOBBY + '/ads_meta', timeout=2) as r:
-            return (json.load(r) or {}).get('ads') or {}
+        with open(ADS_EXACT) as f: d = json.load(f)
+        if time.time() - (d.get('scan_ts') or 0) > ADS_EXACT_FRESH: return {}, set()
+        return d.get('ads') or {}, {str(x) for x in d.get('other') or []}
     except Exception:
-        return {}
+        return {}, set()
 
 def _exact_game(meta):
     # (game, version, mod) from the game's own fields, or None: modname DOW2 = vanilla, Elite = Elite, anything else = another mod
@@ -1070,7 +1075,7 @@ def _exact_game(meta):
 def _rooms_once():
     with urllib.request.urlopen(urllib.request.Request(ROOMS_URL, headers={'User-Agent': 'dow2-ladder'}), timeout=15) as r:
         d = json.load(r)
-    meta = _ads_meta()
+    meta, scan_other = _ads_meta()
     av = {a['profile_id']: a for a in d.get('avatars') or []}
     out = []
     rr = _ASSETS.get('relic_race_id') or {}
@@ -1091,12 +1096,14 @@ def _rooms_once():
                             'race': rr.get(str(rid), '') if rid is not None else '', 'hero': hero, 'steam': steam or None, '_rid': rid})
         # which game: Elite for sure (Elite-only races, badges or maps) / vanilla (a vanilla-only map, no Elite marks) /
         # probably Elite (a map both have) / another mod (a map neither has). Relic's public list carries no version field -
-        # but the game's own query does: when own_lobby saw this room listed for a game (or hosted by one), that game's mod
-        # name and version decide (exact = where from: host / join / find), the guess only for rooms it has not seen.
+        # but Relic's own filtered query does: when relic_scan saw this room listed for vanilla 3.19 or Elite 3.2, that query's mod
+        # name and version decide (exact = 'scan'); a room of the public list at that scan in neither answer is another mod or
+        # version (exact 'scan', mod unknown); the guess only for rooms the scan has not seen yet.
         mt = meta.get(str(m.get('id')))
         ex = _exact_game(mt)
         version = mod = exact = None
-        if ex: (game, version, mod), sure, exact = ex, True, mt.get('src') or 'find'
+        if ex: (game, version, mod), sure, exact = ex, True, mt.get('src') or 'scan'
+        elif str(m.get('id')) in scan_other: game, sure, exact = 'other', True, 'scan'
         elif elite_sure({'mapname': mn, 'slotinfo': m.get('slotinfo', ''), 'matchhistorymember': races}): game, sure = 'elite', True
         elif mn in VAN_MAPS and mn not in ELITE_MAPS and not any('elite' in w for w in b): game, sure = 'vanilla', True
         elif mn in VAN_MAPS or mn in ELITE_MAPS or mn in (_ASSETS.get('maps') or {}): game, sure = 'elite', False

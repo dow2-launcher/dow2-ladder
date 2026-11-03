@@ -1,0 +1,15 @@
+[Unit]
+Description=Relic room scan: the exact game (vanilla 3.19 / Elite 3.2) of every open DoW2 room, asked at Relic with the stand account; out to the ladder (tools/relicscan)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# on prod_gpu (the stand's Wine and Steam are here); the ladder reads /srv/ladder/data/ads_exact.json on rts through /mnt/rts
+WorkingDirectory=/mnt/dow2bench/dev/relicscan
+ExecStart=/usr/bin/python3 -u /mnt/dow2bench/dev/relicscan/relic_scan.py
+Restart=always
+RestartSec=60
+Nice=10
+
+[Install]
+WantedBy=multi-user.target
