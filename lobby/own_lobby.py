@@ -25,6 +25,8 @@ Relic's and send those connections here (rts.fintebtc.de:47443). This server:
   session ids never touch the disk), the listening socket is kept (no refused connections), the process re-executes itself with the
   same PID. Open game connections are cut once; the game reconnects (its readSession long poll starts again) and finds its session
   and its room as they were. A file that does not compile is refused before anything is touched;
+- notes which game each Relic room is for, from the game's own filters (findAdvertisements) and the hosts' own adverts (see
+  ADS_META); the ladder's room list reads them from the status port (GET /ads_meta) instead of guessing by maps and races;
 - with data/trace.on writes a protocol trace (data/trace.jsonl, 600) with session ids, tickets and keys masked.
 Session ids and Steam tickets pass through memory only. Usage: own_lobby.py   (env LOBBY_DATA, LOBBY_PORT, LOBBY_RELAYS, LADDER_DB)
 """
@@ -155,7 +157,7 @@ async def relay_prober():
                 w.close(); RELAY_UP[hp] = True
             except Exception:
                 RELAY_UP[hp] = False
-        reap_sessions(); reap_rooms()
+        reap_sessions(); reap_rooms(); reap_ads()
         await asyncio.sleep(30)
 
 
@@ -248,6 +250,77 @@ def inject_ads(body, sess, params):
     add = [ad_of(r) for r in mine if r['mid'] not in have]
     j[1] = add + j[1]
     return json.dumps(j, separators=(',', ':')).encode()
+
+
+# ---------------- which game a Relic room is for, as the game itself knows it (owner 03.11.2026) ----------------
+# "The game sees only the lobbies that suit it": findAdvertisements carries the game's own filter (modName, modVersion,
+# dataChecksum, appBinaryChecksum, modDLLChecksum) and Relic answers only the rooms of that very game. Trace 03.11.2026
+# 20:28-20:32: Elite 3.2 and vanilla DOW2 3.19 games asking at the same time got disjoint lists which together were the whole
+# public list (community findAdvertisements); a 6p FFA room the ladder took for "another mod" came to the vanilla game. Relic's
+# entries carry no mod fields, so per room id we keep: the filter of the query that listed it ('find'); better, a join Relic let
+# through (Relic checks the joiner's checksums: 'join'); best, the host's own advertisement/host or update ('host'). Only the
+# AD_KEYS fields, the source and the time - never session ids, tickets, passwords or profile ids. Two 'find' queries with
+# different values listing one room = Relic does not filter on that field: it is dropped for that room ('conflict').
+# The ladder reads them from the status port (GET /ads_meta) for its room list.
+ADS_META = {}                     # advertisement id -> {AD_KEYS..., 'src', 't', 'conflict': [...]}
+AD_KEYS = ('modname', 'modversion', 'datachecksum', 'appbinarychecksum', 'moddllchecksum')
+AD_RANK = {'find': 0, 'join': 1, 'host': 2}
+ADS_TTL, ADS_MAX = 3 * 3600, 5000
+
+
+def ad_fields(params):
+    """the game's mod fields from the request (find uses modName / dataChecksum, host and join modname / datachecksum)"""
+    low = {k.lower(): v for k, v in params.items()}
+    return {k: str(low[k]).strip() for k in AD_KEYS if str(low.get(k) or '').strip()}
+
+
+def ads_note(aid, fields, src, now=None):
+    try: aid = int(aid)
+    except (TypeError, ValueError): return
+    if aid <= 0 or ours(aid) or not fields.get('modname'): return
+    now = now or time.time(); e = ADS_META.get(aid)
+    if e is None or AD_RANK[src] > AD_RANK.get(e.get('src'), -1):
+        ADS_META[aid] = dict(fields, src=src, t=now, conflict=[])
+        return
+    e['t'] = now
+    if src == 'host': e.update(fields)                                   # the host's later update
+    elif src == e['src']:                                                # find vs find, join vs join: what does not agree is not known
+        for k in AD_KEYS:
+            if k in e and k in fields and e[k] != fields[k]:
+                e.pop(k); e['conflict'].append(k)
+
+
+def ads_seen(call, params, rbody):
+    """a 200 answer of Relic to an advertisement call: note what it tells about the rooms"""
+    if call == 'advertisement/findAdvertisements':
+        j = json.loads(rbody)
+        if not (isinstance(j, list) and len(j) >= 2 and j[0] == 0 and isinstance(j[1], list)): return 0
+        f = ad_fields(params); now = time.time(); n = 0
+        for a in j[1]:
+            if isinstance(a, list) and a and isinstance(a[0], int): ads_note(a[0], f, 'find', now); n += 1
+        return n
+    if call == 'advertisement/host' and str(params.get('advertisementid')) == '-1':
+        j = json.loads(rbody)
+        if isinstance(j, list) and len(j) > 1 and j[0] == 0: ads_note(j[1], ad_fields(params), 'host'); return 1
+    elif call == 'advertisement/update' and rbody.startswith(b'[0'):
+        ads_note(params.get('advertisementid'), ad_fields(params), 'host'); return 1
+    elif call == 'advertisement/join' and rbody.startswith(b'[0,'):
+        ads_note(params.get('advertisementid'), ad_fields(params), 'join'); return 1
+    return 0
+
+
+def reap_ads():
+    now = time.time()
+    for k in [k for k, v in ADS_META.items() if now - v.get('t', 0) > ADS_TTL]: ADS_META.pop(k, None)
+    if len(ADS_META) > ADS_MAX:
+        for k in sorted(ADS_META, key=lambda k: ADS_META[k].get('t', 0))[:len(ADS_META) - ADS_MAX]: ADS_META.pop(k, None)
+
+
+def ads_view():
+    now = time.time()
+    return {'ttl': ADS_TTL, 'ads': {str(k): dict({x: v[x] for x in AD_KEYS if x in v}, src=v.get('src'), age=int(now - v.get('t', now)),
+                                                **({'conflict': v['conflict']} if v.get('conflict') else {}))
+                                   for k, v in ADS_META.items()}}
 
 
 def own_call(call, p, sess, mm=None):
@@ -767,6 +840,9 @@ async def handle(r, w):
                 except Exception as e:
                     STATS['relic_err'] += 1; log('relic %s: %r' % (call, e)); break
                 STATS['relic'] += 1
+                if call.startswith('advertisement/') and status[9:12] == '200':
+                    try: ads_seen(call, params, rbody)
+                    except Exception as e: log('ads_seen %s failed: %r' % (call, e))
                 if call == 'advertisement/update' and rbody.startswith(b'[4') and params.get('state') == '0' and params.get('matchtype') == '1':
                     try: status, rlines, rbody = await reopen(up, first, lines, body, params, raw, ip, sess) or (status, rlines, rbody)
                     except Exception as e: log('reopen %s: %r' % (params.get('advertisementid'), e))
@@ -856,6 +932,10 @@ async def status(r, w):
             b = json.dumps({'native': flag('native_mm.on'), 'here': here}).encode()
             w.write(b'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: %d\r\n\r\n' % len(b) + b)
             await w.drain(); w.close(); return
+        if target.split('?', 1)[0] == '/ads_meta':                       # the ladder's room list: room id -> the game's own mod fields
+            b = json.dumps(ads_view(), separators=(',', ':')).encode()
+            w.write(b'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: %d\r\n\r\n' % len(b) + b)
+            await w.drain(); w.close(); return
         rooms = [{'mid': x['mid'], 'match': x.get('match'), 'name': x['params'].get('description'), 'host': x['host'], 'state': x['state'], 'relay': '%s:%d' % tuple(x['relay']), 'map': x['params'].get('mapname'),
                   'members': {str(k): {kk: vv for kk, vv in v.items() if kk != 'steam'} for k, v in x['members'].items()},
                   'reports': len(x['reports']), 'stored': bool(x.get('stored'))} for x in ROOMS.values()]
@@ -877,7 +957,8 @@ def state_out():
         x['members'] = {str(k): v for k, v in r['members'].items()}; x['reports'] = {str(k): v for k, v in r['reports'].items()}
         rooms[str(mid)] = x
     sess = {k: {kk: vv for kk, vv in v.items() if kk not in ('wake', 'conns')} for k, v in SESSIONS.items()}
-    return json.dumps({'v': 1, 'rooms': rooms, 'sessions': sess, 'nm_polls': {str(k): v for k, v in NM_POLLS.items()}, 'nm_seq': NM_SEQ[0], 'stats': STATS, 'relay_up': [[a, b, c] for (a, b), c in RELAY_UP.items()]})
+    return json.dumps({'v': 1, 'rooms': rooms, 'sessions': sess, 'nm_polls': {str(k): v for k, v in NM_POLLS.items()}, 'nm_seq': NM_SEQ[0], 'stats': STATS, 'relay_up': [[a, b, c] for (a, b), c in RELAY_UP.items()],
+                       'ads_meta': {str(k): v for k, v in ADS_META.items()}})
 
 
 def state_in(blob):
@@ -897,6 +978,9 @@ def state_in(blob):
         NM_POLLS[int(k)] = v
     NM_SEQ[0] = max(NM_SEQ[0], int(d.get('nm_seq') or 0))
     for a, b, c in d.get('relay_up', []): RELAY_UP[(a, b)] = c
+    for k, v in (d.get('ads_meta') or {}).items():
+        try: ADS_META[int(k)] = v
+        except (TypeError, ValueError): pass
     return len(ROOMS), len(SESSIONS)
 
 

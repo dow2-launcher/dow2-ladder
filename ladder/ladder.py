@@ -1049,9 +1049,28 @@ def _room_rating(steam):
     _ROOM_RATING[steam] = (time.time(), r[0], r[1])
     return r
 
+def _ads_meta():
+    # 03.11.2026 (owner: "the game sees only the lobbies that suit it - use that"): own_lobby notes for each room id the game's own
+    # mod fields - the filter of the game's findAdvertisements that Relic answered with this room, or the host's own advert
+    # (own_lobby.py, ADS_META). {} when own_lobby is away: the guess below as before
+    try:
+        with urllib.request.urlopen(NM_LOBBY + '/ads_meta', timeout=2) as r:
+            return (json.load(r) or {}).get('ads') or {}
+    except Exception:
+        return {}
+
+def _exact_game(meta):
+    # (game, version, mod) from the game's own fields, or None: modname DOW2 = vanilla, Elite = Elite, anything else = another mod
+    mod = str((meta or {}).get('modname') or '').strip()
+    if not mod: return None
+    ver = str(meta.get('modversion') or '').strip()[:16] or None
+    ml = mod.lower()
+    return ('vanilla' if ml == 'dow2' else 'elite' if ml == 'elite' else 'other'), ver, mod[:32]
+
 def _rooms_once():
     with urllib.request.urlopen(urllib.request.Request(ROOMS_URL, headers={'User-Agent': 'dow2-ladder'}), timeout=15) as r:
         d = json.load(r)
+    meta = _ads_meta()
     av = {a['profile_id']: a for a in d.get('avatars') or []}
     out = []
     rr = _ASSETS.get('relic_race_id') or {}
@@ -1071,8 +1090,14 @@ def _rooms_once():
                             'host': x.get('profile_id') == m.get('host_profile_id'), 'rating': rating, 'rsrc': src,
                             'race': rr.get(str(rid), '') if rid is not None else '', 'hero': hero, 'steam': steam or None, '_rid': rid})
         # which game: Elite for sure (Elite-only races, badges or maps) / vanilla (a vanilla-only map, no Elite marks) /
-        # probably Elite (a map both have) / another mod (a map neither has). Relic's public list carries no version field.
-        if elite_sure({'mapname': mn, 'slotinfo': m.get('slotinfo', ''), 'matchhistorymember': races}): game, sure = 'elite', True
+        # probably Elite (a map both have) / another mod (a map neither has). Relic's public list carries no version field -
+        # but the game's own query does: when own_lobby saw this room listed for a game (or hosted by one), that game's mod
+        # name and version decide (exact = where from: host / join / find), the guess only for rooms it has not seen.
+        mt = meta.get(str(m.get('id')))
+        ex = _exact_game(mt)
+        version = mod = exact = None
+        if ex: (game, version, mod), sure, exact = ex, True, mt.get('src') or 'find'
+        elif elite_sure({'mapname': mn, 'slotinfo': m.get('slotinfo', ''), 'matchhistorymember': races}): game, sure = 'elite', True
         elif mn in VAN_MAPS and mn not in ELITE_MAPS and not any('elite' in w for w in b): game, sure = 'vanilla', True
         elif mn in VAN_MAPS or mn in ELITE_MAPS or mn in (_ASSETS.get('maps') or {}): game, sure = 'elite', False
         else: game, sure = 'other', False
@@ -1088,7 +1113,8 @@ def _rooms_once():
                     'password': bool(m.get('passwordprotected')), 'max': m.get('maxplayers'), 'players': players,
                     'free': max(0, cap - len(players)) if cap else None,
                     'observers': m.get('observernum') or 0, 'observers_max': m.get('observermax') or 0,
-                    'game': game, 'sure': sure, 'region': m.get('relayserver_region') or ''})
+                    'game': game, 'sure': sure, 'region': m.get('relayserver_region') or '',
+                    'version': version, 'mod': mod, 'exact': exact})
     out.sort(key=lambda r: (r['game'] != 'elite', -len(r['players']), r['id']))
     return out
 
