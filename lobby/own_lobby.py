@@ -254,14 +254,13 @@ def own_call(call, p, sess, mm=None):
     """our answer (a JSON value) for a call about one of our rooms, or None = pass it on to Relic"""
     if not sess: return None
     svc, _, fn = call.partition('/')
-    if svc == 'automatch': return nm_call(fn, p, sess)
     if svc not in ('advertisement', 'party'): return None
     mid = p.get('advertisementid') or p.get('matchID') or p.get('match_id') or p.get('matchid')
     if fn == 'host' and str(p.get('advertisementid')) == '-1':
         if not mm: return None                                         # everything but our automatch rooms: Relic
         mid = next_mid(); ip, port = relay_for(mm['relay']); now = time.time()
         r = ROOMS[mid] = {'mid': mid, 'host': sess['pid'], 'host_alias': sess['alias'], 'relay': [ip, port], 'state': 'lobby',
-                          'kind': mm.get('kind', 'mm'), 'match': mm['match'], 'steams': mm['steams'],
+                          'kind': mm.get('kind', 'mm'), 'match': mm['match'], 'steams': mm['steams'], 'pids': mm.get('pids') or set(),
                           'params': {k: v for k, v in p.items() if k.lower() not in SECRET_PARAMS},
                           'members': {sess['pid']: {'sg': sess['sg'], 'steam': sess['steam'], 'alias': sess['alias'], 'race': -1, 'team': 0}},
                           'created': now, 'seen': now, 'reports': {}, 'started': None, 'lobby_id': None}
@@ -274,12 +273,17 @@ def own_call(call, p, sess, mm=None):
         log('call %s for unknown room %d' % (call, mid)); return [2]
     r['seen'] = time.time()
     if fn == 'join':
+        refused = nm_check_join(r, p, sess)
+        if refused is not None: return refused
+        if r.get('kind') == 'nm': ladder_bg('joined', {'steam': str(sess['steam']), 'room': mid})
         r['members'].setdefault(sess['pid'], {'sg': sess['sg'], 'steam': sess['steam'], 'alias': sess['alias'], 'race': -1, 'team': 0})
         ip, port = r['relay']
         log('room %d: pid=%d (%s) joins' % (mid, sess['pid'], sess['alias']))
         return [0, '/' + ip, ip, port, [member_row(r, sess['pid'])]]   # as Relic: code, the relay's address, relay, port, the joiner
     if fn == 'leave':
         r['members'].pop(sess['pid'], None)
+        if r.get('kind') == 'nm' and r['state'] == 'lobby':                 # left the native room before the start: he gave up
+            ladder_bg('fail', {'room': mid, 'culprits': [str(sess['steam'])], 'why': 'left the room'})
         if sess['pid'] == r['host'] and r['state'] != 'playing':
             ROOMS.pop(mid, None); log('room %d closed by its host' % mid)
         return [0]
@@ -317,6 +321,7 @@ def start_room(r):
     body = [[[pid, []] for pid in order], [[str(pid), str(r['members'].get(pid, {}).get('race', -1))] for pid in order], int(r['started']),
             [[str(pid), []] for pid in order]]
     got = sum(push(pid, [0, 'MatchStartMessage', pid, body]) for pid in order)
+    if r.get('kind') == 'nm': ladder_bg('started', {'room': r['mid']})
     log('room %d: match started, %d players, start message to %d session(s)' % (r['mid'], len(order), got))
 
 
@@ -381,86 +386,223 @@ def to_ladder(r):
         log('room %d: ladder write failed: %r' % (r['mid'], e))
 
 
-# ---------------- native automatch (research 03.11.2026): the game's OWN "Find a Game" against our matcher ----------------
+# ---------------- native automatch (03.11.2026): the game's OWN "Find a Game", the match decided by the ladder ----------------
 # DOW2.exe still has Relic's whole automatch client (AutomatchInternal / WorldwideAutomatchService). Relic's matcher no longer pairs
-# anybody, but the protocol is simple (reversed 03.11.2026, see research/relic_automatch_reverse.md):
+# anybody; the protocol (reversed 03.11.2026, research/relic_automatch_reverse.md):
 #   automatch/startpolling (matchTypes, raceInfoRaceID, partySessionID, modName/modVersion/CRCs) -> [0, pollID, searches, -1, 0, "", ...]
 #   automatch/polling?pollID   -> the same; once matched: [0, pollID, searches, hostPID, mid|0, map, team, 0, race, searchID, url,
 #                                 "<teams>", "<team size>", [pids]]
 #   readSession push AutomatchGameMessage [hostPID, mid|0, map|url, race, team, 0, searchID, 0, teams, teamSize, [pids]] - instant
-# The player whose profile is hostPID hosts an "AUTOMATCH" room (advertisement/host automatchPoll_id=<his poll>, map from us,
-# teams x team size slots), the others join it by id as soon as we know the id, slots/ready/countdown/start are the game's own.
-NM_POLLS = {}                     # pollID -> search
+# The player whose profile is hostPID hosts an "AUTOMATCH" room (advertisement/host automatchPoll_id=<his poll>, the map from us,
+# teams x team size slots), the others join it by id as soon as we know the id; slots / ready / countdown / start are the game's own.
+# WHO plays with whom is the LADDER's decision (ladder.py nm/*, 127.0.0.1, token data/nm_token of the ladder): rating, groups, map
+# wishes, the longest waiting first, the game server by the players' pings, timeouts (host never hosts, a guest never joins).
+# This server: every search -> nm/join; while searches are on, nm/sync every 0.5 s -> answers and pushes; the room's id -> nm/room;
+# joins -> nm/joined (checksums checked here first); the start -> nm/started; Stop Searching -> nm/leave.
+LADDER_URL = os.environ.get('LADDER_URL', 'http://127.0.0.1:8217')
+NM_TOKEN_FILE = os.environ.get('NM_TOKEN_FILE', '/srv/ladder/data/nm_token')
+NM_POLLS = {}                     # pollID -> our record of one search of one game
 NM_SEQ = [int(time.time()) % 100000 * 100]
-NM_NEED = {1: 2, 2: 4, 3: 6}      # match types: 1 head to head, 2 two on two, 3 team battle (3v3)
-NM_SHAPE = {1: (2, 1), 2: (2, 2), 3: (2, 3)}
-NM_MAPS_DEFAULT = {1: ['2p_typhonswampredux'], 2: ['4p_estate'], 3: ['6p_judgment']}
+NM_MODE = {1: '1v1', 2: '2v2', 3: '3v3'}            # match types: 1 head to head, 2 two on two, 3 team battle
+NM_DEAD = 35                      # s without automatch/polling (the game polls every ~11 s while searching): his game is gone
+CRC_KEYS = ('modname', 'modversion', 'appbinarychecksum', 'datachecksum', 'moddllchecksum')
 
 
-def nm_maps(mt):
+def nm_token():
     try:
-        with open(os.path.join(DATA, 'nm_maps.json')) as f: return json.load(f)[str(mt)]
-    except Exception: return NM_MAPS_DEFAULT.get(mt, NM_MAPS_DEFAULT[1])
+        with open(NM_TOKEN_FILE) as f: return f.read().strip()
+    except Exception: return ''
 
 
-def nm_answer(x):
-    pool = [y for y in NM_POLLS.values() if y['mt'] == x['mt'] and y['key'] == x['key'] and y['state'] != 'gone']
-    races = [0] * 7
-    for y in pool:
-        if 0 <= y['race'] < 7: races[y['race']] += 1
-    rows = [[str(x['sid']), str(x['mt']), len(pool), 1, [[i, races[i]] for i in range(7)]]]
-    m = x.get('match')
-    if not m: return [0, x['poll'], rows, -1, 0, '', -1, -1, -1, -1, '', '0', '0', []]
-    host = m['players'][0]; me_host = x is host
-    teams, size = NM_SHAPE.get(x['mt'], (2, 1))
-    return [0, x['poll'], rows, host['pid'], m['mid'] or 0, m['map'] if me_host else '', m['team'][x['poll']], 0, x['race'], x['sid'],
-            '' if me_host or not m['mid'] else '/' + m['relay'], str(teams), str(size), [y['pid'] for y in m['players']]]
+def ladder_call(fn, body):
+    import urllib.request
+    req = urllib.request.Request(LADDER_URL + '/ladder/api/nm/' + fn, data=json.dumps(body).encode(), method='POST',
+                                 headers={'Content-Type': 'application/json', 'X-NM-Token': nm_token()})
+    with urllib.request.urlopen(req, timeout=4) as f: return json.load(f)
 
 
-def nm_push(x):
-    a = nm_answer(x)
-    push(x['pid'], [0, 'AutomatchGameMessage', x['pid'], [a[3], a[4], a[5] if a[3] == x['pid'] else a[10], a[8], a[6], a[7], a[9], 0, int(a[11]), int(a[12]), a[13]]])
+async def ladder(fn, body):
+    return await asyncio.get_running_loop().run_in_executor(None, ladder_call, fn, body)
 
 
-def nm_try(x):
-    pool = sorted((y for y in NM_POLLS.values() if y['state'] == 'searching' and y['mt'] == x['mt'] and y['key'] == x['key']), key=lambda y: y['t'])
-    need = NM_NEED.get(x['mt'], 2)
-    if len(pool) < need: return
-    players = pool[:need]; size = need // 2
-    import random
-    m = {'id': 'nm%d' % players[0]['poll'], 'players': players, 'mid': None, 'relay': '', 'map': random.choice(nm_maps(x['mt'])),
-         'team': {y['poll']: (0 if i < size else 1) for i, y in enumerate(players)}, 't': time.time()}
-    for y in players: y['state'] = 'matched'; y['match'] = m
-    log('native automatch %s: %s on %s, host pid=%d' % (m['id'], ' vs '.join(str(y['pid']) for y in players), m['map'], players[0]['pid']))
-    nm_push(players[0])
+def ladder_bg(fn, body):
+    """fire and forget (the answer only logged when it failed)"""
+    async def go():
+        try: await ladder(fn, body)
+        except Exception as e: log('ladder nm/%s failed: %r' % (fn, e))
+    asyncio.ensure_future(go())
 
 
-def nm_call(fn, p, sess):
-    if not flag('native_mm.on') or not sess: return None                       # off: Relic's automatch as it is
+def nm_game(p):
+    mod = (p.get('modName') or '').strip()
+    return 'vanilla' if mod.lower() in ('', 'dow2') else ('%s-%s' % (mod, p.get('modVersion') or '')).lower()
+
+
+def nm_members(x):
+    """the players of one search: the party leader (who sent startpolling) first, then his party (one search, one team)"""
+    return x.get('members') or [{'pid': x['pid'], 'steam': x['steam'], 'race': x['race']}]
+
+
+def nm_answer(x, pid=None):
+    """the answer to startpolling / polling for one player of the search (party members poll with the leader's pollID)"""
+    v = x.get('view') or {}; pid = pid or x['pid']
+    me = next((m for m in nm_members(x) if m['pid'] == pid), nm_members(x)[0])
+    rows = [[str(x['sid']), str(x['mt']), max(1, int(v.get('in_pool') or 1)), 1, [[i, 1 if i == me['race'] else 0] for i in range(7)]]]
+    if v.get('state') != 'matched': return [0, x['poll'], rows, -1, 0, '', -1, -1, -1, -1, '', '0', '0', []]
+    me_host = v['host_pid'] == pid; mid = int(v['room']) if str(v.get('room') or '').isdigit() else 0
+    url = ''
+    if not me_host and mid: url = '/' + ((ROOMS.get(mid) or {}).get('relay') or [v.get('relay') or 'relay'])[0]
+    return [0, x['poll'], rows, v['host_pid'], mid, v['map'] if me_host else '', v['team'], 0, me['race'], x['sid'],
+            url, str(v['teams']), str(v['size']), v['pids']]
+
+
+def nm_push(x, pid):
+    a = nm_answer(x, pid)
+    n = push(pid, [0, 'AutomatchGameMessage', pid, [a[3], a[4], a[5] if a[3] == pid else a[10], a[8], a[6], a[7], a[9], 0, int(a[11]), int(a[12]), a[13]]])
+    x.setdefault('pushed', {})[str(pid)] = [x['view'].get('match'), 'host' if a[3] == pid else a[4]]
+    log('native automatch %s: push to pid=%d (%s, mid %s) - %d session(s)' % (x['view'].get('match'), pid, 'host' if a[3] == pid else 'guest', a[4], n))
+
+
+def nm_push_news(x):
+    """AutomatchGameMessage to every player of this search who has news: the host at once, a guest once the room id is known"""
+    v = x['view']; mid = int(v['room']) if str(v.get('room') or '').isdigit() else 0
+    if not isinstance(x.get('pushed'), dict): x['pushed'] = {}
+    for m in nm_members(x):
+        me_host = v['host_pid'] == m['pid']
+        if (me_host or mid) and x['pushed'].get(str(m['pid'])) != [v['match'], 'host' if me_host else mid]: nm_push(x, m['pid'])
+
+
+def nm_apply(x, v):
+    """the ladder's view of this search -> our record, pushes on news"""
+    if not isinstance(v, dict) or x['state'] in ('gone', 'done'): return
+    old = x.get('view') or {}; st = v.get('state')
+    if st == 'matched':
+        x['view'] = v; x['state'] = 'matched'
+        if old.get('match') != v['match']:
+            log('native automatch %s: pid=%d (%s%s) matched, %s, host pid=%s, team %s, map %s' % (v['match'], x['pid'], x['alias'],
+                ' + party %s' % [m['pid'] for m in nm_members(x)[1:]] if len(nm_members(x)) > 1 else '', v['mode'], v['host_pid'], v['team'], v['map']))
+        nm_push_news(x)
+    elif st == 'searching':
+        if old.get('state') == 'matched':                   # not in the room yet (the ladder cancels those who are): the game takes
+            log('native automatch %s: pid=%d back to searching (the match failed)' % (old.get('match'), x['pid']))   # the next match as it comes
+            x['pushed'] = {}
+        x['view'] = v; x['state'] = 'searching'
+    elif st == 'playing':
+        x['state'] = 'done'
+    else:                                                     # cancelled (he was the culprit / he left / in the failed room), idle
+        log('native automatch: pid=%d search ends - %s %s' % (x['pid'], st, v.get('by') or ''))
+        nm_cancelled(x, v)
+        x['state'] = 'gone'
+
+
+def nm_cancelled(x, v):
+    """his search is over without a match (his game was the reason the match failed, or it was already in the failed room, or the
+    ladder lost him): the push AutomatchStopPollingMessage stops the game's search at once - out of any room, back to the Find a Game
+    screen (reverse + stands 03.11.2026); to every player of a party (only the leader can stop it himself)"""
+    x['view'] = {'state': 'searching'}
+    for m in nm_members(x): push(m['pid'], [0, 'AutomatchStopPollingMessage', m['pid'], [x['poll'], x.get('party') or 0]])
+
+
+async def nm_syncer():
+    while True:
+        await asyncio.sleep(0.5)
+        now = time.time()
+        for x in NM_POLLS.values():                                           # the game polls every ~11 s in every state, even in the room
+            if x['state'] in ('searching', 'matched') and now - x['polled'] > NM_DEAD:
+                x['state'] = 'gone'; log('native automatch: pid=%d stopped polling - his game is gone' % x['pid']); ladder_bg('leave', {'steam': x['steam'], 'why': 'game gone'})
+        for k in [k for k, x in NM_POLLS.items() if x['state'] in ('gone', 'done') and now - x['t'] > 3600]: NM_POLLS.pop(k, None)
+        act = {x['steam']: x for x in NM_POLLS.values() if x['state'] in ('searching', 'matched') and x.get('joined')}
+        if not act: continue
+        try: vs = await ladder('sync', {'steams': list(act)})
+        except Exception as e:
+            if now - STATS.get('nm_sync_err_t', 0) > 30: log('native automatch: ladder sync failed: %r' % e); STATS['nm_sync_err_t'] = now
+            continue
+        for steam, x in act.items():
+            try: nm_apply(x, vs.get(steam))
+            except Exception as e: log('native automatch: apply for pid=%d failed: %r' % (x['pid'], e))
+
+
+def nm_search(p):
+    try: x = NM_POLLS.get(int(p.get('pollID') or p.get('myPollID') or 0))
+    except ValueError: x = None
+    return x
+
+
+async def nm_call(fn, p, sess):
+    """our answer to automatch/<fn>, or None = pass it on to Relic (native_mm.on off, not signed in here)"""
+    if not flag('native_mm.on') or not sess: return None
     if fn == 'startpolling':
         def first(k, d):
             try: return json.loads(p.get(k) or '[]')[0]
             except Exception: return d
         NM_SEQ[0] += 1
-        x = {'poll': 900000000 + NM_SEQ[0], 'sid': 800000000 + NM_SEQ[0], 'pid': sess['pid'], 'steam': sess['steam'], 'mt': int(first('matchTypes', 1)),
-             'race': int(first('raceInfoRaceID', 0)), 'key': '|'.join(p.get(k, '') for k in ('modName', 'modVersion', 'dataCRC', 'appBinCRC')),
-             'state': 'searching', 't': time.time(), 'match': None}
-        for k, y in list(NM_POLLS.items()):                                  # one search per player
-            if y['pid'] == x['pid'] and y['state'] == 'searching': y['state'] = 'gone'
+        mt = int(first('matchTypes', 1))
+        # a party (friends who searched together, Find a Game's "Your Party"): only the leader sends startpolling, one entry per
+        # member in raceInfoProfileID / raceInfoRaceID; the members learn it from the push AutomatchStartPollingMessage [pollID,
+        # partySessionID], then poll with the leader's pollID and take the same team (reverse 03.11.2026)
+        try: pids = [int(q) for q in json.loads(p.get('raceInfoProfileID') or '[]')]; races = [int(q) for q in json.loads(p.get('raceInfoRaceID') or '[]')]
+        except Exception: pids, races = [], []
+        members = [{'pid': sess['pid'], 'steam': str(sess['steam']), 'race': races[pids.index(sess['pid'])] if sess['pid'] in pids and len(races) == len(pids) else int(first('raceInfoRaceID', 0))}]
+        now = time.time()
+        for i, q in enumerate(pids):
+            if q == sess['pid']: continue
+            s2 = next((s for s in SESSIONS.values() if s['pid'] == q and s['conns'] and now - s['seen'] < SESSION_FRESH), None)
+            if not s2:                                                       # a friend not signed in here could never enter our room
+                log('native automatch: pid=%d searches with party member pid=%d who is not on this server - refused' % (sess['pid'], q))
+                return NM_REFUSED
+            members.append({'pid': q, 'steam': str(s2['steam']), 'race': races[i] if i < len(races) else 0, 'alias': s2['alias']})
+        if len(members) > {1: 1, 2: 2, 3: 3}.get(mt, 1):
+            log('native automatch: pid=%d party of %d for match type %d - refused' % (sess['pid'], len(members), mt)); return NM_REFUSED
+        x = {'poll': 900000000 + NM_SEQ[0], 'sid': 800000000 + NM_SEQ[0], 'pid': sess['pid'], 'steam': str(sess['steam']), 'alias': sess['alias'],
+             'mt': mt, 'mode': NM_MODE.get(mt, '1v1'), 'race': int(first('raceInfoRaceID', 0)), 'game': nm_game(p),
+             'key': '|'.join(p.get(k, '') for k in ('modName', 'modVersion', 'dataCRC', 'appBinCRC', 'modDllCRC')),
+             'state': 'searching', 't': time.time(), 'polled': time.time(), 'view': {'state': 'searching'}, 'pushed': {}, 'joined': False,
+             'members': members}
+        try: x['party'] = int(p.get('partySessionID') or 0)
+        except ValueError: x['party'] = 0
+        mine = {m['steam'] for m in members}
+        for y in NM_POLLS.values():                                          # one search per player
+            if y['state'] in ('searching', 'matched') and mine & {m['steam'] for m in nm_members(y)}: y['state'] = 'gone'
         NM_POLLS[x['poll']] = x
-        log('native automatch: pid=%d (%s) searches, type %d, %s' % (x['pid'], sess['alias'], x['mt'], x['key']))
-        nm_try(x)
+        log('native automatch: pid=%d (%s) searches %s, %s%s' % (x['pid'], x['alias'], x['mode'], x['key'], ', party %s' % [m['pid'] for m in members[1:]] if members[1:] else ''))
+        for m in members[1:]: push(m['pid'], [0, 'AutomatchStartPollingMessage', m['pid'], [x['poll'], x['party']]])
+        try:
+            v = await ladder('join', {'steam': x['steam'], 'pid': x['pid'], 'name': x['alias'], 'mode': x['mode'], 'race': x['race'],
+                                      'key': x['key'], 'game': x['game'],
+                                      'party': [{'steam': m['steam'], 'pid': m['pid'], 'race': m['race'], 'name': m.get('alias')} for m in members[1:]]})
+        except Exception as e:
+            log('native automatch: the ladder does not answer (%r) - search refused' % e); x['state'] = 'gone'
+            for m in members[1:]: push(m['pid'], [0, 'AutomatchStopPollingMessage', m['pid'], [x['poll'], x['party']]])
+            return NM_REFUSED
+        if v.get('ok') is False:
+            log('native automatch: the ladder refused the search (%s)' % v.get('error')); x['state'] = 'gone'
+            for m in members[1:]: push(m['pid'], [0, 'AutomatchStopPollingMessage', m['pid'], [x['poll'], x['party']]])
+            return NM_REFUSED
+        x['joined'] = True                                                   # from now on nm/sync keeps it up to date
+        nm_apply(x, v)
         return nm_answer(x)
-    try: x = NM_POLLS.get(int(p.get('pollID') or p.get('myPollID') or 0))
-    except ValueError: x = None
-    if fn == 'polling': return nm_answer(x) if x else [2]
+    x = nm_search(p)
+    if fn == 'polling':
+        if not x: return [2]
+        x['polled'] = time.time()
+        return nm_answer(x, sess['pid'])
     if fn == 'stoppolling':
-        if x and x['state'] == 'searching': x['state'] = 'gone'
+        if x and x['state'] in ('searching', 'matched') and sess['pid'] == x['pid']:
+            x['state'] = 'gone'; log('native automatch: pid=%d stops searching' % x['pid'])
+            ladder_bg('leave', {'steam': x['steam'], 'why': 'Stop Searching'})
+            for m in nm_members(x)[1:]: push(m['pid'], [0, 'AutomatchStopPollingMessage', m['pid'], [x['poll'], x['party']]])
         return [0]
     if fn == 'updateStatus':
         log('native automatch: pid=%d status poll=%s match=%s result=%s' % (sess['pid'], p.get('myPollID'), p.get('matchID'), p.get('result')))
+        # result 0 = his host / join failed (the client reports it and keeps searching). Stands 03.11.2026: after a guest's failed join
+        # the host's game soon leaves its room by itself - so the match is over at once: he is out, the host gets a clean cancel
+        if p.get('result') == '0' and x and x['state'] == 'matched':
+            ladder_bg('fail', {'match': x['view'].get('match'), 'culprits': [str(sess['steam'])], 'why': 'could not ' + ('host' if x['view'].get('host_pid') == sess['pid'] else 'join')})
         return [0]
     return None                                                              # getAutomatchMap etc.: Relic
+
+
+NM_REFUSED = [1]                  # startpolling refused (the ladder is away): the game resets its search quietly, no message box (reverse)
 
 
 def nm_room(p, sess):
@@ -468,15 +610,37 @@ def nm_room(p, sess):
     if not flag('native_mm.on') or not sess: return None
     try: x = NM_POLLS.get(int(p.get('automatchPoll_id') or -1))
     except ValueError: return None
-    if not x or not x.get('match') or x['pid'] != sess['pid']: return None
-    m = x['match']
-    return {'match': m['id'], 'steams': {str(y['steam']) for y in m['players']}, 'relay': '', 'kind': 'nm', 'nm': m}
+    if not x or x['state'] != 'matched' or x['view'].get('host_pid') != sess['pid'] or sess['pid'] not in [m['pid'] for m in nm_members(x)]: return None
+    v = x['view']
+    return {'match': v['match'], 'steams': set(v['steams']), 'pids': set(v['pids']), 'relay': v.get('relay') or '', 'kind': 'nm', 'nm': x}
 
 
-def nm_hosted(m, mid, relay_ip):
-    m['mid'] = mid; m['relay'] = relay_ip
-    log('native automatch %s: room %d is up - the others join' % (m['id'], mid))
-    for y in m['players'][1:]: nm_push(y)
+def nm_hosted(x, mid, relay_ip):
+    v = x['view']; v['room'] = mid
+    log('native automatch %s: room %d is up (relay %s) - the others join' % (v['match'], mid, relay_ip))
+    ladder_bg('room', {'steam': v['host_steam'], 'room': mid, 'relay': relay_ip})
+    for y in NM_POLLS.values():                                              # the guests at once (the ladder's sync would take 0.5 s)
+        if y['state'] == 'matched' and y['view'].get('match') == v['match']:
+            y['view']['room'] = mid; nm_push_news(y)
+
+
+def nm_check_join(r, p, sess):
+    """a join into one of our native rooms: only the players of that match, only the very same game (checksums, as Relic checked)"""
+    if r.get('kind') != 'nm': return None
+    if sess['pid'] not in r.get('pids', ()):
+        log('room %d: pid=%d (%s) is not a player of this match - refused' % (r['mid'], sess['pid'], sess['alias'])); return NM_JOIN_FULL
+    hp = r['params']
+    bad = [k for k in CRC_KEYS if (p.get(k) or '').lower() != (hp.get(k) or '').lower()]
+    if bad:
+        log('room %d: pid=%d (%s) has another game (%s) - refused' % (r['mid'], sess['pid'], sess['alias'], ', '.join(bad)))
+        return NM_JOIN_CRC.get(bad[0], NM_JOIN_CRC['datachecksum'])
+    return None
+
+
+# join refusals: the client maps every code we tried (12, 16, ...) to R_ServerCallFailed - "join failed", the search goes on (stands
+# 03.11.2026); the codes below are Relic's names for the reason, kept for the trace
+NM_JOIN_FULL = [1]                # not a player of this match
+NM_JOIN_CRC = {'modname': [14], 'modversion': [15], 'appbinarychecksum': [16], 'datachecksum': [16], 'moddllchecksum': [16]}   # Relic's join result range is -1..16
 
 
 # ---------------- HTTP over TLS ----------------
@@ -565,6 +729,17 @@ async def handle(r, w):
                 w.write(response(status, rlines, rbody)); await w.drain()
                 if rbody[:1].isdigit() and not rbody.endswith(b',[[]]'): trace(ip=ip, pid=sess['pid'], call=call, p=mask_params(params), a=rbody.decode('utf-8', 'replace')[:3000])
                 continue
+            if call.startswith('automatch/') and sess is not None:
+                try: ans = await nm_call(call[10:], params, sess)
+                except Exception as e:
+                    log('nm_call %s failed: %r' % (call, e)); ans = None
+                if ans is not None:
+                    STATS['own'] += 1
+                    b = json.dumps(ans, separators=(',', ':')).encode()
+                    w.write(response('HTTP/1.1 200 OK', OWN_HDRS + ['Request-Path: ' + path], b)); await w.drain()
+                    trace(ip=ip, pid=sess['pid'], call=call, p=mask_params(params), own=1, a=b.decode()[:3000])
+                    if hdrs.get('connection', '').lower() == 'close': break
+                    continue
             mm = None
             if call == 'advertisement/host' and str(params.get('advertisementid')) == '-1':
                 try: mm = nm_room(params, sess) or await mm_decision(params, sess)
@@ -636,11 +811,20 @@ async def read_session(s, params, first, lines, body, up):
 
 async def status(r, w):
     try:
-        await r.readuntil(b'\r\n\r\n')
+        head = (await r.readuntil(b'\r\n\r\n')).decode('latin-1')
+        target = head.split(' ', 2)[1] if head.count(' ') >= 2 else '/'
+        if target.startswith('/nm?'):                                    # the ladder asks for MMFind 0.38: is this player here, native on?
+            steam = urllib.parse.parse_qs(target[4:]).get('steam', [''])[0]; now = time.time()
+            here = any(str(s['steam']) == steam and s['conns'] and now - s['seen'] < SESSION_FRESH for s in SESSIONS.values())
+            b = json.dumps({'native': flag('native_mm.on'), 'here': here}).encode()
+            w.write(b'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: %d\r\n\r\n' % len(b) + b)
+            await w.drain(); w.close(); return
         rooms = [{'mid': x['mid'], 'match': x.get('match'), 'name': x['params'].get('description'), 'host': x['host'], 'state': x['state'], 'relay': '%s:%d' % tuple(x['relay']), 'map': x['params'].get('mapname'),
                   'members': {str(k): {kk: vv for kk, vv in v.items() if kk != 'steam'} for k, v in x['members'].items()},
                   'reports': len(x['reports']), 'stored': bool(x.get('stored'))} for x in ROOMS.values()]
-        b = json.dumps({'own_mm': flag('own_mm.on'), 'list_all': flag('list_all.on'), 'trace': flag('trace.on'), 'sessions': len(SESSIONS), 'stats': STATS,
+        nm = [{'poll': x['poll'], 'pid': x['pid'], 'mode': x['mode'], 'state': x['state'], 'match': (x.get('view') or {}).get('match'),
+               'room': (x.get('view') or {}).get('room'), 'since': int(time.time() - x['t'])} for x in NM_POLLS.values() if x['state'] in ('searching', 'matched')]
+        b = json.dumps({'own_mm': flag('own_mm.on'), 'native_mm': flag('native_mm.on'), 'native': nm, 'list_all': flag('list_all.on'), 'trace': flag('trace.on'), 'sessions': len(SESSIONS), 'stats': STATS,
                         'relays': {'%s:%d' % k: v for k, v in RELAY_UP.items()}, 'rooms': rooms}).encode()
         w.write(b'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: %d\r\n\r\n' % len(b) + b)
         await w.drain()
@@ -652,17 +836,17 @@ async def status(r, w):
 def state_out():
     rooms = {}
     for mid, r in ROOMS.items():
-        x = dict(r); x['steams'] = sorted(r.get('steams') or [])
+        x = dict(r); x['steams'] = sorted(r.get('steams') or []); x['pids'] = sorted(r.get('pids') or [])
         x['members'] = {str(k): v for k, v in r['members'].items()}; x['reports'] = {str(k): v for k, v in r['reports'].items()}
         rooms[str(mid)] = x
     sess = {k: {kk: vv for kk, vv in v.items() if kk not in ('wake', 'conns')} for k, v in SESSIONS.items()}
-    return json.dumps({'v': 1, 'rooms': rooms, 'sessions': sess, 'stats': STATS, 'relay_up': [[a, b, c] for (a, b), c in RELAY_UP.items()]})
+    return json.dumps({'v': 1, 'rooms': rooms, 'sessions': sess, 'nm_polls': {str(k): v for k, v in NM_POLLS.items()}, 'nm_seq': NM_SEQ[0], 'stats': STATS, 'relay_up': [[a, b, c] for (a, b), c in RELAY_UP.items()]})
 
 
 def state_in(blob):
     d = json.loads(blob)
     for mid, x in d.get('rooms', {}).items():
-        x['steams'] = set(x.get('steams') or [])
+        x['steams'] = set(x.get('steams') or []); x['pids'] = set(x.get('pids') or [])
         x['members'] = {int(k): v for k, v in x['members'].items()}; x['reports'] = {int(k): v for k, v in x['reports'].items()}
         if x.get('order'): x['order'] = [int(q) for q in x['order']]
         ROOMS[int(mid)] = x
@@ -671,6 +855,10 @@ def state_in(blob):
         if v.get('pending'): v['wake'].set()
         SESSIONS[k] = v
     STATS.update(d.get('stats', {}))
+    for k, v in d.get('nm_polls', {}).items():
+        if not isinstance(v.get('pushed'), dict): v['pushed'] = {}
+        NM_POLLS[int(k)] = v
+    NM_SEQ[0] = max(NM_SEQ[0], int(d.get('nm_seq') or 0))
     for a, b, c in d.get('relay_up', []): RELAY_UP[(a, b)] = c
     return len(ROOMS), len(SESSIONS)
 
@@ -710,8 +898,8 @@ async def main():
     srv = await asyncio.start_server(handle, sock=ls, ssl=server_ctx(), limit=4 << 20)
     st = await asyncio.start_server(status, sock=lst)
     asyncio.get_running_loop().add_signal_handler(signal.SIGHUP, hot_reload, ls, lst)
-    asyncio.ensure_future(relay_prober())
-    log('own lobby on :%d (automatch rooms %s, trace %s), relays %s' % (PORT, 'ON' if flag('own_mm.on') else 'off', 'on' if flag('trace.on') else 'off',
+    asyncio.ensure_future(relay_prober()); asyncio.ensure_future(nm_syncer())
+    log('own lobby on :%d (automatch rooms %s, native automatch %s, trace %s), relays %s' % (PORT, 'ON' if flag('own_mm.on') else 'off', 'ON' if flag('native_mm.on') else 'off', 'on' if flag('trace.on') else 'off',
                                                                  ', '.join('%s:%d' % x for x in RELAYS)))
     async with srv, st: await asyncio.gather(srv.serve_forever(), st.serve_forever())
 

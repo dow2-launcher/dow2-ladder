@@ -3,6 +3,7 @@
 # оставляет только матчи Elite, считает рейтинг Glicko-2 отдельно по режимам (1v1/2v2/3v3)
 # и сезонам (квартал). Отдаёт JSON для страницы /ladder/. Данные только из Relic; реплеев Relic не хранит.
 import random
+import hmac
 import json, os, re, sqlite3, struct, threading, time, math, base64, zlib, urllib.request, urllib.parse
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from concurrent.futures import ThreadPoolExecutor
@@ -12,7 +13,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB = ROOT + '/data/ladder.sqlite'
 RELIC = 'https://dow-api.reliclink.com/community/leaderboard/'
 UA = 'dow2-ladder/1.0 (community ladder; contact pivolan)'
-PORT = 8217
+PORT = int(os.environ.get('LADDER_PORT', '8217'))    # a test instance (native automatch tests) runs on another port
 
 # ---------- карты Elite (только в Elite, не в ванили): для признака матча Elite ----------
 ELITE_MAPS, VAN_MAPS = set(), set()
@@ -426,6 +427,9 @@ def _drop(steam):  # под MM_LOCK: убрать игрока; если был 
         if m and steam in m['watchers']: m['watchers'].remove(steam); m['players'].pop(steam, None)
         return
     if p and p.get('match'):
+        m = MM_MATCHES.get(p['match'])
+        if m and m.get('native'):                 # native automatch: only he is out, the others search on (their games can)
+            MM[steam] = p; _nm_fail(m, [steam], 'went silent'); MM_CANCELLED.pop(steam, None); return
         m = MM_MATCHES.pop(p['match'], None)
         if m: _cancel_match(m, steam, p.get('name'))
         return
@@ -496,10 +500,14 @@ def _try_match(mode):  # под MM_LOCK: нестрогий подбор с пр
                 diff = abs(q['rating'] - anchor['rating'])
                 over = 1 if any(x.get('max_diff') and diff > x['max_diff'] for x in (anchor, q)) else 0
                 return (no_common, over, diff, q['ts'])
-            g = [anchor]
+            g = _unit(anchor, waiting)                          # a party (native automatch) searches as one: all of it or nobody
+            if len(g) > need: continue
             for q in sorted([x for x in waiting if x is not anchor], key=score):
                 if len(g) >= need: break
-                if fits(g + [q]): g.append(q)
+                if q in g: continue
+                u = _unit(q, waiting)
+                if len(g) + len(u) > need: continue
+                if fits(g + u) and (len(g) + len(u) < need or _splittable(g + u, n)): g.extend(u)
             if len(g) == need: grp = g; break
         if not grp: break
         grp.sort(key=lambda p: p['rating'])
@@ -508,11 +516,15 @@ def _try_match(mode):  # под MM_LOCK: нестрогий подбор с пр
         elif amaps: pool = sorted(amaps)
         else: pool = sorted(set().union(*[set(p.get('maps') or []) for p in grp]))
         mmap = random.choice(pool) if pool else None
+        native = all(p.get('native') for p in grp)              # the game's own automatch (own_lobby): a map key of the mode's size
+        if native and not mmap: mmap = random.choice(_nm_maps(grp[0].get('game'), mode) or [None])
         # команды: перебор всех разбиений, минимальная разница суммарного рейтинга (2v2: сильнейший + слабейший против двух средних)
         import itertools
         best_split, best_d = None, None
+        parties = [[i for i, p in enumerate(grp) if p.get('party') == pt] for pt in {p['party'] for p in grp if p.get('party')}]
         for comb in itertools.combinations(range(len(grp)), n):
             if 0 not in comb: continue                      # без зеркальных повторов
+            if any(len({i in comb for i in pi}) > 1 for pi in parties): continue   # a party plays in one team
             d_ = abs(sum(grp[i]['rating'] for i in comb) - sum(grp[i]['rating'] for i in range(len(grp)) if i not in comb))
             if best_d is None or d_ < best_d: best_d, best_split = d_, comb
         host_team = [grp[i]['steam'] for i in best_split]
@@ -530,11 +542,24 @@ def _try_match(mode):  # под MM_LOCK: нестрогий подбор с пр
         slots = {s_: i for i, s_ in enumerate(host_team)}; slots.update({s_: 4 + i for i, s_ in enumerate(guest_team)})
         MM_MATCHES[mid] = {'id': mid, 'mode': mode, 'host': host_team, 'guest': guest_team, 'slots': slots, 'watchers': [], 'pool': anchor.get('pool', ''),
                            'host_steam': host_steam, 'lobby': None, 'created': time.time(), 'map': mmap,
-                           'room': next((p['room'] for p in grp if p['steam'] == host_steam and p.get('room')), None),
+                           'room': next((p['room'] for p in grp if p['steam'] == host_steam and p.get('room')), None), 'native': native,
                            'state': 'creating', 'started': None,
                            'players': {p['steam']: {'name': p.get('name') or 'Player', 'rating': round(p['rating']), 'rsrc': p.get('rsrc', 'ladder'),
                                                     'race': p.get('race'), 'hero': p.get('hero')} for p in grp}}
 
+
+def _unit(x, waiting):  # x and his party (those of it searching in this pool), or just x
+    pt = x.get('party')
+    if not pt: return [x]
+    u = [y for y in waiting if y.get('party') == pt]
+    return u if x in u else [x]
+
+def _splittable(grp, n):  # can these players make two teams of n without splitting a party?
+    sizes = [len([p for p in grp if p.get('party') == pt]) for pt in {p['party'] for p in grp if p.get('party')}]
+    sizes += [1] * sum(1 for p in grp if not p.get('party'))
+    reach = {0}
+    for k in sizes: reach |= {r + k for r in reach}
+    return n in reach
 
 def _assign_watchers():  # под MM_LOCK: зрителей — в собираемые матчи (до старта), по вместимости слотов наблюдателей
     forming = sorted([m for m in MM_MATCHES.values() if m.get('state') != 'playing'], key=lambda m: m['created'])
@@ -583,6 +608,8 @@ def _best_relay(steams):
     return min(ok, key=lambda h: (max(x[h] for x in pings), ro.index(h)))
 
 def _player_view(p):  # под MM_LOCK: что вернуть игроку в poll
+    if p.get('native'):                                  # MMFind 0.38 watches a native search (the game searches by itself)
+        v = _nm_view(p); v['native'] = True; return v
     if p['mode'] == WATCH and p['state'] == 'searching':
         _assign_watchers()
     if p['state'] == 'searching' and p['mode'] == WATCH:
@@ -695,9 +722,10 @@ def mm_poll(steam):
         p = MM.get(steam)
         if not p:
             c = MM_CANCELLED.get(steam)
-            if c and time.time() - c['t'] < 300: return {'state': 'cancelled', 'match': c['match'], 'by': c['by']}
+            if c and time.time() - c['t'] < 300: return {'state': 'cancelled', 'match': c['match'], 'by': c['by'], **({'again': bool(c.get('again'))} if 'again' in c else {})}
             for m in MM_PLAYING.values():
-                if steam in m['host'] + m['guest'] + m.get('watchers', []): return {'state': 'playing', 'match': m['id']}
+                if steam in m['host'] + m['guest'] + m.get('watchers', []):
+                    return {'state': 'playing', 'match': m['id'], **({'native': True, 'lobby': m.get('lobby')} if m.get('native') else {})}
             return {'state': 'idle'}
         p['seen'] = time.time()
         return _player_view(p)
@@ -1084,6 +1112,236 @@ def mm_hello(steam):  # лёгкий heartbeat от открытого лаун�
         return {'ok': True, 'online': online, 'searching': sum(q.values()),
                 'playing': sum(1 for m in MM_MATCHES.values() if m['lobby'])}
 
+# ---------- native automatch (03.11.2026): the game's OWN Find a Game, served by our lobby server (lobby/own_lobby.py) ----------
+# A player with OwnLobby.dll presses Start Searching; the game asks our lobby server (automatch/startpolling) and own_lobby puts the
+# search into THIS queue (nm/join). The ladder decides the match exactly as for MMFind's searches (rating, groups, map wishes, the
+# longest waiting first, the game server by the players' pings, mm_history); own_lobby turns the decision into the game's answers
+# and pushes (host, map, teams x team size, the player's team, the room id once the host's room is up) - the game then goes to the
+# loading screen by itself. A pool of its own: '<group>|<game>|nm|<checksums>' - only games with the very same exe / data / mod
+# checksums ever meet (a different version never gets into the room), and never MMFind's classic searches (those play in Custom
+# Games rooms, these in the game's own AUTOMATCH room). nm/* calls: own_lobby only (token file data/nm_token, never via nginx).
+NM_TOKEN_FILE = ROOT + '/data/nm_token'
+NM_LOBBY = os.environ.get('NM_LOBBY_STATUS', 'http://127.0.0.1:47444')   # own_lobby's status port (same host)
+NM_HINTS = {}           # steam -> {'t', 'd'}: MMFind's mm/native body - map wishes, max_diff, test group, pings to our servers
+NM_HOST_TIMEOUT = int(os.environ.get('NM_HOST_TIMEOUT', '25'))    # s from the match to the host's room: else the host is out, the others search on
+NM_JOIN_TIMEOUT = int(os.environ.get('NM_JOIN_TIMEOUT', '40'))    # s from the room to every guest in it: else the missing guests are out, the others search on
+NM_START_TIMEOUT = int(os.environ.get('NM_START_TIMEOUT', '90'))   # s from the room to the start with everybody in: else all out (a clean cancel, nobody to blame)
+_NM_TOKEN = {'mtime': None, 'v': ''}
+CATALOG = {}            # map key -> {'name', 'maxplayers', ...} (assets_index.json, the maps of Elite 3.2)
+
+def _nm_token_ok(t):
+    try:
+        st = os.stat(NM_TOKEN_FILE)
+        if st.st_mtime != _NM_TOKEN['mtime']: _NM_TOKEN.update(mtime=st.st_mtime, v=open(NM_TOKEN_FILE).read().strip())
+    except Exception: return False
+    return bool(_NM_TOKEN['v']) and bool(t) and hmac.compare_digest(str(t), _NM_TOKEN['v'])
+
+def _catalog():
+    if not CATALOG:
+        try:
+            with open(os.path.dirname(os.path.abspath(__file__)) + '/assets_index.json', encoding='utf-8') as f: CATALOG.update(json.load(f).get('maps') or {})
+        except Exception: pass
+    return CATALOG
+
+def _nm_maps(game, mode, wishes=None):
+    """map keys for a native match of this game and mode: data/nm_maps.json {"elite": {"1v1": [keys]}, "vanilla": {...}} when there is
+    one, else every map of the mode's size (vanilla: the vanilla maps only). Wishes (MMFind's Map Preferences, the names as the game
+    lists them, or keys) narrow it; wishes that leave nothing are ignored"""
+    n = 2 * TEAM_N.get(mode, 1); kind = 'vanilla' if game == 'vanilla' else 'elite'; cat = _catalog()
+    try:
+        with open(ROOT + '/data/nm_maps.json', encoding='utf-8') as f: pool = list(json.load(f).get(kind, {}).get(mode) or [])
+    except Exception: pool = []
+    if not pool: pool = sorted(k for k, v in cat.items() if v.get('maxplayers') == n and (kind == 'elite' or k in VAN_MAPS))
+    if not pool: pool = ['2p_typhonswampredux'] if n == 2 else []
+    if wishes:
+        by_name = {(v.get('name') or '').lower(): k for k, v in cat.items()}
+        want = {by_name.get(str(w).lower(), str(w)) for w in wishes}
+        pool = [k for k in pool if k in want] or pool
+    return pool
+
+def _nm_view(p):  # under MM_LOCK: what own_lobby needs to answer the game
+    if p['state'] == 'searching':
+        n = sum(1 for q in MM.values() if q['state'] == 'searching' and q['mode'] == p['mode'] and q.get('pool') == p.get('pool'))
+        return {'state': 'searching', 'mode': p['mode'], 'since': int(p['ts']), 'in_pool': n}
+    m = MM_MATCHES.get(p.get('match') or '')
+    if not m:
+        p.update(state='searching', match=None, role=None)
+        return {'state': 'searching', 'mode': p['mode'], 'since': int(p['ts']), 'in_pool': 1}
+    order = m['host'] + m['guest']                       # the host first, then his team, then the other team
+    if 'relay' not in m:                                 # once per match, by the players' pings (MMFind's hint); '' = own_lobby picks
+        m['relay'] = _best_relay(order)
+        print('mm: native match %s relay %r' % (m['id'], m['relay']), flush=True)
+    return {'state': 'matched', 'match': m['id'], 'mode': m['mode'], 'host_steam': m['host_steam'],
+            'host_pid': (MM.get(m['host_steam']) or {}).get('pid') or 0, 'team': 0 if p['steam'] in m['host'] else 1,
+            'teams': 2, 'size': TEAM_N[m['mode']], 'map': m.get('map') or '', 'steams': order,
+            'pids': [(MM.get(s) or {}).get('pid') or 0 for s in order], 'relay': m.get('relay') or '', 'room': m.get('room'),
+            'joined': sorted(m.get('joined') or [])}
+
+def _nm_fail(m, culprits, why):  # under MM_LOCK: a native match that did not come together - the culprits out, the others search on
+    # Stands 03.11.2026: a game already IN the room (the host once it is up, a guest that joined) ends its search when it leaves
+    # that room, whatever we tell it (the client calls StopPolling on leaving an automatch session) - such players get a clean
+    # cancel ('again': the Find a Game screen, Start Searching works at once); only those not in the room yet search on, keeping
+    # their place (a waiting game takes the next match as it comes).
+    now = time.time()
+    MM_MATCHES.pop(m['id'], None)
+    inroom = set(m.get('joined') or ()) | ({m['host_steam']} if m.get('room') else set())
+    everyone = m['host'] + m['guest']
+    party = lambda s: {q for q in everyone if (MM.get(q) or {}).get('party') and (MM.get(q) or {}).get('party') == (MM.get(s) or {}).get('party')} | {s}
+    culprits = set().union(*[party(s) for s in culprits]) if culprits else set()    # one search: a party is out / back together
+    inroom = set().union(*[party(s) for s in inroom]) if inroom else set()
+    back = [s for s in m['host'] + m['guest'] if s not in culprits and s not in inroom]
+    print('mm: native match %s failed (%s): out %s, in the room (cancel) %s, back to searching %s' % (m['id'], why, culprits,
+          sorted(inroom - set(culprits)), back), flush=True)
+    for s in m['host'] + m['guest']:
+        p = MM.get(s)
+        if not p: continue
+        if s in back:
+            p.update(state='searching', match=None, role=None)        # keeps his ts: first in the queue again
+        else:
+            MM.pop(s, None); MM_CANCELLED[s] = {'by': why, 'match': m['id'], 't': now, 'again': s not in culprits}
+    _try_match(m['mode'])
+
+def _nm_timeouts(now):  # under MM_LOCK
+    for m in list(MM_MATCHES.values()):
+        if not m.get('native'): continue
+        if not m.get('room'):
+            if now - m['created'] > NM_HOST_TIMEOUT: _nm_fail(m, [m['host_steam']], 'the host never opened the room')
+            continue
+        missing = [s for s in m['host'] + m['guest'] if s != m['host_steam'] and s not in m.get('joined', set())]
+        if missing and now - m['room_t'] > NM_JOIN_TIMEOUT: _nm_fail(m, missing, 'did not join the room')
+        elif not missing and now - m['room_t'] > NM_START_TIMEOUT: _nm_fail(m, m['host'] + m['guest'], 'the match never started')
+
+def _nm_by_room(room):
+    room = str(room or '')
+    return next((m for m in MM_MATCHES.values() if m.get('native') and str(m.get('room') or '') == room), None) if room else None
+
+def nm_join(d):
+    steam = str(d.get('steam') or ''); mode = d.get('mode')
+    if not steam.isdigit() or mode not in MODES: return {'ok': False, 'error': 'steam/mode'}
+    h = NM_HINTS.get(steam); h = h['d'] if h and time.time() - h['t'] < 900 else {}
+    pid, rating, rd, games, name, rsrc = _rating_info(steam, mode)
+    game = _clean(d.get('game'), 24) or 'elite'; group = _clean(h.get('group'), 24) or ''
+    wishes = [_clean(x, 64) for x in (h.get('maps') or []) if _clean(x, 64)][:200]
+    try: max_diff = max(0, min(3000, int(h.get('max_diff') or 0)))
+    except Exception: max_diff = 0
+    try: race = RACE_KEYS[int(d.get('race'))]
+    except Exception: race = None
+    try: gpid = int(d.get('pid') or 0)
+    except Exception: gpid = 0
+    party = [x for x in (d.get('party') or []) if isinstance(x, dict) and str(x.get('steam') or '').isdigit()][:2]
+    prating = {str(x['steam']): _rating_info(str(x['steam']), mode) for x in party}      # outside the lock (Relic's rating: HTTP)
+    now = time.time()
+    with MM_LOCK:
+        _reap()
+        for mid, m in list(MM_PLAYING.items()):          # searching again = his previous match is over
+            if steam in m['host'] + m['guest'] + m.get('watchers', []): _end_match(mid, m, now)
+        MM_CANCELLED.pop(steam, None)
+        for s_ in [steam] + [str(x['steam']) for x in party]:
+            old = MM.get(s_)
+            if old and old.get('match'):                 # a new search while matched: that match failed for him
+                m = MM_MATCHES.get(old['match'])
+                if m and m.get('native'): _nm_fail(m, [s_], 'searched again')
+                elif m: _drop(s_)
+            elif old: MM.pop(s_, None)
+        MM[steam] = {'jts': now, 'steam': steam, 'mode': mode, 'rating': rating, 'rd': rd, 'games': games, 'ruiner': False,
+                     'pid': gpid or pid, 'name': _clean(d.get('name')) or name or _clean(h.get('name')), 'state': 'searching', 'match': None,
+                     'role': None, 'rsrc': rsrc, 'race': race or _clean(h.get('race'), 32), 'hero': _clean(h.get('hero'), 32),
+                     'maps': _nm_maps(game, mode, wishes) if wishes else [], 'max_diff': max_diff, 'ts': now, 'seen': now,
+                     'pool': '%s|%s|nm|%s' % (group, game, _clean(d.get('key'), 120) or ''), 'game': game, 'room': '', 'fast': True,
+                     'native': True, 'own': True, 'ping': _relay_ping(h.get('relay_ping')), 'group': group, 'compat': False,
+                     'ua': 'own_lobby', 'ver': _clean(h.get('ver') or h.get('launcher'), 32) or '', 'elite': _clean(h.get('elite'), 32) or '',
+                     'os': _clean(h.get('os'), 24) or '', 'party': steam if party else '', 'party_of': [str(x['steam']) for x in party]}
+        for x in party:                                  # his friends: one search with him (same place, same pool), one team
+            ps = str(x['steam']); xpid, xr, xrd, xg, xname, xsrc = prating[ps]
+            try: xrace = RACE_KEYS[int(x.get('race'))]
+            except Exception: xrace = None
+            MM[ps] = dict(MM[steam], steam=ps, pid=int(x.get('pid') or 0) or xpid, name=_clean(x.get('name')) or xname, rating=xr, rd=xrd,
+                          games=xg, rsrc=xsrc, race=xrace, hero=None, party_of=[], ping=None)
+        _try_match(mode); _assign_watchers()
+        return _nm_view(MM[steam])
+
+def nm_sync(d):
+    now = time.time(); out = {}
+    with MM_LOCK:
+        _reap(); _nm_timeouts(now)
+        for steam in [str(s) for s in (d.get('steams') or [])][:500]:
+            p = MM.get(steam)
+            if p and p.get('native'):
+                p['seen'] = now; out[steam] = _nm_view(p)
+                for q in p.get('party_of') or []:
+                    if q in MM: MM[q]['seen'] = now
+                continue
+            c = MM_CANCELLED.get(steam)
+            if c and now - c['t'] < 300: out[steam] = {'state': 'cancelled', 'match': c['match'], 'by': c['by'], 'again': bool(c.get('again'))}; continue
+            m = next((m for m in MM_PLAYING.values() if steam in m['host'] + m['guest']), None)
+            out[steam] = {'state': 'playing', 'match': m['id']} if m else {'state': 'idle'}
+    return out
+
+def nm_room(d):  # the host's AUTOMATCH room is up on our lobby server: its id goes to the guests
+    steam = str(d.get('steam') or '')
+    with MM_LOCK:
+        p = MM.get(steam); m = MM_MATCHES.get((p or {}).get('match') or '')
+        if not m or not m.get('native') or m['host_steam'] != steam: return {'ok': False}
+        m['room'] = str(d.get('room')); m['room_t'] = time.time(); m['lobby'] = 'NM-%s' % m['room']; m.setdefault('joined', set())
+        if _clean(d.get('relay'), 64): m['relay_used'] = _clean(d.get('relay'), 64)
+        return {'ok': True, 'match': m['id']}
+
+def nm_joined(d):
+    steam = str(d.get('steam') or '')
+    with MM_LOCK:
+        m = _nm_by_room(d.get('room'))
+        if not m or steam not in m['host'] + m['guest']: return {'ok': False}
+        m.setdefault('joined', set()).add(steam); return {'ok': True, 'match': m['id']}
+
+def nm_started(d):
+    with MM_LOCK:
+        m = _nm_by_room(d.get('room'))
+        if not m: return {'ok': False}
+        m['state'] = 'playing'; m['started'] = time.time(); MM_PLAYING[m['id']] = m
+        try: _history_add(m)
+        except Exception as e: print('mm: history of %s: %r' % (m['id'], e), flush=True)
+        for s in m['host'] + m['guest']: MM.pop(s, None)
+        MM_MATCHES.pop(m['id'], None)
+        print('mm: native match %s started (room %s)' % (m['id'], m['room']), flush=True)
+        return {'ok': True, 'match': m['id']}
+
+def nm_leave(d):  # Stop Searching (or the game is gone): out of the queue; in a match being set up the others search on
+    steam = str(d.get('steam') or '')
+    with MM_LOCK:
+        p = MM.get(steam)
+        if not p: return {'ok': True}
+        m = MM_MATCHES.get(p.get('match') or '')
+        if m and m.get('native'): _nm_fail(m, [steam], _clean(d.get('why'), 60) or 'left')
+        else:
+            for q in p.get('party_of') or []: MM.pop(q, None)
+            _drop(steam)
+        MM_CANCELLED.pop(steam, None)
+        return {'ok': True}
+
+def nm_fail(d):  # own_lobby knows better (a join refused, the host's game left its room): who is out, the others search on
+    with MM_LOCK:
+        m = MM_MATCHES.get(str(d.get('match') or '')) or _nm_by_room(d.get('room'))
+        if not m or not m.get('native'): return {'ok': False}
+        culprits = [str(s) for s in (d.get('culprits') or []) if str(s) in m['host'] + m['guest']]
+        _nm_fail(m, culprits, _clean(d.get('why'), 60) or 'failed')
+        return {'ok': True}
+
+NM_API = {'join': nm_join, 'sync': nm_sync, 'room': nm_room, 'joined': nm_joined, 'started': nm_started, 'leave': nm_leave, 'fail': nm_fail}
+
+def mm_native(steam, d):
+    """MMFind 0.38 asks before Start Searching: will the game's own search be served natively (OwnLobby.dll signed this player in
+    on our lobby server, the native automatch is on there)? Yes = MMFind lets the game search by itself and keeps its wishes here"""
+    if d.get('mode', '1v1') not in MODES: return {'native': False, 'why': 'mode'}
+    try:
+        with urllib.request.urlopen(NM_LOBBY + '/nm?steam=' + urllib.parse.quote(steam), timeout=1.5) as f: st = json.load(f)
+    except Exception: return {'native': False, 'why': 'lobby server unreachable'}
+    if not st.get('native'): return {'native': False, 'why': 'native automatch off'}
+    if not st.get('here'): return {'native': False, 'why': 'not signed in through our lobby server'}
+    with MM_LOCK:
+        NM_HINTS[steam] = {'t': time.time(), 'd': d}
+        for s in [s for s, h in NM_HINTS.items() if time.time() - h['t'] > 900]: NM_HINTS.pop(s, None)
+    return {'native': True}
+
 # ---------- отзывы из лаунчера: чат игрок ↔ разработчики (26.10.2026) ----------
 # Игрок: uid — случайный секрет из настроек лаунчера (знать uid = видеть свою переписку), имя по желанию.
 # Разработчик отвечает со страницы /ladder/fb-admin (вход по токену из data/fb_admin_token).
@@ -1363,6 +1621,13 @@ class H(BaseHTTPRequestHandler):
                     uu = _fb_uid(d.get('uid'))
                     if uu: m['muted'] = [x for x in m['muted'] if x != uu] + ([uu] if on else [])
                 fb_mod_save(m); return self.send(200, {'ok': True, 'mod': m}, cache=0)
+            if u.path.startswith('/ladder/api/nm/'):     # own_lobby only: its token, and never through nginx (which adds X-Real-IP)
+                if self.headers.get('X-Real-IP') or self.headers.get('X-Forwarded-For') or not _nm_token_ok(self.headers.get('X-NM-Token')):
+                    return self.send(403, {'error': 'token'}, cache=0)
+                fn = NM_API.get(u.path[len('/ladder/api/nm/'):])
+                if not fn: return self.send(404, {'error': 'not found'}, cache=0)
+                d = self._body()
+                return self.send(200, fn(d if isinstance(d, dict) else {}), cache=0)
             d = self._body()
             if isinstance(d, dict): d['_ua'] = self.headers.get('User-Agent', '')
             steam = str(d.get('steam', ''))[:32]
@@ -1378,6 +1643,7 @@ class H(BaseHTTPRequestHandler):
             if u.path == '/ladder/api/mm/room':  return self.send(200, mm_room(steam, d.get('room')), cache=0)
             if u.path == '/ladder/api/mm/host':  return self.send(200, mm_host(steam, d.get('lobby', ''), d.get('map'), d.get('room')), cache=0)
             if u.path == '/ladder/api/mm/leave': return self.send(200, mm_leave(steam), cache=0)
+            if u.path == '/ladder/api/mm/native': return self.send(200, mm_native(steam, d), cache=0)
             return self.send(404, {'error': 'not found'}, cache=0)
         except Exception as e:
             return self.send(500, {'error': type(e).__name__}, cache=0)
@@ -1417,9 +1683,10 @@ class Server(ThreadingHTTPServer):
     request_queue_size = 1024
 
 if __name__ == '__main__':
-    threading.Thread(target=crawler, daemon=True).start()
-    threading.Thread(target=_rooms_loop, daemon=True).start()
+    if not os.environ.get('LADDER_NO_CRAWL'):          # a test instance: no Relic crawling, no rooms / history polling
+        threading.Thread(target=crawler, daemon=True).start()
+        threading.Thread(target=_rooms_loop, daemon=True).start()
+        threading.Thread(target=_history_resolver, daemon=True).start()
     threading.Thread(target=_seasons_refresher, daemon=True).start()
-    threading.Thread(target=_history_resolver, daemon=True).start()
     threading.Thread(target=stream.publisher, daemon=True).start()
     Server(('127.0.0.1', PORT), H).serve_forever()
