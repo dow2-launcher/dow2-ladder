@@ -542,6 +542,8 @@ def _try_match(mode):  # под MM_LOCK: нестрогий подбор с пр
                 u = _unit(q, waiting)
                 if len(g) + len(u) > need: continue
                 if fits(g + u) and (len(g) + len(u) < need or _splittable(g + u, n)): g.extend(u)
+            if len(g) != need and any(x.get('party') for x in waiting):   # the greedy fill can block on parties (2v2: a single +
+                g = _fill_exact(anchor, waiting, need, n, score, fits)      # two duos; 3v3: duo + two trios) - try every combination
             if len(g) == need: grp = g; break
         if not grp: break
         grp.sort(key=lambda p: p['rating'])
@@ -587,6 +589,25 @@ def _unit(x, waiting):  # x and his party (those of it searching in this pool), 
     if not pt: return [x]
     u = [y for y in waiting if y.get('party') == pt]
     return u if x in u else [x]
+
+def _fill_exact(anchor, waiting, need, n, key, fits):
+    # release gate 03.11.2026 (offline sim): the greedy fill above takes the best-scored unit first and never backs out, so with
+    # parties a full, splittable match could exist and still not form (2v2 waiting: single, duo, duo -> single + duo = 3, the second
+    # duo does not fit; nobody played until another single came). Here: the anchor's unit + every combination of the other units
+    # (best-scored first, at most 12 units - k <= 5, at most 792 combinations per anchor), the first one that fills both teams.
+    import itertools
+    base = _unit(anchor, waiting)
+    units, seen = [], {id(x) for x in base}
+    for q in sorted([x for x in waiting if x is not anchor], key=key):
+        if id(q) in seen: continue
+        u = _unit(q, waiting); seen |= {id(x) for x in u}
+        if len(base) + len(u) <= need: units.append(u)
+        if len(units) >= 12: break
+    for k in range(1, need - len(base) + 1):
+        for comb in itertools.combinations(units, k):
+            g = base + [x for u in comb for x in u]
+            if len(g) == need and fits(g) and _splittable(g, n): return g
+    return base
 
 def _splittable(grp, n):  # can these players make two teams of n without splitting a party?
     sizes = [len([p for p in grp if p.get('party') == pt]) for pt in {p['party'] for p in grp if p.get('party')}]
