@@ -410,7 +410,7 @@ def _counts():  # вызывать под MM_LOCK
 def _reap():  # вызывать под MM_LOCK: выкинуть тех, кто перестал poll'ить
     now = time.time()
     for steam in [s for s, p in MM.items()
-                  if now - p['seen'] > (30 if p['state'] == 'searching' else 150)]:
+                  if now - p['seen'] > (30 if p['state'] == 'searching' else 20 if p.get('fast') else 150)]:   # 0.37 Fast polls every 0.5 s while the match is set up: 20 s of silence = his game is gone, the match is cancelled for the others (was 45-120 s)
         _drop(steam)
     for s in [s for s, t in PRESENCE.items() if now - t > 120]:
         PRESENCE.pop(s, None)
@@ -671,7 +671,7 @@ def mm_join(steam, mode, d=None):
                      'pid': pid, 'name': name or _clean(d.get('name')), 'state': 'searching', 'match': None, 'role': None,
                      'rsrc': rsrc, 'race': _clean(d.get('race'), 32), 'hero': _clean(d.get('hero'), 32), 'maps': maps, 'max_diff': max_diff,
                      'ts': now, 'seen': now, 'pool': '%s|%s' % (_clean(d.get('group'), 24) or '', _game(d)),   # 02.11 evening: the fast automatch (private rooms) is OFF - owner: «убираем»; a "direct" search goes into the usual pool   # one queue per game (01.11: vanilla and Elite never meet); 02.11: MMFind 0.34 fast automatch (experiment) only with its own kind
-                     'game': _game(d), 'room': str(int(d['room'])) if str(d.get('room') or '').isdigit() else '',
+                     'game': _game(d), 'room': str(int(d['room'])) if str(d.get('room') or '').isdigit() else '', 'fast': bool(d.get('fast')),
                     
                      'own': bool(d.get('own_server')), 'ping': _relay_ping(d.get('relay_ping')) if d.get('own_server') else None,
                      'group': _clean(d.get('group'), 24) or '', 'compat': bool(d.get('relay_compat')),
