@@ -1,0 +1,19 @@
+[Unit]
+Description=xray: the DWR3 bridge's TCP to Relic relays (27000-27099) goes out via iggy (VLESS gRPC REALITY), not from Russia
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+DynamicUser=yes
+LoadCredential=config.json:/etc/xray-relic/config.json
+ExecStart=/opt/xray-relic/xray run -config ${CREDENTIALS_DIRECTORY}/config.json
+Restart=always
+RestartSec=3
+ExecStopPost=+/usr/local/sbin/relic-egress down xray-relic stopped
+LimitNOFILE=65536
+ProtectSystem=strict
+ProtectHome=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

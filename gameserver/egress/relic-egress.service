@@ -1,0 +1,12 @@
+[Unit]
+Description=DWR3 bridge -> Relic via iggy: keeps the iptables REDIRECT while xray-relic and the tunnel work, removes it otherwise
+After=xray-relic.service
+
+[Service]
+ExecStart=/usr/local/sbin/relic-egress watch
+ExecStopPost=/usr/local/sbin/relic-egress down relic-egress stopped
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
