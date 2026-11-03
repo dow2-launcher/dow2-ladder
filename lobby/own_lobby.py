@@ -254,17 +254,19 @@ def own_call(call, p, sess, mm=None):
     """our answer (a JSON value) for a call about one of our rooms, or None = pass it on to Relic"""
     if not sess: return None
     svc, _, fn = call.partition('/')
+    if svc == 'automatch': return nm_call(fn, p, sess)
     if svc not in ('advertisement', 'party'): return None
     mid = p.get('advertisementid') or p.get('matchID') or p.get('match_id') or p.get('matchid')
     if fn == 'host' and str(p.get('advertisementid')) == '-1':
         if not mm: return None                                         # everything but our automatch rooms: Relic
         mid = next_mid(); ip, port = relay_for(mm['relay']); now = time.time()
         r = ROOMS[mid] = {'mid': mid, 'host': sess['pid'], 'host_alias': sess['alias'], 'relay': [ip, port], 'state': 'lobby',
-                          'kind': 'mm', 'match': mm['match'], 'steams': mm['steams'],
+                          'kind': mm.get('kind', 'mm'), 'match': mm['match'], 'steams': mm['steams'],
                           'params': {k: v for k, v in p.items() if k.lower() not in SECRET_PARAMS},
                           'members': {sess['pid']: {'sg': sess['sg'], 'steam': sess['steam'], 'alias': sess['alias'], 'race': -1, 'team': 0}},
                           'created': now, 'seen': now, 'reports': {}, 'started': None, 'lobby_id': None}
         log('room %d (%s, ladder %s) hosted by pid=%d (%s), relay %s:%d' % (mid, p.get('description'), mm['match'], sess['pid'], sess['alias'], ip, port))
+        if mm.get('nm'): nm_hosted(mm['nm'], mid, ip)
         return [0, mid, 'authtoken', ip, port, [member_row(r, sess['pid'])]]
     if not ours(mid): return None
     mid = int(mid); r = ROOMS.get(mid)
@@ -379,6 +381,104 @@ def to_ladder(r):
         log('room %d: ladder write failed: %r' % (r['mid'], e))
 
 
+# ---------------- native automatch (research 03.11.2026): the game's OWN "Find a Game" against our matcher ----------------
+# DOW2.exe still has Relic's whole automatch client (AutomatchInternal / WorldwideAutomatchService). Relic's matcher no longer pairs
+# anybody, but the protocol is simple (reversed 03.11.2026, see research/relic_automatch_reverse.md):
+#   automatch/startpolling (matchTypes, raceInfoRaceID, partySessionID, modName/modVersion/CRCs) -> [0, pollID, searches, -1, 0, "", ...]
+#   automatch/polling?pollID   -> the same; once matched: [0, pollID, searches, hostPID, mid|0, map, team, 0, race, searchID, url,
+#                                 "<teams>", "<team size>", [pids]]
+#   readSession push AutomatchGameMessage [hostPID, mid|0, map|url, race, team, 0, searchID, 0, teams, teamSize, [pids]] - instant
+# The player whose profile is hostPID hosts an "AUTOMATCH" room (advertisement/host automatchPoll_id=<his poll>, map from us,
+# teams x team size slots), the others join it by id as soon as we know the id, slots/ready/countdown/start are the game's own.
+NM_POLLS = {}                     # pollID -> search
+NM_SEQ = [int(time.time()) % 100000 * 100]
+NM_NEED = {1: 2, 2: 4, 3: 6}      # match types: 1 head to head, 2 two on two, 3 team battle (3v3)
+NM_SHAPE = {1: (2, 1), 2: (2, 2), 3: (2, 3)}
+NM_MAPS_DEFAULT = {1: ['2p_typhonswampredux'], 2: ['4p_estate'], 3: ['6p_judgment']}
+
+
+def nm_maps(mt):
+    try:
+        with open(os.path.join(DATA, 'nm_maps.json')) as f: return json.load(f)[str(mt)]
+    except Exception: return NM_MAPS_DEFAULT.get(mt, NM_MAPS_DEFAULT[1])
+
+
+def nm_answer(x):
+    pool = [y for y in NM_POLLS.values() if y['mt'] == x['mt'] and y['key'] == x['key'] and y['state'] != 'gone']
+    races = [0] * 7
+    for y in pool:
+        if 0 <= y['race'] < 7: races[y['race']] += 1
+    rows = [[str(x['sid']), str(x['mt']), len(pool), 1, [[i, races[i]] for i in range(7)]]]
+    m = x.get('match')
+    if not m: return [0, x['poll'], rows, -1, 0, '', -1, -1, -1, -1, '', '0', '0', []]
+    host = m['players'][0]; me_host = x is host
+    teams, size = NM_SHAPE.get(x['mt'], (2, 1))
+    return [0, x['poll'], rows, host['pid'], m['mid'] or 0, m['map'] if me_host else '', m['team'][x['poll']], 0, x['race'], x['sid'],
+            '' if me_host or not m['mid'] else '/' + m['relay'], str(teams), str(size), [y['pid'] for y in m['players']]]
+
+
+def nm_push(x):
+    a = nm_answer(x)
+    push(x['pid'], [0, 'AutomatchGameMessage', x['pid'], [a[3], a[4], a[5] if a[3] == x['pid'] else a[10], a[8], a[6], a[7], a[9], 0, int(a[11]), int(a[12]), a[13]]])
+
+
+def nm_try(x):
+    pool = sorted((y for y in NM_POLLS.values() if y['state'] == 'searching' and y['mt'] == x['mt'] and y['key'] == x['key']), key=lambda y: y['t'])
+    need = NM_NEED.get(x['mt'], 2)
+    if len(pool) < need: return
+    players = pool[:need]; size = need // 2
+    import random
+    m = {'id': 'nm%d' % players[0]['poll'], 'players': players, 'mid': None, 'relay': '', 'map': random.choice(nm_maps(x['mt'])),
+         'team': {y['poll']: (0 if i < size else 1) for i, y in enumerate(players)}, 't': time.time()}
+    for y in players: y['state'] = 'matched'; y['match'] = m
+    log('native automatch %s: %s on %s, host pid=%d' % (m['id'], ' vs '.join(str(y['pid']) for y in players), m['map'], players[0]['pid']))
+    nm_push(players[0])
+
+
+def nm_call(fn, p, sess):
+    if not flag('native_mm.on') or not sess: return None                       # off: Relic's automatch as it is
+    if fn == 'startpolling':
+        def first(k, d):
+            try: return json.loads(p.get(k) or '[]')[0]
+            except Exception: return d
+        NM_SEQ[0] += 1
+        x = {'poll': 900000000 + NM_SEQ[0], 'sid': 800000000 + NM_SEQ[0], 'pid': sess['pid'], 'steam': sess['steam'], 'mt': int(first('matchTypes', 1)),
+             'race': int(first('raceInfoRaceID', 0)), 'key': '|'.join(p.get(k, '') for k in ('modName', 'modVersion', 'dataCRC', 'appBinCRC')),
+             'state': 'searching', 't': time.time(), 'match': None}
+        for k, y in list(NM_POLLS.items()):                                  # one search per player
+            if y['pid'] == x['pid'] and y['state'] == 'searching': y['state'] = 'gone'
+        NM_POLLS[x['poll']] = x
+        log('native automatch: pid=%d (%s) searches, type %d, %s' % (x['pid'], sess['alias'], x['mt'], x['key']))
+        nm_try(x)
+        return nm_answer(x)
+    try: x = NM_POLLS.get(int(p.get('pollID') or p.get('myPollID') or 0))
+    except ValueError: x = None
+    if fn == 'polling': return nm_answer(x) if x else [2]
+    if fn == 'stoppolling':
+        if x and x['state'] == 'searching': x['state'] = 'gone'
+        return [0]
+    if fn == 'updateStatus':
+        log('native automatch: pid=%d status poll=%s match=%s result=%s' % (sess['pid'], p.get('myPollID'), p.get('matchID'), p.get('result')))
+        return [0]
+    return None                                                              # getAutomatchMap etc.: Relic
+
+
+def nm_room(p, sess):
+    """advertisement/host of an AUTOMATCH room by the host of one of our native matches -> the room lives here"""
+    if not flag('native_mm.on') or not sess: return None
+    try: x = NM_POLLS.get(int(p.get('automatchPoll_id') or -1))
+    except ValueError: return None
+    if not x or not x.get('match') or x['pid'] != sess['pid']: return None
+    m = x['match']
+    return {'match': m['id'], 'steams': {str(y['steam']) for y in m['players']}, 'relay': '', 'kind': 'nm', 'nm': m}
+
+
+def nm_hosted(m, mid, relay_ip):
+    m['mid'] = mid; m['relay'] = relay_ip
+    log('native automatch %s: room %d is up - the others join' % (m['id'], mid))
+    for y in m['players'][1:]: nm_push(y)
+
+
 # ---------------- HTTP over TLS ----------------
 RELIC_CTX = ssl.create_default_context(cafile=os.path.join(HERE, 'relic_ca.pem'))
 RELIC_CTX.verify_flags &= ~ssl.VERIFY_X509_STRICT                     # Relic's root (2014) has a non-critical basicConstraints
@@ -467,7 +567,7 @@ async def handle(r, w):
                 continue
             mm = None
             if call == 'advertisement/host' and str(params.get('advertisementid')) == '-1':
-                try: mm = await mm_decision(params, sess)
+                try: mm = nm_room(params, sess) or await mm_decision(params, sess)
                 except Exception as e: log('mm_decision failed: %r' % e)
             try: ans = own_call(call, params, sess, mm)
             except Exception as e:
@@ -605,7 +705,7 @@ async def main():
     os.makedirs(DATA, exist_ok=True)
     ls, lst = inherited()
     if ls is None:
-        ls = socket.socket(socket.AF_INET, socket.SOCK_STREAM); ls.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); ls.bind(('0.0.0.0', PORT)); ls.listen(128)
+        ls = socket.socket(socket.AF_INET, socket.SOCK_STREAM); ls.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); ls.bind((os.environ.get('LOBBY_BIND', '0.0.0.0'), PORT)); ls.listen(128)
         lst = socket.socket(socket.AF_INET, socket.SOCK_STREAM); lst.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); lst.bind(('127.0.0.1', STATUS_PORT)); lst.listen(16)
     srv = await asyncio.start_server(handle, sock=ls, ssl=server_ctx(), limit=4 << 20)
     st = await asyncio.start_server(status, sock=lst)
