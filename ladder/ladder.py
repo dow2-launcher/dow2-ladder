@@ -1103,7 +1103,7 @@ def _rooms_once():
         ex = _exact_game(mt)
         version = mod = exact = None
         if ex: (game, version, mod), sure, exact = ex, True, mt.get('src') or 'scan'
-        elif str(m.get('id')) in scan_other: game, sure, exact = 'other', True, 'scan'
+        # not in either filtered answer: maybe another mod, maybe a room Relic leaves out of findAdvertisements (full, password) - the guess below decides
         elif elite_sure({'mapname': mn, 'slotinfo': m.get('slotinfo', ''), 'matchhistorymember': races}): game, sure = 'elite', True
         elif mn in VAN_MAPS and mn not in ELITE_MAPS and not any('elite' in w for w in b): game, sure = 'vanilla', True
         elif mn in VAN_MAPS or mn in ELITE_MAPS or mn in (_ASSETS.get('maps') or {}): game, sure = 'elite', False
