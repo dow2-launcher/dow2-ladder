@@ -10,8 +10,9 @@ Packet: "DU" + type (1) + connection id (u32 LE, random, chosen by the player) +
   3 DATA    both: seq (u32) + ack (u32) + sack (u32) + bytes (<= 1200)
   4 ACK     both: ack (u32) + sack (u32)              ack = next packet number expected, sack bit i = ack+1+i arrived
   5 FIN     both: the connection is over
-  6 PING    player -> us: up to 32 bytes              -> 7 PONG with the same bytes; no connection is made (Relay 17
-            measures the delay to every node with it - over UDP, the way the game will go)
+  6 PING    player -> us: up to 1200 bytes            -> 7 PONG with at most the first 32 of them (never more than came in);
+            no connection is made. Relay 17 measures the delay with small ones; Relay 18 also sends a burst of 40 x 1000 bytes
+            and counts the answers: some paths (DPI) pass a short ping but stop a stream after ~33 KB (owner 03.11.2026)
 Packets are numbered from 0 on each side. Lost ones are sent again after an RTO from the measured round trip, or at once
 when a later one was acknowledged twice past it. Keepalive: an ACK each second; 30 s without a packet = gone.
 Usage: udp_gateway.py [port] [battle_relay host:port]   (default 47100 127.0.0.1:47100)
@@ -129,7 +130,7 @@ class Gateway(asyncio.DatagramProtocol):
         if len(d) < 7 or d[:2] != b'DU': return
         t, cid = d[2], struct.unpack('<I', d[3:7])[0]; body = d[7:]
         if t == PING:                                           # stateless echo, small (no amplification)
-            if len(body) <= 32: self.tr.sendto(b'DU' + bytes([PONG]) + d[3:], addr)
+            if len(body) <= 1200: self.tr.sendto(b'DU' + bytes([PONG]) + d[3:7] + body[:32], addr)
             return
         c = self.conns.get(cid)
         if c and c.addr[0] != addr[0]: return                   # an id is bound to its address (the port may change: NAT)
