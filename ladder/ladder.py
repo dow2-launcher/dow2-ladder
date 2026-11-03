@@ -1150,6 +1150,94 @@ def live_view():
     return {'now': int(now), 'searching': searching, 'ingame': ingame, 'launcher': launcher,
             'users': {s: users.card(s) for s in sorted(busy | {p['steam'] for p in launcher})}}
 
+# ---------- rematch on Continue (MMFind 0.43, owner 03.11.2026): after a match from an ORDINARY Custom Games lobby ----------
+# The game's own post-game Continue only throws everyone to the main menu (broken by Relic ~2016). MMFind takes the click and
+# asks here; the key is the old room's id (the same in every player's game). Who makes the new room: the old host if he pressed
+# Continue within RM_HOST_GRACE s of the first press, else the first one who pressed (and is still asking). He gives the new
+# room's id and name (op host), everyone else gets them in his poll and joins by himself. Nobody waits for anybody: the room is
+# handed out for RM_TTL s (a later Continue still gets in) until the host says the game started. In memory only (a restart
+# loses running rematches - their players get "gone" and stay in the menu).
+#   op continue {key, name, was_host, slot, pid, people}  op poll {key}  op host {key, room, lobby, map}  op leave {key}  op started {key}
+#   -> {'state': 'wait' | 'host' | 'hosting' | 'room' (+room, lobby, map, host_name) | 'gone'}
+RM_LOCK = threading.Lock()
+REMATCH = {}            # key -> {'t', 'first', 'players': {steam: {...}}, 'order': [steam], 'host', 'ht', 'room', 'lobby', 'map', 'closed'}
+RM_HOST_GRACE = 6       # s: the old host's head start over the first one who pressed Continue
+RM_HOST_TIMEOUT = 45    # s: the chosen host gives no room in that time (or went quiet) -> the next one
+RM_SEEN = 12            # s: a player not asking for that long is not picked as the host
+RM_TTL = 600            # s: a rematch is handed out that long (after the room came up)
+
+def _rm_reap(now):     # under RM_LOCK
+    for k, r in list(REMATCH.items()):
+        if now - r['t'] > RM_TTL or (r.get('closed') and now - r['closed'] > 120): REMATCH.pop(k, None)
+
+def _rm_pick(r, now):  # under RM_LOCK: who makes the room
+    if r.get('room') or r.get('closed'): return
+    h = r.get('host')
+    if h:
+        p = r['players'].get(h)
+        if p and now - r['ht'] < RM_HOST_TIMEOUT and now - p['seen'] < RM_HOST_TIMEOUT: return
+        if p: p['failed'] = True
+        print('rematch %s: host %s gave no room - picking another' % (r['key'], h), flush=True)
+        r['host'] = h = None
+    alive = [s for s in r['order'] if s in r['players'] and not r['players'][s].get('failed') and now - r['players'][s]['seen'] < RM_SEEN]
+    if not alive: return
+    old = [s for s in alive if r['players'][s].get('was_host')]
+    if old: h = old[0]
+    elif now - r['first'] >= RM_HOST_GRACE: h = alive[0]
+    else: return
+    r['host'] = h; r['ht'] = now
+    print('rematch %s: %s (%s) makes the new room%s' % (r['key'], h, r['players'][h].get('name'), ' (the old host)' if old else ''), flush=True)
+
+def _rm_view(r, steam):
+    if r.get('closed'): return {'state': 'gone', 'why': 'started'}
+    if r.get('room'):
+        if steam == r.get('host'): return {'state': 'hosting', 'room': r['room'], 'lobby': r['lobby']}
+        return {'state': 'room', 'room': r['room'], 'lobby': r['lobby'], 'map': r.get('map'),
+                'host_name': r['players'].get(r['host'], {}).get('name')}
+    if steam == r.get('host'): return {'state': 'host'}
+    return {'state': 'wait', 'pressed': len(r['players'])}
+
+def mm_rematch(steam, d):
+    steam = str(steam); op = str(d.get('op') or ''); key = str(d.get('key') or '')
+    if not key.isdigit() or len(key) > 20 or key == '0': return {'state': 'gone', 'why': 'key'}
+    now = time.time()
+    with RM_LOCK:
+        _rm_reap(now)
+        r = REMATCH.get(key)
+        if op == 'continue':
+            if r is None:
+                r = REMATCH[key] = {'key': key, 't': now, 'first': now, 'players': {}, 'order': [], 'host': None}
+                print('rematch %s: Continue by %s (%s), %s people in the old lobby' % (key, steam, _clean(d.get('name')), d.get('people')), flush=True)
+            if steam not in r['players']: r['order'].append(steam)
+            try: slot = int(d.get('slot'))
+            except Exception: slot = -1
+            r['players'][steam] = {'name': _clean(d.get('name')), 'was_host': bool(d.get('was_host')), 'slot': slot,
+                                   'pid': _clean(d.get('pid'), 24), 'seen': now, 'failed': False}
+        if not r or steam not in r['players']: return {'state': 'gone', 'why': 'unknown'}
+        p = r['players'][steam]; p['seen'] = now
+        if op == 'leave':
+            p['failed'] = True
+            if r.get('host') == steam and not r.get('room'): r['host'] = None
+            _rm_pick(r, now)
+            return {'ok': True}
+        if op == 'host':
+            if steam != r.get('host') or not str(d.get('room') or '').isdigit(): return {'ok': False, **_rm_view(r, steam)}
+            r['room'] = str(int(d['room'])); r['lobby'] = _clean(d.get('lobby'), 48); r['map'] = _clean(d.get('map'), 64); r['t'] = now
+            print('rematch %s: room %s "%s" (%s) is up' % (key, r['room'], r['lobby'], r['map']), flush=True)
+            return {'ok': True, **_rm_view(r, steam)}
+        if op == 'started':
+            if steam == r.get('host') and r.get('room'): r['closed'] = now; print('rematch %s: started' % key, flush=True)
+            return {'ok': True}
+        _rm_pick(r, now)
+        return _rm_view(r, steam)
+
+def mm_rematch_live():   # GET mm/rematch: the rematches being gathered (no SteamIDs)
+    now = time.time()
+    with RM_LOCK:
+        _rm_reap(now)
+        return {'rematches': [{'age': int(now - r['first']), 'pressed': len(r['players']), 'room_up': bool(r.get('room')),
+                               'started': bool(r.get('closed')), 'host': r['players'].get(r.get('host'), {}).get('name')} for r in REMATCH.values()]}
+
 def mm_leave(steam):
     with MM_LOCK:
         _drop(str(steam))
@@ -1652,6 +1740,7 @@ class H(BaseHTTPRequestHandler):
                 d = _relays().get('doc') or {'v': 1, 'relays': [{'ip': ip} for ip in relay_order()], 'ts': 0}
                 return self.send(200, d, cache=30)
             if u.path == '/ladder/api/mm/live': return self.send(200, mm_live(qs.get('debug', ['0'])[0] in ('1', 'true')), cache=0)
+            if u.path == '/ladder/api/mm/rematch': return self.send(200, mm_rematch_live(), cache=0)
             if u.path == '/ladder/api/history':
                 g = lambda k: qs.get(k, [''])[0]
                 return self.send(200, history(g('q')[:64], g('mode')[:8], g('map')[:64], g('race')[:32], g('page') or 0, g('n') or 30, g('off')), cache=10)
@@ -1742,6 +1831,7 @@ class H(BaseHTTPRequestHandler):
             if u.path == '/ladder/api/mm/host':  return self.send(200, mm_host(steam, d.get('lobby', ''), d.get('map'), d.get('room')), cache=0)
             if u.path == '/ladder/api/mm/leave': return self.send(200, mm_leave(steam), cache=0)
             if u.path == '/ladder/api/mm/native': return self.send(200, mm_native(steam, d), cache=0)
+            if u.path == '/ladder/api/mm/rematch': return self.send(200, mm_rematch(steam, d if isinstance(d, dict) else {}), cache=0)
             return self.send(404, {'error': 'not found'}, cache=0)
         except Exception as e:
             return self.send(500, {'error': type(e).__name__}, cache=0)
