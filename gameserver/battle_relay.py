@@ -54,6 +54,21 @@ def tcp_info(w):
     except Exception: return None
 
 
+def tcp_stats(sock):
+    """the TCP state of one connection from Linux TCP_INFO (struct tcp_info, linux/tcp.h), {} elsewhere: rtt/rttvar/min_rtt/rto
+    in ms, retrans = segments out again right now, lost = counted lost right now, total_retrans = in all, backoff = RTOs in a
+    row, cwnd, unacked, bytes_retrans, last_rx_ms = since the last data came in"""
+    try: b = sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_INFO, 232)
+    except Exception: return {}
+    u = lambda o: struct.unpack_from('<I', b, o)[0] if len(b) >= o + 4 else None
+    d = dict(rtt=u(68), rttvar=u(72), rto=u(8), retrans=u(36), lost=u(32), total_retrans=u(100), backoff=b[4] if len(b) > 4 else None,
+             cwnd=u(80), unacked=u(24), last_rx_ms=u(52), min_rtt=u(148))
+    for k in ('rtt', 'rttvar', 'rto', 'min_rtt'):
+        if d[k] is not None: d[k] = round(d[k] / 1000, 1)
+    if len(b) >= 216: d['bytes_retrans'] = struct.unpack_from('<Q', b, 208)[0]
+    return {k: v for k, v in d.items() if v is not None}
+
+
 def log(**k):
     k['t'] = round(time.time(), 3)
     with open(LOG, 'a') as f: f.write(json.dumps(k) + '\n')
@@ -199,6 +214,69 @@ async def find_peer(sid):
     return None
 
 
+class BridgeStats:
+    """03.11.2026: what the passed-on connection (our node -> the Relic relay, or -> our other server) was like - logged every
+    STATS_EVERY s while it lives (ev=bridge_stats) and when it closes (ev=bridge_end), so that a lag "3-4 minutes into the
+    match" shows whether the way from the node (Russia) to Relic stalls or chokes: TCP_INFO of that connection (rtt/rttvar,
+    retransmissions, lost, RTOs in a row), the bytes both ways, the longest pause in what Relic sends (it ticks every 100 ms
+    in a match: a pause of 250+ ms is a stall), the same for the game's side, and the connection's age."""
+    EVERY, SAMPLE, STALL = 30, 1.0, 0.25
+
+    def __init__(self, p, dest, to, usock):
+        self.p, self.dest, self.to, self.usock = p, f'{dest[0]}:{dest[1]}', to, usock
+        self.t0 = time.monotonic(); self.up = self.down = self.up_n = self.down_n = 0
+        self.last_rx = self.last_tx = None; self.closed_by = None; self.final_tcp = {}
+        self.all_rx_gap = self.all_tx_gap = 0.0; self.all_rx_stalls = 0; self.all_max_rtt = 0.0; self.all_max_backoff = 0
+        self.new_window()
+
+    def new_window(self):
+        self.w_rx_gap = self.w_tx_gap = 0.0; self.w_rx_stalls = 0; self.w_up = self.w_down = 0
+        self.w_max_rtt = 0.0; self.w_max_rto = 0.0; self.w_max_backoff = 0; self.w_max_unacked = 0; self.w_max_buf = 0
+
+    def rx(self, n):                                   # a frame from Relic (n bytes with its length)
+        now = time.monotonic(); self.down += n; self.w_down += n; self.down_n += 1
+        if self.last_rx is not None:
+            g = now - self.last_rx
+            if g > self.STALL: self.w_rx_stalls += 1; self.all_rx_stalls += 1
+            self.w_rx_gap = max(self.w_rx_gap, g); self.all_rx_gap = max(self.all_rx_gap, g)
+        self.last_rx = now
+
+    def tx(self, n):                                   # a frame from the game, on its way to Relic
+        now = time.monotonic(); self.up += n; self.w_up += n; self.up_n += 1
+        if self.last_tx is not None:
+            g = now - self.last_tx; self.w_tx_gap = max(self.w_tx_gap, g); self.all_tx_gap = max(self.all_tx_gap, g)
+        self.last_tx = now
+
+    def sample(self, uw):                              # every SAMPLE s: the worst of the TCP state between two log lines
+        i = tcp_stats(self.usock)
+        self.w_max_rtt = max(self.w_max_rtt, i.get('rtt', 0)); self.w_max_rto = max(self.w_max_rto, i.get('rto', 0))
+        self.w_max_backoff = max(self.w_max_backoff, i.get('backoff', 0)); self.w_max_unacked = max(self.w_max_unacked, i.get('unacked', 0))
+        self.all_max_rtt = max(self.all_max_rtt, self.w_max_rtt); self.all_max_backoff = max(self.all_max_backoff, self.w_max_backoff)
+        try: self.w_max_buf = max(self.w_max_buf, uw.transport.get_write_buffer_size())
+        except Exception: pass
+        # the open pause right now counts too (Relic silent for a while and still silent)
+        if self.last_rx is not None: self.w_rx_gap = max(self.w_rx_gap, time.monotonic() - self.last_rx)
+
+    def snap(self):                                    # TCP_INFO before our side closes the socket (it is gone after)
+        self.final_tcp = tcp_stats(self.usock) or self.final_tcp
+
+    def line(self, ev):
+        now = time.monotonic(); win = ev == 'bridge_stats'
+        k = dict(ev=ev, peer=self.p.addr, dest=self.dest, to=self.to, secs=round(now - self.t0),
+                 up_bytes=self.up, down_bytes=self.down, up_msgs=self.up_n, down_msgs=self.down_n,
+                 tcp=tcp_stats(self.usock) or self.final_tcp)
+        if win:
+            k.update(win_up=self.w_up, win_down=self.w_down, max_rx_gap_ms=round(self.w_rx_gap * 1000), rx_stalls=self.w_rx_stalls,
+                     max_tx_gap_ms=round(self.w_tx_gap * 1000), max_rtt=self.w_max_rtt, max_rto=self.w_max_rto,
+                     max_backoff=self.w_max_backoff, max_unacked=self.w_max_unacked, max_buf=self.w_max_buf)
+        else:
+            k.update(closed_by=self.closed_by, max_rx_gap_ms=round(self.all_rx_gap * 1000), rx_stalls=self.all_rx_stalls,
+                     max_tx_gap_ms=round(self.all_tx_gap * 1000), max_rtt=self.all_max_rtt, max_backoff=self.all_max_backoff,
+                     since_rx_ms=round((now - self.last_rx) * 1000) if self.last_rx is not None else None)
+        log(**k)
+        if win: self.new_window()
+
+
 async def pass_on(q, w, p, dest, held, answered, pre=b''):
     """pass this peer on (to our other server or to the Relic relay its game wanted): what it sent so far, then both
     ways as they are"""
@@ -206,32 +284,50 @@ async def pass_on(q, w, p, dest, held, answered, pre=b''):
         ur, uw = await asyncio.wait_for(asyncio.open_connection(*dest), 10)
     except Exception as e:
         log(ev='pass_fail', peer=p.addr, dest=f'{dest[0]}:{dest[1]}', err=repr(e)); return
-    try: uw.get_extra_info('socket').setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    usock = uw.get_extra_info('socket')
+    try: usock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     except Exception: pass
-    log(ev='pass_on', peer=p.addr, dest=f'{dest[0]}:{dest[1]}', to='ours' if pre else ('relic' if held else 'relic_bridge'), held=len(held))
+    to = 'ours' if pre else ('relic' if held else 'relic_bridge')
+    log(ev='pass_on', peer=p.addr, dest=f'{dest[0]}:{dest[1]}', to=to, held=len(held))
+    st = BridgeStats(p, dest, to, usock)
     if pre: uw.write(pre)
-    for m in held: uw.write(len(m).to_bytes(2, 'big') + m)
+    for m in held: uw.write(len(m).to_bytes(2, 'big') + m); st.tx(len(m) + 2)
     await uw.drain()
 
     async def up():                                     # game -> Relic, frame by frame as it came
         try:
             while True:
                 m = await q.get()
-                if m is None: break
-                uw.write(len(m).to_bytes(2, 'big') + m); await uw.drain()
-        except Exception: pass
-        finally: uw.close()
+                if m is None: st.closed_by = st.closed_by or 'game'; break
+                uw.write(len(m).to_bytes(2, 'big') + m); st.tx(len(m) + 2); await uw.drain()
+        except Exception as e: st.closed_by = st.closed_by or f'up:{type(e).__name__}'
+        finally: st.snap(); uw.close()
 
     async def down():                                   # Relic -> game; its echoes of hello/ping we answered already are dropped
         try:
             while True:
                 n = int.from_bytes(await ur.readexactly(2), 'big')
                 m = await ur.readexactly(n) if n else b''
+                st.rx(n + 2)
                 if answered and m in answered: answered.remove(m); continue
                 w.write(n.to_bytes(2, 'big') + m); await w.drain()
+        except asyncio.IncompleteReadError: st.closed_by = st.closed_by or 'relic'
+        except Exception as e: st.closed_by = st.closed_by or f'down:{type(e).__name__}'
+        finally: st.snap(); w.close()
+
+    async def watch():                                  # the TCP state every second, a log line every 30 s
+        n = 0
+        while True:
+            await asyncio.sleep(st.SAMPLE); n += 1
+            st.sample(uw)
+            if n % int(st.EVERY / st.SAMPLE) == 0: st.line('bridge_stats')
+    wt = asyncio.ensure_future(watch())
+    try: await asyncio.gather(up(), down())
+    finally:
+        wt.cancel()
+        try: st.sample(uw)
         except Exception: pass
-        finally: w.close()
-    await asyncio.gather(up(), down())
+        st.line('bridge_end')
 
 
 async def handle(r, w):
