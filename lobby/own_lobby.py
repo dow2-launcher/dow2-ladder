@@ -767,6 +767,9 @@ async def handle(r, w):
                 except Exception as e:
                     STATS['relic_err'] += 1; log('relic %s: %r' % (call, e)); break
                 STATS['relic'] += 1
+                if call == 'advertisement/update' and rbody.startswith(b'[4') and params.get('state') == '0' and params.get('matchtype') == '1':
+                    try: status, rlines, rbody = await reopen(up, first, lines, body, params, raw, ip, sess) or (status, rlines, rbody)
+                    except Exception as e: log('reopen %s: %r' % (params.get('advertisementid'), e))
                 if call.startswith('login/'):
                     rbody = TELEM_RE.sub(rb'\1\2', rbody)
                     rbody = rbody.replace(b'["RL_TELEMSERVICE","1"]', b'["RL_TELEMSERVICE","0"]')
@@ -786,6 +789,32 @@ async def handle(r, w):
         up.close()
         try: w.close()
         except Exception: pass
+
+
+# Continue after a match (03.11.2026, owner: "the game's own Continue - the host presses it and everyone is back in the room"):
+# the host's game puts the room back in the lobby (advertisement/update state=0 visible=1), but Relic keeps a started custom game
+# (matchtype 1) started and answers [4], so the room stays out of the Custom Games list. On that answer only, we tell Relic the
+# room is in the lobby again (advertisement/updateState state=0 with the player's own session) and send his update once more.
+def relic_request(first, lines, body, path, params):
+    method = first.split(' ', 1)[0]; q = urllib.parse.urlencode(params)
+    keep = [h for h in lines if h and h.split(':', 1)[0].strip().lower() not in ('content-length', 'transfer-encoding')]
+    if body:
+        return ('%s %s HTTP/1.1\r\n' % (method, path) + ''.join(h + '\r\n' for h in keep) + 'Content-Length: %d\r\n\r\n' % len(q)).encode('latin-1') + q.encode('latin-1')
+    return ('%s %s?%s HTTP/1.1\r\n' % (method, path, q) + ''.join(h + '\r\n' for h in keep) + '\r\n').encode('latin-1')
+
+
+async def reopen(up, first, lines, body, params, raw, ip, sess):
+    aid = params.get('advertisementid')
+    sp = {'advertisementid': aid, 'state': '0'}
+    if 'sessionID' in params: sp['sessionID'] = params['sessionID']
+    st, rl, rh, rb = await up.request(relic_request(first, lines, body, '/game/advertisement/updateState', sp))
+    trace(ip=ip, pid=sess and sess['pid'], call='advertisement/updateState', p=mask_params(sp), st=st[9:12], own='reopen', a=mask_body('advertisement/updateState', rb))
+    if not rb.startswith(b'[0'):
+        log('room %s back in the lobby (Continue): Relic refused updateState 0 -> %r' % (aid, rb[:40])); return None
+    st, rl, rh, rb = await up.request(raw)
+    log('room %s back in the lobby (Continue): updateState 0 ok, update -> %r' % (aid, rb[:40]))
+    STATS['reopen'] = STATS.get('reopen', 0) + 1
+    return st, rl, rb
 
 
 OWN_HDRS = ['Content-Type: application/json', 'Connection: keep-alive', 'Cache-Control: no-store, no-cache, must-revalidate, max-age=0']
