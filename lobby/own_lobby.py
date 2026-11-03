@@ -20,10 +20,15 @@ Relic's and send those connections here (rts.fintebtc.de:47443). This server:
   NOTE: the game hosts EVERY room with visible=0 and opens it with advertisement/update visible=1 a moment later, so visible=0 at
   host time does not mean "private". The old v1 rule (data/own_rooms.on: every visible=0 host kept here) hid ordinary custom
   games and automatch rooms of OwnLobby players from Relic (02.11.2026 evening: matches m1-m3 cancelled) - it is gone;
+- hot reload (03.11.2026, owner: open rooms must not hold an update back): `systemctl reload dow2-ownlobby` (SIGHUP) puts the new
+  code in place WITHOUT losing anything: the rooms, the sessions and the counters go to the new code through a memfd (memory only -
+  session ids never touch the disk), the listening socket is kept (no refused connections), the process re-executes itself with the
+  same PID. Open game connections are cut once; the game reconnects (its readSession long poll starts again) and finds its session
+  and its room as they were. A file that does not compile is refused before anything is touched;
 - with data/trace.on writes a protocol trace (data/trace.jsonl, 600) with session ids, tickets and keys masked.
 Session ids and Steam tickets pass through memory only. Usage: own_lobby.py   (env LOBBY_DATA, LOBBY_PORT, LOBBY_RELAYS, LADDER_DB)
 """
-import asyncio, json, os, re, socket, sqlite3, ssl, sys, time, urllib.parse
+import asyncio, json, os, re, signal, socket, sqlite3, ssl, sys, time, urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.environ.get('LOBBY_DATA', '/srv/ownlobby/data')
@@ -543,10 +548,68 @@ async def status(r, w):
     w.close()
 
 
+# ---------------- hot reload (see the top) ----------------
+def state_out():
+    rooms = {}
+    for mid, r in ROOMS.items():
+        x = dict(r); x['steams'] = sorted(r.get('steams') or [])
+        x['members'] = {str(k): v for k, v in r['members'].items()}; x['reports'] = {str(k): v for k, v in r['reports'].items()}
+        rooms[str(mid)] = x
+    sess = {k: {kk: vv for kk, vv in v.items() if kk not in ('wake', 'conns')} for k, v in SESSIONS.items()}
+    return json.dumps({'v': 1, 'rooms': rooms, 'sessions': sess, 'stats': STATS, 'relay_up': [[a, b, c] for (a, b), c in RELAY_UP.items()]})
+
+
+def state_in(blob):
+    d = json.loads(blob)
+    for mid, x in d.get('rooms', {}).items():
+        x['steams'] = set(x.get('steams') or [])
+        x['members'] = {int(k): v for k, v in x['members'].items()}; x['reports'] = {int(k): v for k, v in x['reports'].items()}
+        if x.get('order'): x['order'] = [int(q) for q in x['order']]
+        ROOMS[int(mid)] = x
+    for k, v in d.get('sessions', {}).items():
+        v['wake'] = asyncio.Event(); v['conns'] = set()
+        if v.get('pending'): v['wake'].set()
+        SESSIONS[k] = v
+    STATS.update(d.get('stats', {}))
+    for a, b, c in d.get('relay_up', []): RELAY_UP[(a, b)] = c
+    return len(ROOMS), len(SESSIONS)
+
+
+def hot_reload(srv_sock, st_sock):
+    try:                                                                 # the new code must at least compile, or we keep running
+        compile(open(os.path.abspath(__file__), encoding='utf-8').read(), __file__, 'exec')
+    except Exception as e:
+        log('reload refused, the new own_lobby.py does not compile: %r' % e); return
+    fd = os.memfd_create('ownlobby-state', 0)
+    os.write(fd, state_out().encode()); os.lseek(fd, 0, 0)
+    for x in (fd, srv_sock.fileno(), st_sock.fileno()): os.set_inheritable(x, True)
+    os.environ['OWNLOBBY_STATE_FD'] = str(fd)
+    os.environ['OWNLOBBY_LISTEN_FDS'] = '%d,%d' % (srv_sock.fileno(), st_sock.fileno())
+    log('reload: %d room(s), %d session(s) handed over - re-executing' % (len(ROOMS), len(SESSIONS)))
+    os.execv(sys.executable, [sys.executable, '-u', os.path.abspath(__file__)])
+
+
+def inherited():
+    fds = os.environ.pop('OWNLOBBY_LISTEN_FDS', ''); sfd = os.environ.pop('OWNLOBBY_STATE_FD', '')
+    if sfd:
+        try:
+            with os.fdopen(int(sfd), 'rb') as f: n = state_in(f.read())
+            log('reload: %d room(s), %d session(s) taken over' % n)
+        except Exception as e: log('reload: state not taken over: %r' % e)
+    if not fds: return None, None
+    a, b = (int(x) for x in fds.split(','))
+    return socket.socket(fileno=a), socket.socket(fileno=b)
+
+
 async def main():
     os.makedirs(DATA, exist_ok=True)
-    srv = await asyncio.start_server(handle, '0.0.0.0', PORT, ssl=server_ctx(), limit=4 << 20)
-    st = await asyncio.start_server(status, '127.0.0.1', STATUS_PORT)
+    ls, lst = inherited()
+    if ls is None:
+        ls = socket.socket(socket.AF_INET, socket.SOCK_STREAM); ls.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); ls.bind(('0.0.0.0', PORT)); ls.listen(128)
+        lst = socket.socket(socket.AF_INET, socket.SOCK_STREAM); lst.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); lst.bind(('127.0.0.1', STATUS_PORT)); lst.listen(16)
+    srv = await asyncio.start_server(handle, sock=ls, ssl=server_ctx(), limit=4 << 20)
+    st = await asyncio.start_server(status, sock=lst)
+    asyncio.get_running_loop().add_signal_handler(signal.SIGHUP, hot_reload, ls, lst)
     asyncio.ensure_future(relay_prober())
     log('own lobby on :%d (automatch rooms %s, trace %s), relays %s' % (PORT, 'ON' if flag('own_mm.on') else 'off', 'on' if flag('trace.on') else 'off',
                                                                  ', '.join('%s:%d' % x for x in RELAYS)))

@@ -93,16 +93,20 @@ gameserver/"; continue; fi
   done
   pending=$(echo "$pending" | sort -u)
 fi
-# ---- own lobby server (experiment, 02.11.2026): only where it is installed (/srv/ownlobby); its rooms live in memory -
-# restart only when no room of ours is open (else wait for the next run, as the game servers do)
+# ---- own lobby server (experiment, 02.11.2026): only where it is installed (/srv/ownlobby). Since 03.11.2026 open rooms do not hold
+# an update back: `systemctl reload` = hot reload (own_lobby.py re-executes itself and keeps its rooms, sessions and listening socket;
+# a file that does not compile is refused and the old code keeps running). A reload that did not take (the log says so) -> restart
+# only when no room of ours is open.
 if has lobby/ && [ -d /srv/ownlobby/app ]; then
-  rooms=$(curl -s -m 5 http://127.0.0.1:47444/ | python3 -c 'import json,sys
+  install -o root -g root -m 644 lobby/own_lobby.py lobby/relic_ca.pem /srv/ownlobby/app/
+  since=$(date '+%Y-%m-%d %H:%M:%S'); systemctl reload dow2-ownlobby; sleep 3
+  if journalctl -u dow2-ownlobby --since "$since" --no-pager | grep -q "taken over"; then done_parts="$done_parts лобби"
+  else
+    rooms=$(curl -s -m 5 http://127.0.0.1:47444/ | python3 -c 'import json,sys
 try: print(len(json.load(sys.stdin).get("rooms", [])))
 except Exception: print(0)')
-  if [ "${rooms:-0}" -gt 0 ]; then pending="$pending
-lobby/"; else
-    install -o root -g root -m 644 lobby/own_lobby.py lobby/relic_ca.pem /srv/ownlobby/app/
-    systemctl restart dow2-ownlobby && done_parts="$done_parts лобби"
+    if [ "${rooms:-0}" -gt 0 ]; then pending="$pending
+lobby/"; else systemctl restart dow2-ownlobby && done_parts="$done_parts лобби"; fi
   fi
 fi
 # deploy/ (systemd units, notifier) is installed by hand: it changes how the services run
