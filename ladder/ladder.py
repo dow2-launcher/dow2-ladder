@@ -1024,6 +1024,11 @@ try:                                                  # the site's game data: ma
 except Exception:
     _ASSETS = {'maps': {}, 'relic_race_id': {}}
 
+# vanilla 3.19 has no Ordo Malleus and no Tau: its race ids are the same alphabetical racebps list without them (03.11.2026:
+# a vanilla room showed Ordo Malleus players with the Brother-Captain's icon - they were orks; 6 and 7 never come from vanilla,
+# see elite_sure)
+VAN_RACE_ID = {0: 'chaos_marines', 1: 'eldar', 2: 'imperial_guard', 3: 'orks', 4: 'space_marines', 5: 'tyranids'}
+
 def _slot_fields(raw, pid):
     # slotinfo: after a player's Relic profile id (u32) come u32 fields; the 5th is the hero index, the 6th the race id
     # (Relic race id = racebps id: 0 CSM, 1 Eldar, 2 IG, 3 OM, 4 Orks, 5 SM, 6 Tau, 7 Tyranids) - read 02.11.2026 against the badges
@@ -1064,13 +1069,16 @@ def _rooms_once():
             if rid is not None: races.append({'race_id': rid})
             players.append({'name': a.get('alias') or 'Player', 'country': a.get('country') or '', 'team': x.get('teamid'),
                             'host': x.get('profile_id') == m.get('host_profile_id'), 'rating': rating, 'rsrc': src,
-                            'race': rr.get(str(rid), '') if rid is not None else '', 'hero': hero, 'steam': steam or None})
+                            'race': rr.get(str(rid), '') if rid is not None else '', 'hero': hero, 'steam': steam or None, '_rid': rid})
         # which game: Elite for sure (Elite-only races, badges or maps) / vanilla (a vanilla-only map, no Elite marks) /
         # probably Elite (a map both have) / another mod (a map neither has). Relic's public list carries no version field.
         if elite_sure({'mapname': mn, 'slotinfo': m.get('slotinfo', ''), 'matchhistorymember': races}): game, sure = 'elite', True
         elif mn in VAN_MAPS and mn not in ELITE_MAPS and not any('elite' in w for w in b): game, sure = 'vanilla', True
         elif mn in VAN_MAPS or mn in ELITE_MAPS or mn in (_ASSETS.get('maps') or {}): game, sure = 'elite', False
         else: game, sure = 'other', False
+        for p in players:                             # the race by the game's own table (vanilla: no OM / Tau in between)
+            rid = p.pop('_rid')
+            if game == 'vanilla' and rid is not None: p['race'] = VAN_RACE_ID.get(rid, '')
         mi = (_ASSETS.get('maps') or {}).get(mn) or {}
         cap = mi.get('maxplayers') or (int(mn[0]) if mn[:1].isdigit() and mn[1:3] == 'p_' else None)
         out.append({'id': m.get('id'), 'name': (m.get('description') or '')[:64], 'map': mn, 'state': m.get('state'),
