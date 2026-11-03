@@ -1170,7 +1170,7 @@ def mm_hello(steam):  # лёгкий heartbeat от открытого лаун�
         _touch(steam); _reap()
         online = sum(1 for t in PRESENCE.values() if time.time() - t < 60)
         q = _counts()
-        return {'ok': True, 'online': online, 'searching': sum(q.values()),
+        return {'ok': True, 'online': online, 'searching': sum(q.values()), 'queue': q,     # queue per mode: MMFind 0.42's Find a Game info
                 'playing': sum(1 for m in MM_MATCHES.values() if m['lobby'])}
 
 # ---------- native automatch (03.11.2026): the game's OWN Find a Game, served by our lobby server (lobby/own_lobby.py) ----------
@@ -1415,6 +1415,10 @@ NM_API = {'join': nm_join, 'sync': nm_sync, 'room': nm_room, 'joined': nm_joined
 def mm_native(steam, d):
     """MMFind 0.38 asks before Start Searching: will the game's own search be served natively (OwnLobby.dll signed this player in
     on our lobby server, the native automatch is on there)? Yes = MMFind lets the game search by itself and keeps its wishes here"""
+    # peek (MMFind 0.42, owner 03.11.2026: the kind of search shown as soon as Find a Game opens, before Start Searching): the same
+    # answer with nothing changed here - no wishes kept, no old match ended, no "cancelled" note dropped (MMFind still needs that
+    # one to search again after a native match the server called off). MMFind asks so on entering the screen and every 20 s there.
+    peek = bool(d.get('peek'))
     if d.get('mode', '1v1') not in MODES: return {'native': False, 'why': 'mode'}
     try:
         with urllib.request.urlopen(NM_LOBBY + '/nm?steam=' + urllib.parse.quote(steam), timeout=1.5) as f: st = json.load(f)
@@ -1426,6 +1430,7 @@ def mm_native(steam, d):
         if any(p['state'] == 'searching' and not p.get('native') and p['mode'] == mode and (p.get('pool') or '') == pool and p['steam'] != str(steam)
                for p in MM.values()):
             return {'native': False, 'why': 'classic players waiting'}
+    if peek: return {'native': True, 'peek': True}
     with MM_LOCK:
         NM_HINTS[steam] = {'t': time.time(), 'd': d}
         now = time.time()                                # he is about to search: his previous match is over (MMFind's poll must not
