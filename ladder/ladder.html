@@ -84,6 +84,10 @@ select { font: 600 14px Spectral, serif; color: var(--text); background: var(--p
 .room .rp img { width: 18px; height: 18px; object-fit: contain; flex: none; }
 .room .rp .nm { overflow: hidden; text-overflow: ellipsis; } .room .rp.host .nm { color: var(--gold-2, #f0d48f); }
 .room .rp.free { color: #6f6656; font-style: italic; }
+.room .rnd, .hm .rnd { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; flex: none; border: 1px solid #8a6d2a; border-radius: 3px; color: #e9c46a; font: 700 12px/1 Georgia, serif; background: #0e0c09; }
+.hm .rnd { width: 28px; height: 28px; font-size: 16px; }
+.room .robs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 6px; padding-top: 5px; border-top: 1px dashed #2c251b; font-size: 13px; color: var(--dim, #9a8f7a); }
+.room .robs svg { flex: none; } .room .robs .nm { color: var(--bone, #e8dcc4); } .room .rp.cpu .nm { color: #9a8f7a; font-style: italic; }
 .room .rfoot { margin-top: 6px; font-size: 12px; color: var(--dim, #9a8f7a); }
 @media (max-width: 760px) { .rooms-grid { grid-template-columns: 1fr; } .room { grid-template-columns: 64px 1fr; } .room .mmap { width: 64px; height: 64px; } }
 .dbg-tgl { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--gold-2); opacity: .7; cursor: pointer; margin: 2px 0 6px; user-select: none; }
@@ -232,11 +236,11 @@ async function loadStatus() {
 const I18N = {
   ru: { ingame: 'в DoW II', online: 'онлайн', queue: 'в очереди', playing: 'играют', cta: 'Встать в очередь', searching: 'Сейчас ищут', matches: 'Матчи',
         loading: 'Загрузка…', player: 'Игрок', rating: 'Рейтинг', games: 'Игр', maps: 'карт', anyMap: 'любая карта', anyOpp: 'любой соперник',
-        ratingDiff: 'рейтинга', waits: 'ждёт', nobody: 'Никто не ищет. Нажмите «Find a Game» в игре.', rooms: 'Открытые лобби', roomsSub: 'Кастомки, которые сейчас собираются в игре, — тот же список, что в браузере игр (Custom Games). Обновляется раз в 15 секунд.', noRooms: 'Сейчас никто не собирает игру.', pw: 'с паролем', obs: 'наблюдатели', vanilla: 'ваниль', otherMod: 'другой мод', freeSlot: 'свободно', noMatches: 'Сейчас матчей нет.',
+        ratingDiff: 'рейтинга', waits: 'ждёт', nobody: 'Никто не ищет. Нажмите «Find a Game» в игре.', rooms: 'Открытые лобби', roomsSub: 'Кастомки, которые сейчас собираются в игре, — тот же список, что в браузере игр (Custom Games). Обновляется раз в 15 секунд.', noRooms: 'Сейчас никто не собирает игру.', pw: 'с паролем', obs: 'наблюдатели', rnd: 'Случайная раса', cpu: 'Компьютер', vanilla: 'ваниль', otherMod: 'другой мод', freeSlot: 'свободно', noMatches: 'Сейчас матчей нет.',
         hostMap: 'карта на выбор хоста', sec: 'с', min: 'мин', agoNow: 'только что', agoMin: 'мин назад', agoHour: 'ч назад', agoDay: 'дн назад', noPlayers: 'Пока нет игроков с 5+ матчами в этом режиме.', error: 'Ошибка загрузки.',
         note: (n, s) => `${n} игроков · сезон ${s} · рейтинг Glicko-2, минимум 5 матчей`, season: 'сезон',
         st: { creating: 'создаётся', lobby: 'в лобби', playing: 'идёт' },
-        race: { space_marines: 'Космодесант', chaos_space_marines: 'Хаос', eldar: 'Эльдар', imperial_guard: 'Имп. гвардия', ordo_malleus: 'Ордо Маллеус', orks: 'Орки', tau: 'Тау', tyranids: 'Тираниды', necron: 'Некроны' },
+        race: { space_marines: 'Космодесант', chaos_space_marines: 'Хаос', eldar: 'Эльдар', imperial_guard: 'Имп. гвардия', ordo_malleus: 'Ордо Маллеус', orks: 'Орки', tau: 'Тау', tyranids: 'Тираниды', necron: 'Некроны', random: 'Случайная раса' },
         newbie: 'новичок', newT: 'Ещё нет рейтинга: нет игр в ладдере и в Relic', relicT: 'Рейтинг Relic: в ладдере этого сезона в этом режиме игр ещё нет',
         desc: 'Рейтинговая таблица Dawn of War II: Retribution (Elite). Glicko-2, сезоны, 1v1/2v2/3v3.',
         hist: 'История матчей ладдера', hq: 'Ник, карта или лобби', allModes: 'Все режимы', allRaces: 'Все расы', allMaps: 'Все карты', more: 'Показать ещё', dbgLabel: 'Детали (отладка)',
@@ -244,11 +248,11 @@ const I18N = {
         watchers: 'зрители' },
   en: { ingame: 'in DoW II', online: 'online', queue: 'in queue', playing: 'playing', cta: 'Join the queue', searching: 'Searching now', matches: 'Matches',
         loading: 'Loading…', player: 'Player', rating: 'Rating', games: 'Games', maps: 'maps', anyMap: 'any map', anyOpp: 'any opponent',
-        ratingDiff: 'rating', waits: 'waiting', nobody: 'Nobody is searching. Press “Find a Game” in the game.', rooms: 'Open lobbies', roomsSub: 'Custom games being set up in the game right now - the same list as the game browser (Custom Games). Refreshed every 15 seconds.', noRooms: 'Nobody is setting up a game right now.', pw: 'password', obs: 'observers', vanilla: 'vanilla', otherMod: 'other mod', freeSlot: 'open', noMatches: 'No matches right now.',
+        ratingDiff: 'rating', waits: 'waiting', nobody: 'Nobody is searching. Press “Find a Game” in the game.', rooms: 'Open lobbies', roomsSub: 'Custom games being set up in the game right now - the same list as the game browser (Custom Games). Refreshed every 15 seconds.', noRooms: 'Nobody is setting up a game right now.', pw: 'password', obs: 'observers', rnd: 'Random race', cpu: 'Computer', vanilla: 'vanilla', otherMod: 'other mod', freeSlot: 'open', noMatches: 'No matches right now.',
         hostMap: 'map picked by the host', sec: 's', min: 'min', agoNow: 'just now', agoMin: 'min ago', agoHour: 'h ago', agoDay: 'd ago', noPlayers: 'No players with 5+ games in this mode yet.', error: 'Loading error.',
         note: (n, s) => `${n} players · season ${s} · Glicko-2 rating, at least 5 games`, season: 'season',
         st: { creating: 'being created', lobby: 'in lobby', playing: 'in progress' },
-        race: { space_marines: 'Space Marines', chaos_space_marines: 'Chaos', eldar: 'Eldar', imperial_guard: 'Imperial Guard', ordo_malleus: 'Ordo Malleus', orks: 'Orks', tau: 'Tau', tyranids: 'Tyranids', necron: 'Necrons' },
+        race: { space_marines: 'Space Marines', chaos_space_marines: 'Chaos', eldar: 'Eldar', imperial_guard: 'Imperial Guard', ordo_malleus: 'Ordo Malleus', orks: 'Orks', tau: 'Tau', tyranids: 'Tyranids', necron: 'Necrons', random: 'Random race' },
         newbie: 'new', newT: 'No rating yet: no ladder or Relic games', relicT: 'Relic rating: no ladder games this season in this mode yet',
         desc: 'Dawn of War II: Retribution (Elite) ladder. Glicko-2 rating, seasons, 1v1/2v2/3v3.',
         hist: 'Ladder match history', hq: 'Player, map or lobby', allModes: 'All modes', allRaces: 'All races', allMaps: 'All maps', more: 'Show more', dbgLabel: 'Details (debug)',
@@ -319,20 +323,26 @@ function roomCard(r) {
     : r.game === 'vanilla' ? `<span class="tag van">${T('vanilla')}${ver}${r.sure === false ? '?' : ''}</span>`
     : r.game === 'other' ? `<span class="tag oth">${r.mod ? esc(r.mod) + ver : T('otherMod')}</span>` : '';
   const cap = r.cap || (((r.map || '').match(/^(\d)p_/) || [])[1] | 0) || r.max || 0;
-  const pl = p => `<div class="rp${p.host ? ' host' : ''}" title="${esc((p.race ? RACE[p.race === 't_tau' ? 'tau' : p.race === 'chaos_marines' ? 'chaos_space_marines' : p.race] || p.race : '') + (p.host ? ' · host' : ''))}">`
-    + (p.race ? `<img src="${R_ASSETS}${p.hero != null ? 'heroes/' + p.race + '_' + p.hero : 'races/' + p.race}.png" alt="" onerror="this.src='${R_ASSETS}races/${p.race}.png'">` : '')
-    + `<span>${roomFlag(p.country)}</span><span class="nm">${esc(p.name)}</span>${p.rating ? ' <span class="rt">' + p.rating + '</span>' : ''}</div>`;
+  const RND = `<span class="rnd" title="${esc(T('rnd'))}">?</span>`;
+  const icon = p => p.race ? `<img src="${R_ASSETS}${p.hero != null ? 'heroes/' + p.race + '_' + p.hero : 'races/' + p.race}.png" alt="" onerror="this.onerror=null;this.src='${R_ASSETS}races/${p.race}.png'">` : (p.random ? RND : '');
+  const rn = p => p.race ? RACE[p.race === 't_tau' ? 'tau' : p.race === 'chaos_marines' ? 'chaos_space_marines' : p.race] || p.race : (p.random ? T('rnd') : '');
+  const pl = p => `<div class="rp${p.host ? ' host' : ''}" title="${esc(rn(p) + (p.host ? ' · host' : ''))}">`
+    + icon(p) + `<span>${roomFlag(p.country)}</span><span class="nm">${esc(p.name)}</span>${p.rating ? ' <span class="rt">' + p.rating + '</span>' : ''}</div>`;
+  const cpu = c => `<div class="rp cpu" title="${esc(rn(c))}">${icon(c)}<span class="nm">${esc(T('cpu'))}</span></div>`;
+  // r.players[].observer (03.11.2026): the player sits in an observer slot of the lobby; team = the column (FFA: the half of the map's slots)
   const per = cap ? Math.max(1, Math.round(cap / 2)) : 0;
+  const play = (r.players || []).filter(p => !p.observer), obs = (r.players || []).filter(p => p.observer);
   const teams = [0, 1].map(t => {
-    const ps = (r.players || []).filter(p => (p.team | 0) === t);
-    const free = per ? Math.max(0, per - ps.length) : 0;
-    return `<div class="team">${ps.map(pl).join('')}${Array(free).fill(`<div class="rp free">${esc(T('freeSlot'))}</div>`).join('')}</div>`;
+    const ps = play.filter(p => (p.team | 0) === t || (t === 1 && (p.team | 0) > 1)), cs = (r.ai || []).filter(c => (c.team | 0) === t || (t === 1 && (c.team | 0) > 1));
+    const free = per ? Math.max(0, per - ps.length - cs.length) : 0;
+    return `<div class="team">${ps.map(pl).join('')}${cs.map(cpu).join('')}${Array(free).fill(`<div class="rp free">${esc(T('freeSlot'))}</div>`).join('')}</div>`;
   }).join('');
-  const others = (r.players || []).filter(p => (p.team | 0) > 1);
+  const EYE = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 5C6.5 5 2.7 9.2 1.5 12c1.2 2.8 5 7 10.5 7s9.3-4.2 10.5-7C21.3 9.2 17.5 5 12 5zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9zm0-7a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/></svg>';
+  const obsRow = obs.length ? `<div class="robs" title="${esc(T('obs'))}">${EYE}${obs.map(p => `<span>${roomFlag(p.country)}</span><span class="nm">${esc(p.name)}</span>`).join(' · ')}</div>` : '';
   return `<div class="room"><div class="mmap" style="${r.minimap ? `background-image:url('${R_ASSETS}${esc(r.minimap)}')` : ''}"></div><div style="min-width:0">
     <div class="rh">${r.mode ? `<span class="tag">${esc(r.mode)}</span>` : ''}${gameTag}${r.password ? '<span class="tag">🔒</span>' : ''}<span class="rn">${esc(r.name || '—')}</span></div>
-    <div class="rmap">${esc(r.map_title || '') || mapName(r.map)}${cap ? ' · ' + (r.players || []).length + '/' + cap : ''}</div>
-    <div class="teams">${teams}</div>${others.length ? '<div>' + others.map(pl).join('') + '</div>' : ''}
+    <div class="rmap">${esc(r.map_title || '') || mapName(r.map)}${cap ? ' · ' + (play.length + (r.ai || []).length) + '/' + cap : ''}</div>
+    <div class="teams">${teams}</div>${obsRow}
     <div class="rfoot">${r.observers ? T('obs') + ': ' + r.observers + ' · ' : ''}${r.password ? T('pw') : ''}</div></div></div>`;
 }
 async function loadRooms() {
@@ -410,6 +420,7 @@ function mapKey(m) {                 // у решённых — уже ключ 
 }
 function mapTitle(k) { const m = ASSETS.maps[k]; return m && m.name ? esc(m.name) : mapName(k); }
 function heroImg(p) {
+  if (p.race === 'random') return `<span class="rnd" title="${esc(T('rnd'))}">?</span>`;   // Random and the played race not known (yet)
   const r = ASSETS.races[p.race]; if (!r) return '';
   const h = p.hero != null && r.heroes && r.heroes[p.hero];
   const ri = `<img class="rc" src="${A + r.icon}" alt="" title="${esc(raceName(p.race))}">`;

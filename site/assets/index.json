@@ -641,6 +641,34 @@
    "minimap": "maps/6p_fen_dunloch_redux.png",
    "minimap_plain": "maps_plain/6p_fen_dunloch_redux.png"
   },
+  "6p_ffa_ashesoftyphon": {
+   "name": "(FFA) Ashes of Typhon",
+   "maxplayers": 6,
+   "minimap": "maps/6p_ffa_ashesoftyphon.png",
+   "minimap_plain": "maps_plain/6p_ffa_ashesoftyphon.png",
+   "ffa": true
+  },
+  "6p_ffa_calderisrefinery": {
+   "name": "(FFA) Calderis Refinery",
+   "maxplayers": 6,
+   "minimap": "maps/6p_ffa_calderisrefinery.png",
+   "minimap_plain": "maps_plain/6p_ffa_calderisrefinery.png",
+   "ffa": true
+  },
+  "6p_ffa_judgmentofcarrion": {
+   "name": "(FFA) Judgment of Carrion",
+   "maxplayers": 6,
+   "minimap": "maps/6p_ffa_judgmentofcarrion.png",
+   "minimap_plain": "maps_plain/6p_ffa_judgmentofcarrion.png",
+   "ffa": true
+  },
+  "6p_ffa_whitewallsofcalderis": {
+   "name": "(FFA) White Walls of Calderis",
+   "maxplayers": 6,
+   "minimap": "maps/6p_ffa_whitewallsofcalderis.png",
+   "minimap_plain": "maps_plain/6p_ffa_whitewallsofcalderis.png",
+   "ffa": true
+  },
   "6p_fortuna_sanctum": {
    "name": "(6p) Fortuna Sanctum",
    "maxplayers": 6,
@@ -791,6 +819,20 @@
    "minimap": "maps/6p_wrathofbaal.png",
    "minimap_plain": "maps_plain/6p_wrathofbaal.png"
   },
+  "ffa_doom_of_tularis": {
+   "name": "(FFA) Doom of Tularis",
+   "maxplayers": 6,
+   "minimap": "maps/ffa_doom_of_tularis.png",
+   "minimap_plain": "maps_plain/ffa_doom_of_tularis.png",
+   "ffa": true
+  },
+  "ffa_siege_of_vraks": {
+   "name": "(FFA) Siege of Vraks",
+   "maxplayers": 6,
+   "minimap": "maps/ffa_siege_of_vraks.png",
+   "minimap_plain": "maps_plain/ffa_siege_of_vraks.png",
+   "ffa": true
+  },
   "jarilosforge": {
    "name": "(2p) Jarilo's Forge",
    "maxplayers": 2,
@@ -812,6 +854,7 @@
   "race_key": "replay race string == racebps file name (simulation/attrib/racebps/<key>.rbf)",
   "hero_index": "replay hero index == position in racebps hero_list (Elite_Attrib.sga)",
   "minimap": "lobby/front-end preview (<map>_fe.dds) with start positions and points; minimap_plain = in-game minimap (_mm/_map.dds)",
-  "relic_race_id": "equals racebps race_id (verified earlier against Relic match history: 0 CSM,1 Eldar,2 IG,3 OM,4 Orks,5 SM,6 Tau,7 Tyranids)"
+  "relic_race_id": "equals racebps race_id (verified earlier against Relic match history: 0 CSM,1 Eldar,2 IG,3 OM,4 Orks,5 SM,6 Tau,7 Tyranids)",
+  "ffa": "maps/freeforall/ (vanilla 6p_ffa_*, Elite ffa_*): the same files as maps/pvp/, ffa = true (03.11.2026)"
  }
 }

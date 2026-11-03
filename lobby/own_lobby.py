@@ -348,8 +348,15 @@ def to_ladder(r):
         except Exception: ids = []
         for i, q in enumerate(ids):
             if i < len(res): outcome.setdefault(int(q), res[i])
+    # the race each one PLAYED: the game's own report (race_ids in the order of profile_ids); the lobby slot has 255 for Random or
+    # the race shown before the roll (03.11.2026: Random -> Tau was stored as Imperial Guard)
+    played = {}
+    try:
+        for q, rc in zip(json.loads(rep.get('profile_ids') or '[]'), json.loads(rep.get('race_ids') or '[]')):
+            if 0 <= int(rc) < 16: played[int(q)] = int(rc)
+    except Exception: played = {}
     start = int(r['started'] or r['created']); end = int(time.time())
-    members = [{'profile_id': pid, 'race_id': m.get('race', -1), 'teamid': m.get('team', 0), 'statgroup_id': m.get('sg', 0),
+    members = [{'profile_id': pid, 'race_id': played.get(pid, m.get('race', -1)), 'teamid': m.get('team', 0), 'statgroup_id': m.get('sg', 0),
                 'outcome': outcome.get(pid, -1)} for pid, m in r['members'].items()]
     p = r['params']
     m = {'id': r['mid'], 'source': 'ownlobby', 'mapname': p.get('mapname', ''), 'description': p.get('description', ''),

@@ -965,6 +965,25 @@ def _history_resolver():
 
 RACE_KEYS = ['chaos_marines', 'eldar', 'imperial_guard', 'ordo_malleus', 'orks', 'space_marines', 't_tau', 'tyranids', 'z_unecron']   # как в игре и в реплеях
 RACE_ALIAS = {'chaos_space_marines': 'chaos_marines', 'tau': 't_tau', 'necron': 'z_unecron'}                                     # так их шлёт MMFind
+_OWN_RACES = {}
+def _own_races(own_id):
+    # a match of our own lobby: the race (key) each player PLAYED is in the game's own report (report.race_ids, same order as
+    # report.profile_ids); the members' race_id is the lobby slot's (255 = Random, or the race shown before a Random roll) -
+    # 03.11.2026 TvangeS: Нежданчег rolled Tau on Random, the history said Imperial Guard (slot 2, report 6, the replay Tau)
+    if own_id in _OWN_RACES: return _OWN_RACES[own_id]
+    out = {}
+    try:
+        with db() as c: row = c.execute('SELECT data FROM matches WHERE id = ?', (int(own_id),)).fetchone()
+        m = json.loads(row[0]) if row else {}
+        rep = m.get('report') or {}
+        ids, rcs = json.loads(rep.get('profile_ids') or '[]'), json.loads(rep.get('race_ids') or '[]')
+        keys = VAN_RACE_ID if str(m.get('modname') or '').lower() == 'dow2' else dict(enumerate(RACE_KEYS))   # vanilla: its own ids
+        out = {int(pid): keys[int(rc)] for pid, rc in zip(ids, rcs) if int(rc) in keys}
+    except Exception:
+        out = {}
+    if out: _OWN_RACES[own_id] = out
+    return out
+
 def history(q='', mode='', mapk='', race='', page=0, n=30, off=None):
     """Сыгранные через ладдер матчи, новые сверху; фильтры: текст (ник/карта/лобби), режим, карта, раса."""
     with db() as c:
@@ -975,10 +994,13 @@ def history(q='', mode='', mapk='', race='', page=0, n=30, off=None):
         mapk_ = ((res or {}).get('mapname') or mp or '').lower()
         if res:                                    # Relic знает точно: раса, герой, победа
             by = {r['pid']: r for r in res['players']}
+            played = _own_races(res['own_id']) if res.get('own_id') else {}
             for p in pl:
                 r = by.get(p.get('pid'))
                 if r:
-                    if r.get('race') is not None and 0 <= r['race'] < len(RACE_KEYS): p['race'] = RACE_KEYS[r['race']]
+                    rc = r.get('race')
+                    if p.get('pid') in played: p['race'] = played[p['pid']]
+                    elif rc is not None and 0 <= rc < len(RACE_KEYS): p['race'] = RACE_KEYS[rc]
                     if r.get('hero') is not None: p['hero'] = r['hero']
                     p['win'] = r.get('result') == 1; p['stats'] = r.get('stats')
         for p in pl:
@@ -1029,16 +1051,34 @@ except Exception:
 # see elite_sure)
 VAN_RACE_ID = {0: 'chaos_marines', 1: 'eldar', 2: 'imperial_guard', 3: 'orks', 4: 'space_marines', 5: 'tyranids'}
 
-def _slot_fields(raw, pid):
-    # slotinfo: after a player's Relic profile id (u32) come u32 fields; the 5th is the hero index, the 6th the race id
-    # (Relic race id = racebps id: 0 CSM, 1 Eldar, 2 IG, 3 OM, 4 Orks, 5 SM, 6 Tau, 7 Tyranids) - read 02.11.2026 against the badges
-    try:
-        i = raw.find(struct.pack('<I', pid))
-        if i < 0: return None, None
-        v = struct.unpack_from('<6I', raw, i + 4)
-        return (v[5] if v[5] < 16 else None), (v[4] if v[4] < 8 else None)
-    except Exception:
-        return None, None
+def _slot_head_at(raw, p):
+    # a slot record starts with: profile id, 3 ints (-1 -1 -1 when empty / 0 join-order 0), team, hero, race, a byte, -1
+    if p < 0 or p + 43 > len(raw) or raw[p + 29:p + 33] != b'\xff\xff\xff\xff': return False
+    pid, a, b, c, team, hero, race = struct.unpack_from('<7i', raw, p)
+    if not (0 <= team < 16 and (0 <= hero < 8 or hero == 255) and (0 <= race < 16 or race == 255)): return False
+    return (pid == -1 and a == b == c == -1) or (pid > 0 and a == 0 and 0 < b < 256 and c == 0)
+
+def _slots(raw):
+    # slotinfo (zlib) = u32 12, u16 number of slots (8; automatch 2/6), then per slot - read 03.11.2026 against 10.4k Relic match
+    # histories (all members found, team and race as Relic has them; random = 255): i32 profile id (-1 empty / computer), i32 0,
+    # i32 join order (1 = host), i32 0, i32 team, i32 hero, i32 race (Relic race id; 255 = random / none), u8, i32 -1, 10 bytes
+    # (byte 7: 0 player, 1 open, 2 computer, 5 closed); a player or computer then has his army (u32 n + UTF-16 name, 4 bytes,
+    # u32 n + badge path) and a tail of variable length (automatch adds more): the next slot is found by its head.
+    # Slot index = place in the lobby: 0..3 the first team, 4..7 the second; a map for n per team plays slots 0..n-1 and 4..4+n-1,
+    # the others are the OBSERVER slots (MMFind reverse 26.10.2026; the host opens them after a map change). FFA maps: every slot
+    # its own team (0..7), slots 0..cap-1 play, the rest observe.
+    if len(raw) < 6: return []
+    n = struct.unpack_from('<H', raw, 4)[0]; off = 6; out = []
+    for k in range(min(n, 16)):
+        if not _slot_head_at(raw, off): break
+        pid, _a, _b, _c, team, hero, race = struct.unpack_from('<7i', raw, off)
+        out.append({'i': k, 'pid': pid if pid != -1 else None, 'team': team, 'hero': hero, 'race': race, 'kind': raw[off + 40]})
+        off += 43
+        if k == n - 1: break
+        if not _slot_head_at(raw, off):               # a player's / computer's army and tail (a computer may have none)
+            off = next((q for q in range(off, min(len(raw) - 42, off + 600)) if _slot_head_at(raw, q)), None)
+            if off is None: break
+    return out
 
 def _room_rating(steam):
     hit = _ROOM_RATING.get(steam)
@@ -1084,16 +1124,43 @@ def _rooms_once():
         mn = (m.get('mapname') or '').lower()
         try: raw = zlib.decompress(base64.b64decode(m.get('slotinfo', '')))
         except Exception: raw = b''
-        players, races = [], []
+        sl = _slots(raw); by_pid = {q['pid']: q for q in sl if q['pid']}
+        mi = (_ASSETS.get('maps') or {}).get(mn) or {}
+        cap = mi.get('maxplayers') or (int(mn[0]) if mn[:1].isdigit() and mn[1:3] == 'p_' else None) \
+            or (8 if mn.startswith('ffa8_') else None)
+        # FFA (03.11.2026, noofancy: an FFA room was called 3v3): an FFA map, or the slots' teams are not the two halves
+        ffa = bool(mi.get('ffa')) or 'ffa' in mn.split('_') or mn.startswith('ffa') or len({q['team'] for q in sl}) > 2
+        half = max(1, (struct.unpack_from('<H', raw, 4)[0] if len(raw) >= 6 else len(sl)) // 2)   # slots per half (8 -> 4)
+        def observer_slot(q):
+            # the lobby's observer slots (see _slots): FFA - past the map's size; teams - past n in each half
+            if not cap or not sl: return False
+            return q['i'] >= cap if ffa else (q['i'] % half) >= max(1, cap // 2)
+        players, races, ai = [], [], []
         for x in m.get('matchmembers') or []:
             a = av.get(x.get('profile_id')) or {}
             steam = (a.get('name') or '').rsplit('/', 1)[-1] if (a.get('name') or '').startswith('/steam/') else ''
             rating, src = _room_rating(steam) if steam else (None, 'new')
-            rid, hero = _slot_fields(raw, x.get('profile_id') or 0)
+            q = by_pid.get(x.get('profile_id') or 0)
+            # the slot is the truth: Relic's matchmembers.teamid is the team at the join (stale after a move: 03.11.2026 a host in
+            # the observer slot 7 was still team 0 there); race 255 in a slot = Random (or nothing picked yet), hero 255 = none
+            rid = q['race'] if q and q['race'] < 16 else None
+            hero = q['hero'] if q and q['hero'] < 8 else None
             if rid is not None: races.append({'race_id': rid})
-            players.append({'name': a.get('alias') or 'Player', 'country': a.get('country') or '', 'team': x.get('teamid'),
-                            'host': x.get('profile_id') == m.get('host_profile_id'), 'rating': rating, 'rsrc': src,
-                            'race': rr.get(str(rid), '') if rid is not None else '', 'hero': hero, 'steam': steam or None, '_rid': rid})
+            obs = bool(q and observer_slot(q))
+            team = (q['team'] if q else x.get('teamid'))
+            pl = {'name': a.get('alias') or 'Player', 'country': a.get('country') or '', 'team': team,
+                  'host': x.get('profile_id') == m.get('host_profile_id'), 'rating': rating, 'rsrc': src,
+                  'race': rr.get(str(rid), '') if rid is not None and not obs else '', 'hero': hero if not obs else None,
+                  'random': bool(q and q['race'] == 255 and not obs), 'observer': obs, 'slot': q['i'] if q else None,
+                  'steam': steam or None, '_rid': rid}
+            if ffa and q and not obs:                 # FFA: the real team in ffa_team; team = the column (left / right half of the
+                pl['ffa_team'] = q['team']            # map's slots) so a list of two columns (launcher 1.4.7) shows every player
+                pl['team'] = 0 if q['i'] < max(1, (cap or len(sl)) // 2 + (cap or len(sl)) % 2) else 1
+            players.append(pl)
+        for q in sl:                                  # computer players (not in matchmembers): they take a slot too
+            if q['pid'] is None and q['kind'] == 2 and not observer_slot(q):
+                ai.append({'slot': q['i'], 'team': (0 if q['i'] < max(1, (cap or len(sl)) // 2 + (cap or len(sl)) % 2) else 1) if ffa else q['team'],
+                           'race_id': q['race'] if q['race'] < 16 else None, 'hero': q['hero'] if q['hero'] < 8 else None})
         # which game: Elite for sure (Elite-only races, badges or maps) / vanilla (a vanilla-only map, no Elite marks) /
         # probably Elite (a map both have) / another mod (a map neither has). Relic's public list carries no version field -
         # but Relic's own filtered query does: when relic_scan saw this room listed for vanilla 3.19 or Elite 3.2, that query's mod
@@ -1110,15 +1177,24 @@ def _rooms_once():
         else: game, sure = 'other', False
         for p in players:                             # the race by the game's own table (vanilla: no OM / Tau in between)
             rid = p.pop('_rid')
-            if game == 'vanilla' and rid is not None: p['race'] = VAN_RACE_ID.get(rid, '')
-        mi = (_ASSETS.get('maps') or {}).get(mn) or {}
-        cap = mi.get('maxplayers') or (int(mn[0]) if mn[:1].isdigit() and mn[1:3] == 'p_' else None)
+            if game == 'vanilla' and rid is not None and p['race']: p['race'] = VAN_RACE_ID.get(rid, '')
+        for c in ai:
+            rid = c.pop('race_id')
+            c['race'] = (VAN_RACE_ID.get(rid, '') if game == 'vanilla' else rr.get(str(rid), '')) if rid is not None else ''
+        # the mode: FFA by the teams of the map's slots (each its own = ffa, else 2v2v2 / 3v3 ...), else by the map's size
+        mode = {2: '1v1', 4: '2v2', 6: '3v3', 8: '4v4'}.get(cap, '') if cap else ''
+        if ffa:
+            tm = {}
+            for q in (sl[:cap] if cap else [q for q in sl if q['pid'] or q['kind'] == 2]): tm[q['team']] = tm.get(q['team'], 0) + 1
+            sizes = sorted(tm.values(), reverse=True)
+            mode = 'ffa' if not sizes or max(sizes) == 1 else 'v'.join(str(v) for v in sizes)
+        players.sort(key=lambda p: (p['slot'] is None, p['slot'] or 0))   # the lobby's order: by slot
+        playing = [p for p in players if not p['observer']]
         out.append({'id': m.get('id'), 'name': (m.get('description') or '')[:64], 'map': mn, 'state': m.get('state'),
                     'map_title': re.sub(r'^\(\d+p\)\s*', '', mi.get('name') or '') or mn.split('_', 1)[-1].replace('_', ' '),
-                    'minimap': mi.get('minimap') or '', 'cap': cap,
-                    'mode': {2: '1v1', 4: '2v2', 6: '3v3', 8: '4v4'}.get(cap, '') if cap else '',
-                    'password': bool(m.get('passwordprotected')), 'max': m.get('maxplayers'), 'players': players,
-                    'free': max(0, cap - len(players)) if cap else None,
+                    'minimap': mi.get('minimap') or '', 'cap': cap, 'mode': mode, 'ffa': ffa,
+                    'password': bool(m.get('passwordprotected')), 'max': m.get('maxplayers'), 'players': players, 'ai': ai,
+                    'free': max(0, cap - len(playing) - len(ai)) if cap else None,
                     'observers': m.get('observernum') or 0, 'observers_max': m.get('observermax') or 0,
                     'game': game, 'sure': sure, 'region': m.get('relayserver_region') or '',
                     'version': version, 'mod': mod, 'exact': exact})
