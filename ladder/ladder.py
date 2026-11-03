@@ -1260,10 +1260,33 @@ def nm_join(d):
         _try_match(mode); _assign_watchers()
         return _nm_view(MM[steam])
 
+NM_DIVERT_AFTER = int(os.environ.get('NM_DIVERT_AFTER', '4'))   # s a classic searcher waits before native searchers are sent to him
+def _nm_divert(now):  # under MM_LOCK
+    # release gate 03.11.2026 (stands): classic searches (MMFind's 0.37 flow: OwnLobby off, or not signed in on our lobby server) and
+    # native ones never share a pool - a player with OwnLobby off waited alone while everybody else searched natively. Now, while a
+    # classic player waits in a group|game|mode, the native searches that MMFind runs there (fresh mm/native hint, no party, not
+    # matched yet) are called off with 'again': MMFind searches again at once, mm/native answers "classic" (see mm_native) and they
+    # meet in the classic pool. Native searchers without MMFind (no hint) are left alone - nobody would search again for them.
+    classic = set()
+    for p in MM.values():
+        if p['state'] == 'searching' and not p.get('native') and p['mode'] in MODES and now - p['ts'] >= NM_DIVERT_AFTER:
+            classic.add((p.get('pool') or '', p['mode']))
+    if not classic: return
+    for s, p in list(MM.items()):
+        if p['state'] != 'searching' or not p.get('native') or p.get('party') or p.get('party_of'): continue
+        h = NM_HINTS.get(s)
+        if not h or now - h['t'] > 900: continue
+        g = p.get('game') or ''                          # native: 'elite-3.2' (mod + version); classic (MMFind): 'elite' / 'vanilla'
+        key = ('%s|%s' % (p.get('group') or '', 'elite' if g.startswith('elite') else g), p['mode'])
+        if key not in classic: continue
+        MM.pop(s, None)
+        MM_CANCELLED[s] = {'by': 'classic players waiting', 'match': 'classic-%s-%d' % (s[-6:], int(now)), 't': now, 'again': True, 'native': True}
+        print('mm: native search of %s called off - a classic player waits in %s (MMFind searches again, classic)' % (s, key), flush=True)
+
 def nm_sync(d):
     now = time.time(); out = {}
     with MM_LOCK:
-        _reap(); _nm_timeouts(now)
+        _reap(); _nm_timeouts(now); _nm_divert(now)
         for steam in [str(s) for s in (d.get('steams') or [])][:500]:
             p = MM.get(steam)
             if p and p.get('native'):
@@ -1337,6 +1360,11 @@ def mm_native(steam, d):
     except Exception: return {'native': False, 'why': 'lobby server unreachable'}
     if not st.get('native'): return {'native': False, 'why': 'native automatch off'}
     if not st.get('here'): return {'native': False, 'why': 'not signed in through our lobby server'}
+    pool, mode = '%s|%s' % (_clean(d.get('group'), 24) or '', _game(d)), d.get('mode', '1v1')
+    with MM_LOCK:                                        # a classic player waits where he would search: the classic flow, to meet him
+        if any(p['state'] == 'searching' and not p.get('native') and p['mode'] == mode and (p.get('pool') or '') == pool and p['steam'] != str(steam)
+               for p in MM.values()):
+            return {'native': False, 'why': 'classic players waiting'}
     with MM_LOCK:
         NM_HINTS[steam] = {'t': time.time(), 'd': d}
         now = time.time()                                # he is about to search: his previous match is over (MMFind's poll must not
