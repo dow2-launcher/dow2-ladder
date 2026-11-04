@@ -69,7 +69,7 @@ footer { padding: 30px 0 50px; color: var(--muted); font-size: 15px; text-align:
 <header class="hero"><div class="wrap">
   <div class="kicker" data-i="kick">Elite Lab</div>
   <h1 data-i="h1">Experiments</h1>
-  <p class="lead" data-i="lead">Add-ons and tools we are testing with the community. Easiest way: install the launcher and tick them in “Add-ons” — they update themselves and are all off until you turn them on. For vanilla DoW2 without the launcher there are packages below.</p>
+  <p class="lead" data-i="lead">Add-ons and tools we are testing with the community. Easiest way: install the launcher and tick them in “Add-ons” — they update themselves; the automatch and our game servers are on by default, the rest is off until you turn it on. For vanilla DoW2 without the launcher there are packages below.</p>
   <div class="jump"><a class="btn" href="#elite" data-i="j_elite">Elite (launcher) ↓</a><a class="btn main" href="#vanilla" data-i="j_van">Vanilla DoW2 ↓</a></div>
   <div class="warn" data-i="warn">These are prototypes made by a community member, not by the Elite team. Use them at your own risk. If the game crashes, press “Send logs” in the launcher before starting the game again.</div>
 </div></header>
@@ -119,12 +119,12 @@ footer { padding: 30px 0 50px; color: var(--muted); font-size: 15px; text-align:
       <small><span data-i="cat_interface">Interface</span></small>
     </div>
     <div class="card">
-      <h3><span data-i="a_obsfix_r2_h">Observer lag fix (experimental)</span> <span class="ver">obsfix-1</span> <span class="badge b-ok" data-i="b_ok">works</span></h3>
+      <h3><span data-i="a_obsfix_r2_h">Observer lag fix</span> <span class="ver">obsfix-1</span> <span class="badge b-ok" data-i="b_ok">works</span></h3>
       <p data-i="a_obsfix_r2_p">Spectating a live game no longer rebuilds the whole match info dozens of times per frame. Turn on, spectate, send logs.</p>
       <small><span data-i="cat_gameplay">Gameplay</span></small>
     </div>
     <div class="card">
-      <h3><span data-i="a_reverse_r2_h">Reverse (test)</span> <span class="ver">reverse-4</span> <span class="badge b-ok" data-i="b_ok">works</span></h3>
+      <h3><span data-i="a_reverse_r2_h">Reverse</span> <span class="ver">reverse-4</span> <span class="badge b-ok" data-i="b_ok">works</span></h3>
       <p data-i="a_reverse_r2_p">Like Company of Heroes: hold Ctrl and right-click behind your units (or on the minimap) - vehicles back off to that point driving backwards, front armour to the enemy, instead of turning around. Works through the game's own orders, nothing changes for the other players.</p>
       <small><span data-i="cat_gameplay">Gameplay</span></small>
     </div>
@@ -316,7 +316,7 @@ footer { padding: 30px 0 50px; color: var(--muted); font-size: 15px; text-align:
 <script>
 var RU = {
   back: "← Elite Launcher", kick: "Elite Lab", h1: "Эксперименты",
-  lead: "Дополнения и инструменты, которые мы проверяем вместе с сообществом. Проще всего — поставить лаунчер и отметить их галочками в «Дополнениях»: они обновляются сами и выключены, пока вы их не включите. Для ванильной DoW2 без лаунчера — пакеты ниже.",
+  lead: "Дополнения и инструменты, которые мы проверяем вместе с сообществом. Проще всего — поставить лаунчер и отметить их галочками в «Дополнениях»: они обновляются сами; автоматч и наши игровые серверы включены по умолчанию, остальное выключено, пока не включите. Для ванильной DoW2 без лаунчера — пакеты ниже.",
   warn: "Это прототипы участника сообщества, не команды Elite. Используйте на свой страх и риск. Если игра вылетела — нажмите «Отправить логи» в лаунчере до следующего запуска игры.",
   h_addons: "В лаунчере (Elite)",
   addons_sub: "Лаунчер → «Дополнения» → отметьте нужные. Каждое дополнение — отдельный файл: выключенное вообще не загружается.",
@@ -330,8 +330,8 @@ var RU = {
   a_matchtimer_r2_h: "Таймер матча", a_matchtimer_r2_p: "Время матча (минуты:секунды игрового времени) в интерфейсе самой игры: сверху под счётчиком очков, под кнопкой Menu или в самой кнопке Menu. В матче без счётчика (аннигиляция) — под кнопкой Menu.",
   a_cooldowns_r2_h: "Секунды перезарядки на кнопках способностей", a_cooldowns_r2_p: "Сколько секунд осталось до готовности способности и глобальной способности — в центре кнопки.",
   a_apm_h: "APM (действий в минуту)", a_apm_p: "Ваши клики и нажатия клавиш в минуту за последнюю минуту матча, в интерфейсе самой игры: сверху рядом с таймером матча или в левом нижнем углу миникарты. Видите только вы, в игру ничего не отправляется.",
-  a_obsfix_r2_h: "Исправление тормозов обсервера (тест)", a_obsfix_r2_p: "Обсервер больше не пересобирает всю информацию о матче десятки раз за кадр. Включи, посмотри игру обсом, отправь логи.",
-  a_reverse_r2_h: "Задний ход (тест)", a_reverse_r2_p: "Как в Company of Heroes: зажмите Ctrl и щёлкните правой кнопкой позади отряда (или по миникарте) — техника отходит туда задом, лобовой бронёй к врагу, а не разворачивается. Работает через обычные приказы игры, для остальных игроков ничего не меняется.",
+  a_obsfix_r2_h: "Исправление тормозов обсервера", a_obsfix_r2_p: "Обсервер больше не пересобирает всю информацию о матче десятки раз за кадр. Включи, посмотри игру обсом, отправь логи.",
+  a_reverse_r2_h: "Задний ход", a_reverse_r2_p: "Как в Company of Heroes: зажмите Ctrl и щёлкните правой кнопкой позади отряда (или по миникарте) — техника отходит туда задом, лобовой бронёй к врагу, а не разворачивается. Работает через обычные приказы игры, для остальных игроков ничего не меняется.",
   a_reinforcefix_h: "Автоподкрепление после врат", a_reinforcefix_p: "Отряд, зашедший во врата Паутины эльдар, выходит с включённым автоподкреплением (игра его сбрасывает). Подкрепление заказывает сама игра обычными приказами — больше ничего не меняется.",
   a_steamkeep_h: "Не вылетать из матча при отвале Steam", a_steamkeep_p: "Когда во время матча у Steam пропадает связь (сбой, обновление серверов Steam, перезапуск Steam), игра выходит из матча и часто закрывается. С этой галочкой матч доигрывается до конца — весь матч, сколько бы Steam ни отсутствовал и сколько бы раз ни отваливался: сама игра идёт через игровой сервер, Steam для неё не нужен. Просьбу Steam закрыть игру до конца матча не выполняем; свои Alt+F4, выход через меню и крестик работают. После матча игра не закрывается, результат и реплей уходят как обычно. Матч через Steam P2P без релея спасти нельзя.",
   a_jumpretry_h: "Прыжок не срывается о препятствия", a_jumpretry_p: "Для аутарха и других прыгунов: если по пути к точке прыжка он сам перескочил препятствие и из-за этого приказ прыжка сорвался, приказ повторяется сразу после приземления (до 3 раз). Повтор — обычный приказ игры, для остальных игроков ничего не меняется; любой ваш новый приказ отряду отменяет повтор.",
