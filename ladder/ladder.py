@@ -642,7 +642,32 @@ def _relays():   # кэш по mtime: правка relays.json применяе�
 def relay_order():   # список IP узлов в порядке приоритета (tie-break в _best_relay); добавление зеркала = правка relays.json
     return _relays()['ips']
 
-def _best_relay(steams):
+RELAY_LINKS_FILE = ROOT + '/data/relay_links.json'   # round trips between our nodes (tools/relay_links.py, by DU PING from each node)
+_LINKS = {'mtime': 0, 'links': {}}
+CHAIN_V = '0.0.0.22'      # Relay.dll 22+ puts this key into its pings: it reaches a node it can't reach itself through its own nearest one
+CHAIN_EXTRA = 10          # ms on top of a chain: the two gateways and the extra pass-on (and a direct node wins a near tie)
+def _relay_links():   # {from ip: {to ip: rtt ms}}, measured from the node that opens the hop; by mtime, the last good one on a bad file
+    try:
+        st = os.stat(RELAY_LINKS_FILE)
+        if st.st_mtime != _LINKS['mtime']:
+            d = json.load(open(RELAY_LINKS_FILE, encoding='utf-8'))
+            _LINKS.update(mtime=st.st_mtime, links={a: {b: float(v) for b, v in (x or {}).items() if float(v) > 0}
+                                                     for a, x in (d.get('links') or {}).items()})
+    except Exception:
+        pass
+    return _LINKS['links']
+
+def _relay_cost(x, h, ro, links):
+    """a player's delay to the session on node h: its ping when it reaches h; a Relay 22 player that doesn't goes through its
+    nearest node that does answer (as Relay.dll picks it) + that node's round trip to h; None = it can't play there"""
+    if x.get(h, -1) > 0: return x[h], None
+    if CHAIN_V not in x: return None, None
+    near = sorted((x[y], ro.index(y), y) for y in ro if y != h and x.get(y, -1) > 0)
+    if not near: return None, None
+    via = near[0][2]; l = links.get(via, {}).get(h)
+    return (x[via] + l + CHAIN_EXTRA, via) if l else (None, None)
+
+def _best_relay(steams, chain=False):
     # Relay 9: every player pinged our game servers (relay_ping {ip: ms}, -1 = no answer). The match goes to the first server
     # of relays.json that every player reaches; none =  (play on Relic). 0 ms counts as no answer: no server is that close
     # over the internet, it is something on the player own PC (VPN, a blocking bypass, an antivirus) answering for it -
@@ -658,6 +683,19 @@ def _best_relay(steams):
     # worst delay (TCP connect time to the game port, Relay.dll - not ICMP ping, which many VPNs and providers block);
     # a tie goes by relays.json
     ro = relay_order()
+    if chain:
+        # 04.11.2026 relay chain (native automatch): a player who can't reach a node plays on it through his own nearest node
+        # (Relay.dll 22 "DWR4", the nodes pass it on over our UDP tunnel), so a node fits when every player reaches it directly
+        # or through a chain; the one with the lowest worst delay wins, a chain counting ping to his node + node -> node + 10 ms
+        links = _relay_links(); best = None
+        for h in ro:
+            cost = [_relay_cost(x, h, ro, links) for x in pings]
+            if any(c is None for c, _ in cost): continue
+            k = (max(c for c, _ in cost), ro.index(h))
+            if best is None or k < best[0]: best = (k, h, [(s_, v, round(c)) for s_, (c, v) in zip(steams, cost) if v])
+        if not best: return ''
+        if best[2]: print('mm: relay %s worst %d ms, chains %s' % (best[1], best[0][0], best[2]), flush=True)
+        return best[1]
     ok = [h for h in ro if all(x.get(h, -1) > 0 for x in pings)]
     if not ok: return ''
     return min(ok, key=lambda h: (max(x[h] for x in pings), ro.index(h)))
@@ -1435,7 +1473,7 @@ def _nm_view(p):  # under MM_LOCK: what own_lobby needs to answer the game
         return {'state': 'searching', 'mode': p['mode'], 'since': int(p['ts']), 'in_pool': 1}
     order = m['host'] + m['guest']                       # the host first, then his team, then the other team
     if 'relay' not in m:                                 # once per match, by the players' pings (MMFind's hint); '' = own_lobby picks
-        m['relay'] = _best_relay(order)
+        m['relay'] = _best_relay(order, chain=True)
         print('mm: native match %s relay %r' % (m['id'], m['relay']), flush=True)
     return {'state': 'matched', 'match': m['id'], 'mode': m['mode'], 'host_steam': m['host_steam'],
             'host_pid': (MM.get(m['host_steam']) or {}).get('pid') or 0, 'team': 0 if p['steam'] in m['host'] else 1,

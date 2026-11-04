@@ -33,7 +33,9 @@ BR = (BR[0], int(BR[1]))
 MAXP = 1200            # payload bytes per packet
 WINDOW = 512           # packets in flight
 PER_IP = 16            # connections per address
-TRUSTED = set(os.environ.get('UDPGW_TRUSTED', '83.217.192.34,91.107.122.186').split(','))   # our Moscow nodes (du_egress, 03.11.2026): all their bridges come from one address - no per-address limit
+# our nodes: no per-address limit - all bridges of a Moscow node (du_egress, 03.11.2026) and all players another node passes on
+# here (battle_relay over du_client, the relay chain 04.11.2026) come from that node's one address
+TRUSTED = set(os.environ.get('UDPGW_TRUSTED', '83.217.192.34,91.107.122.186,15.220.68.107,116.202.106.150').split(','))
 IDLE = 30.0
 SYN, SYNACK, DATA, ACK, FIN, PING, PONG, DATA2, ACK2 = 1, 2, 3, 4, 5, 6, 7, 8, 9
 VERSION = 2            # the newest we speak: 2 = DATA2 with copies

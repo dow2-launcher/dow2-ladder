@@ -1,0 +1,9 @@
+[Unit]
+Description=relay_links.py every 30 minutes (the ladder's relay chain: node -> node round trips)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=30min
+
+[Install]
+WantedBy=timers.target

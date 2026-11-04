@@ -27,17 +27,45 @@ whose own path to Relic is bad or cut on the way (Russia: DPI on foreign hosting
 Native (02.11.2026, own lobby server experiment): no preamble - the game itself was sent here by our lobby server
 (lobby/own_lobby.py answers host/join with this server as the room's relay), so the stream starts with the game's own first
 frame (u16 length, then 15 hello). Hosted here like DWR1; a guest whose session is on another of our servers is passed there.
+Chain (DWR4, Relay.dll 22, 04.11.2026): "DWR4" + IPv4 + port (BE) of the node of the session (the one our lobby server gave
+the game as the room's relay), then the game's native stream. The player can't reach that node itself (no UDP answer, or the
+stream check of Relay 18 failed: DPI), so it came to its own best node: this one passes it on to the session's node at once
+(player -> this node -> the session's node, never more), hosted here only when that node is this one, the session is here
+already, or the node can't be reached (then guests find it here by DWRQ). Our nodes talk to each other over our UDP tunnel
+(du_client.py -> the other node's udp_gateway, like du_egress.py): TCP Russia <-> Europe stalls, UDP does not; TCP when the
+other node's udp_gateway does not answer (RELAY_PEER_DU=0: TCP only). The same way carries "DWRQ" and every pass-on to ours.
+The hop adds the round trip between the two nodes (Poland - Germany ~19 ms, Germany - Moscow ~47, Poland - Moscow ~54) and
+about a millisecond in each gateway; no second tick - only the session's node ticks, the passing node carries frames as
+they come.
 Usage: battle_relay.py [port] [bind]   (default 47100 127.0.0.1)
 Peers silent for IDLE seconds are dropped (the game pings every ~3 s).
 """
 import asyncio, ipaddress, json, os, socket, struct, sys, time
+try: import du_client                                # the UDP tunnel between our nodes (same directory)
+except Exception: du_client = None
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 47100
 BIND = sys.argv[2] if len(sys.argv) > 2 else '127.0.0.1'
 TICK = 0.1
 IDLE = 60
 DECIDE = 5                                          # s: no peer announce from a new session's first peer -> it's the host
-PEERS = [h for h in os.environ.get('RELAY_PEERS', '83.217.192.34,116.202.106.150,15.220.68.107').split(',') if h]
+RETRY = 8                                           # s: a guest whose session no node has yet asks our other nodes again (DWR1 / native)
+PEERS = [h for h in os.environ.get('RELAY_PEERS', '83.217.192.34,116.202.106.150,15.220.68.107,91.107.122.186').split(',') if h]
+PEER_DU = os.environ.get('RELAY_PEER_DU', '1') != '0' and du_client is not None   # our other nodes over UDP (udp_gateway), else TCP
+
+
+def _hp(h):                                         # "ip" or "ip:port" of RELAY_PEERS
+    return (h.rsplit(':', 1)[0], int(h.rsplit(':', 1)[1])) if ':' in h else (h, PORT)
+
+
+def _local(ip):                                     # an address of this machine (a node behind NAT - AWS - does not know its own)
+    try:
+        u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); u.connect((ip, 9)); me = u.getsockname()[0]; u.close()
+        return me == ip
+    except Exception: return False
+
+
+SELF = set(x for x in os.environ.get('RELAY_SELF', '').split(',') if x) | {h for h, _ in map(_hp, PEERS) if _local(h)}
 _last_warn = {}
 LOG = os.environ.get('RELAY_LOG', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'battle_relay.jsonl'))
 sessions = {}                                       # sid bytes -> Session
@@ -201,17 +229,36 @@ def handle_msg(p, m, echo=True):
     log(ev='unknown', type=hex(t), len=len(m), head=m[:24].hex(), peer=p.addr)
 
 
-async def find_peer(sid):
-    """which of our other servers has this session (its host)"""
-    for h in PEERS:                                     # "ip" or "ip:port"
-        hp = (h.rsplit(':', 1)[0], int(h.rsplit(':', 1)[1])) if ':' in h else (h, PORT)
+async def peer_connect(hp, timeout=10, du=True):
+    """a connection to another of our nodes: over our UDP tunnel to its udp_gateway (same port), TCP when that does not
+    answer -> (reader, writer, 'du' | 'tcp')"""
+    if du and PEER_DU:
+        c = await du_client.open_du(*hp)
+        if c: return c[0], c[1], 'du'
+    r, w = await asyncio.wait_for(asyncio.open_connection(*hp), timeout)
+    try: w.get_extra_info('socket').setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    except Exception: pass
+    return r, w, 'tcp'
+
+
+async def ask_peer(hp, sid):
+    """does that node have the session: "DWRQ" + sid -> Y/N; over UDP, then TCP once more when UDP gave no answer"""
+    for du in ((True, False) if PEER_DU else (False,)):
         try:
-            r2, w2 = await asyncio.wait_for(asyncio.open_connection(*hp), 2)
+            r2, w2, _ = await peer_connect(hp, 2, du)
             w2.write(b'DWRQ' + sid); await w2.drain()
             a = await asyncio.wait_for(r2.readexactly(1), 2); w2.close()
-            if a == b'Y': return hp
+            return a == b'Y'
         except Exception: pass
-    return None
+    return False
+
+
+async def find_peer(sid):
+    """which of our other servers has this session (its host) - all asked at once"""
+    hps = [hp for hp in map(_hp, PEERS) if hp[0] not in SELF]
+    if not hps: return None
+    res = await asyncio.gather(*[ask_peer(hp, sid) for hp in hps])
+    return next((hp for hp, y in zip(hps, res) if y), None)
 
 
 class BridgeStats:
@@ -222,8 +269,8 @@ class BridgeStats:
     in a match: a pause of 250+ ms is a stall), the same for the game's side, and the connection's age."""
     EVERY, SAMPLE, STALL = 30, 1.0, 0.25
 
-    def __init__(self, p, dest, to, usock):
-        self.p, self.dest, self.to, self.usock = p, f'{dest[0]}:{dest[1]}', to, usock
+    def __init__(self, p, dest, to, usock, du=None):
+        self.p, self.dest, self.to, self.usock, self.du = p, f'{dest[0]}:{dest[1]}', to, usock, du
         self.t0 = time.monotonic(); self.up = self.down = self.up_n = self.down_n = 0
         self.last_rx = self.last_tx = None; self.closed_by = None; self.final_tcp = {}
         self.all_rx_gap = self.all_tx_gap = 0.0; self.all_rx_stalls = 0; self.all_max_rtt = 0.0; self.all_max_backoff = 0
@@ -265,6 +312,7 @@ class BridgeStats:
         k = dict(ev=ev, peer=self.p.addr, dest=self.dest, to=self.to, secs=round(now - self.t0),
                  up_bytes=self.up, down_bytes=self.down, up_msgs=self.up_n, down_msgs=self.down_n,
                  tcp=tcp_stats(self.usock) or self.final_tcp)
+        if self.du: k['du'] = self.du.du_stats()          # our UDP tunnel to the other node: rtt, resent, lost_in, copies, filled
         if win:
             k.update(win_up=self.w_up, win_down=self.w_down, max_rx_gap_ms=round(self.w_rx_gap * 1000), rx_stalls=self.w_rx_stalls,
                      max_tx_gap_ms=round(self.w_tx_gap * 1000), max_rtt=self.w_max_rtt, max_rto=self.w_max_rto,
@@ -277,19 +325,21 @@ class BridgeStats:
         if win: self.new_window()
 
 
-async def pass_on(q, w, p, dest, held, answered, pre=b''):
+async def pass_on(q, w, p, dest, held, answered, pre=b'', why=None):
     """pass this peer on (to our other server or to the Relic relay its game wanted): what it sent so far, then both
-    ways as they are"""
+    ways as they are. False = that server could not be reached (nothing was sent to the game)"""
+    how = 'tcp'
     try:
-        ur, uw = await asyncio.wait_for(asyncio.open_connection(*dest), 10)
+        if pre: ur, uw, how = await peer_connect(dest, 3)   # ours: our UDP tunnel when its udp_gateway answers (1.5 s), else TCP (3 s)
+        else: ur, uw = await asyncio.wait_for(asyncio.open_connection(*dest), 10)
     except Exception as e:
-        log(ev='pass_fail', peer=p.addr, dest=f'{dest[0]}:{dest[1]}', err=repr(e)); return
+        log(ev='pass_fail', peer=p.addr, dest=f'{dest[0]}:{dest[1]}', err=repr(e)); return False
     usock = uw.get_extra_info('socket')
     try: usock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     except Exception: pass
     to = 'ours' if pre else ('relic' if held else 'relic_bridge')
-    log(ev='pass_on', peer=p.addr, dest=f'{dest[0]}:{dest[1]}', to=to, held=len(held))
-    st = BridgeStats(p, dest, to, usock)
+    log(ev='pass_on', peer=p.addr, dest=f'{dest[0]}:{dest[1]}', to=to, held=len(held), via=how, **({'why': why} if why else {}))
+    st = BridgeStats(p, dest, to, usock, uw if how == 'du' else None)
     if pre: uw.write(pre)
     for m in held: uw.write(len(m).to_bytes(2, 'big') + m); st.tx(len(m) + 2)
     await uw.drain()
@@ -328,6 +378,7 @@ async def pass_on(q, w, p, dest, held, answered, pre=b''):
         try: st.sample(uw)
         except Exception: pass
         st.line('bridge_end')
+    return True
 
 
 async def handle(r, w):
@@ -369,6 +420,11 @@ async def handle(r, w):
                 log(ev='bridge_refused', peer=p.addr, dest=f'{dest[0]}:{dest[1]}'); w.close(); return
             rt = asyncio.ensure_future(reader())
             await pass_on(q, w, p, dest, [], []); return
+        chain = None
+        if pre[:4] == b'DWR4':                          # Relay 22: the player can't reach the session's node - it came here
+            chain = socket.inet_ntoa(pre[4:8])
+            log(ev='chain', peer=p.addr, node=f'{chain}:{int.from_bytes(pre[8:10], "big")}')
+            pre = b'DWR1' + b'\0' * 6                   # what this node does with it, if it does not pass it on: native
         if pre[:4] not in (b'DWR1', b'DWR2'): log(ev='bad_preamble', peer=p.addr, hex=pre.hex()); w.close(); return
         compat = pre[:4] == b'DWR2'
         if compat: await asyncio.wait_for(r.readexactly(1), 15)
@@ -376,6 +432,20 @@ async def handle(r, w):
         if True:   # 30.10.2026: a guest whose lobby is on another of our servers is passed on there in the strict mode (DWR1) too
             relic = (socket.inet_ntoa(pre[4:8]), int.from_bytes(pre[8:10], 'big'))
             held, answered, sid = [], [], None
+            if chain:                                   # up to the hello (the session), nothing answered: the session's node answers
+                while sid is None and len(held) < 64:
+                    m = await asyncio.wait_for(q.get(), IDLE)
+                    if m is None: return
+                    held.append(m)
+                    if m[:1] == b'\x15': sid = m[1:5]
+                hp = next((hp for hp in map(_hp, PEERS) if hp[0] == chain), None)
+                if hp and chain not in SELF and sid is not None and sid not in sessions:
+                    if await pass_on(q, w, p, hp, held, [], pre=b'DWR1' + b'\0' * 6, why='chain'): return
+                # hosted here: the session's node is this one / not ours / can't be reached, or the session is here already
+                log(ev='chain_here', peer=p.addr, node=chain, sid=int.from_bytes(sid, 'little') if sid else None,
+                    why='self' if chain in SELF else 'not ours' if not hp else 'session here' if sid in sessions else 'unreachable')
+                for m in held:
+                    if m[:1] in (b'\x15', b'\x14'): p.send(m); answered.append(m)
             while sid is None and len(held) < 64:
                 m = await asyncio.wait_for(q.get(), IDLE)
                 if m is None: return
@@ -393,7 +463,12 @@ async def handle(r, w):
                 break
             if away and sid not in sessions:
                 h = await find_peer(sid)
-                if h: await pass_on(q, w, p, h, held, answered, pre=b'DWR1' + pre[4:10]); return
+                # 04.11.2026: no node has it yet and there is no Relic to fall back to (DWR1 / native) - its host may be on the way
+                # (a chained host is passed on, or hosted on its own node only after the hop failed): ask again for a few seconds
+                retry_end = time.time() + (RETRY if not compat else 0)
+                while not h and sid not in sessions and time.time() < retry_end:
+                    await asyncio.sleep(1); h = sid not in sessions and await find_peer(sid)
+                if h and await pass_on(q, w, p, h, held, answered, pre=b'DWR1' + pre[4:10]): return
                 if compat: await pass_on(q, w, p, relic, held, answered); return
                 # strict (DWR1) and none of ours has it: the lobby is on Relic - handled below ("mixed", Relay.dll explains)
             for m in held:

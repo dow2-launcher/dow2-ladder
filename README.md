@@ -8,7 +8,7 @@
 | `stats/` | статистика игроков Relic, рейтинг для LobbyStats, приём логов из лаунчера (`/stats/`) | `/srv/relicstats/app/` | `relic-stats` (8216) |
 | `replay/` | реплеи: загрузка, дубли, разбор, истории (`/replay/`) | `/srv/replayweb/app/`, воркер — `/usr/local/bin/` | `replay-web`, `replay-story` |
 | `site/` | лендинг Elite (корень сайта и `/elite/`), Elite Lab, ассеты рас/карт | `/var/www/rts-site/elite/` (кроме `dl/` — его заливает CI лаунчера) | nginx |
-| `gameserver/` | наш игровой сервер (`battle_relay.py`, порт 47100), UDP-шлюз к нему (`udp_gateway.py`), проверка связи для NetProbe (`probe_server.py`), выход Москвы в Relic через iggy (`egress/`), TCP-настройки (`tcp/`), старый пересыльщик (`relay_proxy.py`) | Timeweb и ru.pivolan (Москва), iggy, polsha: `/srv/dow2battle/` | `dow2-battle`, `dow2-udpgw` |
+| `gameserver/` | наш игровой сервер (`battle_relay.py`, порт 47100), UDP-шлюз к нему (`udp_gateway.py`), туннель между узлами (`du_client.py`), проверка связи для NetProbe (`probe_server.py`), выход Москвы в Relic через iggy (`egress/`), TCP-настройки (`tcp/`), старый пересыльщик (`relay_proxy.py`) | Timeweb и ru.pivolan (Москва), iggy, polsha: `/srv/dow2battle/` | `dow2-battle`, `dow2-udpgw` |
 | `lobby/` | свой лобби-сервер: игра с OwnLobby.dll (галочка «Автоматч v2.0») ходит сюда вместо dow2r-lobby.reliclink.com; всё пробрасывается в Relic, свой — только родной автоматч (Find a Game) и его комнаты AUTOMATCH | `/srv/ownlobby/app/` (данные, сертификат, флаги `native_mm.on`, `trace.on`, `unrated.on` — `/srv/ownlobby/data/`) | `dow2-ownlobby` (47443 TLS, статус 127.0.0.1:47444) |
 | `tools/` | `relicscan/` — сканер комнат Relic (см. ниже); копии `elite-dev` / `elite-devstatus` (страница /elite/dev/) | prod_gpu: `/mnt/dow2bench/dev/relicscan`; rts: `/usr/local/bin/` | `relic-scan` (prod_gpu) |
 | `deploy/` | скрипт выкладки, юниты systemd, уведомление о логах | — | ставится руками |
@@ -61,6 +61,25 @@
 - запасной — **VLESS** (`xray-relic`, gRPC REALITY до iggy:8443);
 - `relic-egress` раз в 10 с держит одно правило на первый работающий путь; ни один не работает — напрямую в Relic.
 Подробно, замеры и откат одной командой — `gameserver/egress/README.md`.
+
+## Цепочка узлов (`battle_relay.py` DWR4, `du_client.py`, ладдер `_best_relay(chain=True)`, 04.11.2026)
+
+Не каждый игрок достаёт до каждого нашего узла (Украина не видит Москву, Россия под DPI — Европу), но почти всегда хотя бы до
+одного. Игрок родного автоматча, который не достаёт до узла матча (нет ответа UDP или не прошла проверка потока Relay 18),
+идёт на свой ближайший годный узел с преамбулой `DWR4` + IPv4 + порт узла сессии (Relay.dll 22), и тот сразу передаёт его
+узлу сессии. Не больше двух узлов: игрок → его узел → узел сессии.
+- между узлами — наш UDP-туннель (`du_client.py` → `udp_gateway` другого узла, тот же DU v2 с копиями, что у Relay.dll и
+  `du_egress`), TCP — если шлюз не ответил за 1,5 с; тем же путём идут `DWRQ` (все узлы опрашиваются разом) и любая передача
+  гостя на наш другой узел (DWR1/DWR2/родной — как и раньше, только не TCP). `RELAY_PEER_DU=0` — только TCP.
+- узел сессии недоступен узлу → игрок обслуживается у себя (гости найдут его по `DWRQ`, гость без сессии переспрашивает 8 с).
+- задержка цепочки = пинг игрока до своего узла + RTT узел → узел (Польша–Германия ~19 мс, Германия–Москва ~46,
+  Польша–Москва ~54, ru.pivolan–Европа 40–80) + ~1 мс на шлюзы; второго тика нет — тикает только узел сессии (100 мс),
+  передающий узел пересылает кадры сразу.
+- ладдер: для родного матча узел с наименьшей худшей задержкой, где игрок с Relay 22 (ключ `0.0.0.22` в пингах) может
+  прийти цепочкой: пинг до его ближайшего узла + RTT из `data/relay_links.json` + 10 мс; старый Relay — только напрямую.
+  `relay_links.json` пишет `ladder/relay_links.py` (root на rts, ssh на узлы, DU PING между узлами), таймер `relay-links.timer`.
+- в журнале узла: `ev=chain` (пришёл DWR4), `ev=pass_on ... via=du|tcp why=chain`, `ev=chain_here` (обслужен у себя и почему),
+  в `bridge_stats`/`bridge_end` — `du{rtt, resent, lost_in, copies, filled}`.
 
 ## Статистика моста (`battle_relay.py`, BridgeStats)
 

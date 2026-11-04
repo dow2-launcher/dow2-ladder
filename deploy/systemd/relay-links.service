@@ -1,0 +1,8 @@
+[Unit]
+Description=Round trips between our game nodes for the relay chain (ladder/relay_links.py -> /srv/ladder/data/relay_links.json)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /srv/ladder/app/relay_links.py
+TimeoutStartSec=300
