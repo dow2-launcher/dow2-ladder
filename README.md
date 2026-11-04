@@ -8,11 +8,67 @@
 | `stats/` | статистика игроков Relic, рейтинг для LobbyStats, приём логов из лаунчера (`/stats/`) | `/srv/relicstats/app/` | `relic-stats` (8216) |
 | `replay/` | реплеи: загрузка, дубли, разбор, истории (`/replay/`) | `/srv/replayweb/app/`, воркер — `/usr/local/bin/` | `replay-web`, `replay-story` |
 | `site/` | лендинг Elite (корень сайта и `/elite/`), Elite Lab, ассеты рас/карт | `/var/www/rts-site/elite/` (кроме `dl/` — его заливает CI лаунчера) | nginx |
-| `gameserver/` | наш игровой сервер (`battle_relay.py`, порт 47100) и старый пересыльщик в Relic (`relay_proxy.py`) | Timeweb: `/srv/dow2battle/`, `/srv/dow2relay/` | `dow2-battle`, `dow2-relay` |
-| `lobby/` | свой лобби-сервер (эксперимент): игра с OwnLobby.dll ходит сюда вместо dow2r-lobby.reliclink.com; всё пробрасывается в Relic, свои — приватные комнаты автоматча, их ретранслятор и итог в ладдер | `/srv/ownlobby/app/` (данные, сертификат, флаги `own_rooms.on`, `trace.on`, `unrated.on` — `/srv/ownlobby/data/`) | `dow2-ownlobby` (47443 TLS, статус 127.0.0.1:47444) |
+| `gameserver/` | наш игровой сервер (`battle_relay.py`, порт 47100), UDP-шлюз к нему (`udp_gateway.py`), проверка связи для NetProbe (`probe_server.py`), выход Москвы в Relic через iggy (`egress/`), TCP-настройки (`tcp/`), старый пересыльщик (`relay_proxy.py`) | Timeweb и ru.pivolan (Москва), iggy, polsha: `/srv/dow2battle/` | `dow2-battle`, `dow2-udpgw` |
+| `lobby/` | свой лобби-сервер: игра с OwnLobby.dll (галочка «Автоматч v2.0») ходит сюда вместо dow2r-lobby.reliclink.com; всё пробрасывается в Relic, свой — только родной автоматч (Find a Game) и его комнаты AUTOMATCH | `/srv/ownlobby/app/` (данные, сертификат, флаги `native_mm.on`, `trace.on`, `unrated.on` — `/srv/ownlobby/data/`) | `dow2-ownlobby` (47443 TLS, статус 127.0.0.1:47444) |
+| `tools/` | `relicscan/` — сканер комнат Relic (см. ниже); копии `elite-dev` / `elite-devstatus` (страница /elite/dev/) | prod_gpu: `/mnt/dow2bench/dev/relicscan`; rts: `/usr/local/bin/` | `relic-scan` (prod_gpu) |
 | `deploy/` | скрипт выкладки, юниты systemd, уведомление о логах | — | ставится руками |
 
 Данные (базы, токены, ключи) в репозитории не лежат: они в `/srv/*/data/` на сервере.
+
+## Автоматч: только родной (с 03.11.2026)
+
+- Работает только **родной автоматч** игры: Multiplayer → Find a Game → Start Searching. MMFind 0.45 спрашивает ладдер
+  (`/ladder/api/mm/native`); на «да» игра сама ищет через наш лобби-сервер (`lobby/own_lobby.py`, `automatch/startpolling` /
+  `polling`), а кто с кем играет решает ладдер (`ladder.py`, `nm/*`: рейтинг, группы, пожелания карт, сервер по пингам игроков).
+  Хост поднимает комнату AUTOMATCH, остальные заходят по id, старт — штатный. Встречаются только игры с одинаковыми
+  контрольными суммами exe / данных / мода.
+- **Классического автоматча нет**: мост «классика ↔ родной» убран, `mm/native` никогда не отвечает «ждут классические игроки».
+  `mm/join` / `mm/poll` остались только для старых клиентов, пока они не обновятся (такие находят лишь друг друга).
+  Поиск Relic не запускается: на «нет» MMFind пишет на экране Find a Game, почему.
+- Включено флагом `native_mm.on` в `/srv/ownlobby/data/`; `unrated.on` — тестовые матчи без рейтинга.
+
+## Комнаты: точный тип, обсерверы, FFA
+
+Список комнат (`/ladder/api/rooms`, вкладка «Комнаты» лаунчера и сайт) собирается из публичного списка Relic.
+- **Точный тип комнаты** (Elite 3.2 / ваниль 3.19 / другой мод) — от сканера `relicscan` (ниже): файл
+  `/srv/ladder/data/ads_exact.json`, свежий не старше 120 с. Комната, которой нет ни в одном ответе сканера, другим модом
+  наверняка не считается (Relic может не отдавать полные и запароленные) — решает догадка по карте и расам. Скан старый или
+  его нет — как раньше, догадка.
+- **Слоты** разбираются по одному (`slotinfo`, сверено с 10,4 тыс. историй матчей Relic): команда и раса берутся из слота.
+  Игрок в слоте обсервера (команды: дальше n карты в каждой половине; FFA: дальше размера карты) — `observer=true`, без расы
+  и героя, на сайте отдельной строкой с глазом. Раса 255 = Random (`random=true`, «?»), компьютеры — в `ai[]`.
+- **FFA**: FFA-карта или команды слотов не по двум половинам → режим `ffa` / `2v2v2`…, `ffa_team` — настоящая команда,
+  `team` — колонка (левая / правая половина слотов). FFA-карты (4 ванильных `6p_ffa_*`, Elite `ffa_doom_of_tularis`,
+  `ffa_siege_of_vraks`) с миникартами в `assets_index.json`.
+
+## Сканер комнат relicscan (`tools/relicscan`)
+
+`relic_scan.py` на prod_gpu (сервис `relic-scan`, рабочая копия `/mnt/dow2bench/dev/relicscan`). Каждые 30 с входит в Relic
+аккаунтом стенда (стенд 1, cherpekat) так же, как игра (Steam Encrypted App Ticket через `steamticket.exe` под Wine), и делает
+два `findAdvertisements` — как ваниль DOW2 3.19 и как Elite 3.2: Relic отдаёт только комнаты спросившей игры. Итог — id комнаты →
+поля мода — пишет ладдеру в `/mnt/rts/srv/ladder/data/ads_exact.json` (без секретов). Сессия и тикет только в памяти процесса.
+Игра стенда важнее: пока на стенде запущена игра (и 120 с после), сканер не входит; сессию выбили — пауза 10 минут; не больше
+4 входов в час.
+
+## Выход Москвы в Relic через iggy (`gameserver/egress`)
+
+Русские игроки с форвардингом: игрок → московский узел (UDP) → мост DWR3 в `battle_relay` → TCP к ретранслятору Relic в США.
+Этот последний TCP из России через несколько минут деградирует (DPI по дороге). Поэтому на обоих московских узлах (timeweb
+83.217.192.34, ru.pivolan 91.107.122.186) TCP моста к Relic (порты 27000–27099, uid `dow2-battle`) заворачивается iptables на iggy
+(116.202.106.150), Relic видит iggy. `battle_relay.py` не менялся.
+- основной путь — **DU**: `du_egress.py` (сервис `du-egress`) несёт байты нашим UDP-туннелем (DU v2, с копиями) до
+  `udp_gateway` iggy, тот — preamble `DWR3` в `battle_relay` iggy → TCP к Relic;
+- запасной — **VLESS** (`xray-relic`, gRPC REALITY до iggy:8443);
+- `relic-egress` раз в 10 с держит одно правило на первый работающий путь; ни один не работает — напрямую в Relic.
+Подробно, замеры и откат одной командой — `gameserver/egress/README.md`.
+
+## Статистика моста (`battle_relay.py`, BridgeStats)
+
+Каждое пересылаемое соединение (мост DWR3 / pass_on: наш узел → ретранслятор Relic или наш другой сервер) пишет в журнал
+`dow2-battle` строку `ev=bridge_stats` раз в 30 с (худшее из выборок по 1 с) и `ev=bridge_end` при закрытии (кто закрыл):
+TCP_INFO (rtt, rttvar, rto, retrans, lost, backoff, cwnd, unacked), байты и кадры в обе стороны, самая длинная пауза в том,
+что шлёт Relic (в матче он тикает каждые 100 мс; 250+ мс — затык) и что шлёт игра, возраст соединения. Чтобы понять, затыкается
+ли путь узел (Россия) → Relic, когда у игроков лаги через 3–4 минуты матча. Смотреть: `journalctl -u dow2-battle | grep ev=bridge`.
 
 ## Как заливать
 
@@ -20,7 +76,7 @@
 
 ```bash
 export GIT_SSH_COMMAND="ssh -i /root/.ssh/deploy_dow2-ladder -o IdentitiesOnly=yes"
-git clone git@github.com:pivolan/dow2-ladder.git
+git clone git@github.com:dow2-launcher/dow2-ladder.git
 # правки → коммит → push в main
 git -c user.name=pivolan -c user.email=pivolan@users.noreply.github.com commit -am "что и зачем"
 git push origin main
@@ -34,7 +90,7 @@ git push origin main
 1. **GitHub Actions** (`.github/workflows/check.yml`) на каждый push и PR проверяет, что весь Python компилируется. Секреты не нужны.
 2. **Сервер сам забирает main.** Таймер `dow2-web-deploy.timer` на основном сервере раз в 2 минуты запускает
    `deploy/deploy.sh`: `git fetch` по deploy-ключу → проверка → ставит только изменившиеся части → перезапускает только их
-   → пишет в Telegram (тред dow_replay) «🚀 выложено: …» или «⛔ не компилируется».
+   → пишет итог только в журнал (`journalctl -u dow2-web-deploy`), в Telegram ничего не шлёт.
 3. **Бережно к игрокам:**
    - ладдер держит очередь в памяти — пока кто-то ищет или собирается в матч, перезапуск ждёт (до 10 минут);
    - игровой сервер в Москве перезапускается, только когда на нём нет ни одной игры (иначе ждёт следующего запуска).
