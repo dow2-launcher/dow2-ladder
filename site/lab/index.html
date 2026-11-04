@@ -133,19 +133,19 @@ footer { padding: 30px 0 50px; color: var(--muted); font-size: 15px; text-align:
   <p class="sub" data-i="van_sub">Unpack into the game folder next to DOW2.exe: you get <code>winmm.dll</code> and the <code>dow2-patches</code> folder. <code>winmm.dll</code> is a small loader: it loads every .dll from <code>dow2-patches</code>, so the packages can be combined — if you already have it, copy only the new .dll into <code>dow2-patches</code>. Game files are not changed; to remove, delete <code>winmm.dll</code> and the folder.</p>
   <div class="cards">
     <div class="card">
-      <h3><span data-i="amv_h">Automatch and our servers</span> <span class="ver">MMFind 0.33 + Relay 15</span> <span class="badge b-test" data-i="b_test">test</span></h3>
-      <p data-i="amv_p">Find a Game works again in vanilla: Multiplayer → Find a Game → Start Searching. 1v1 / 2v2 / 3v3 and maps as usual; the game is created and joined for you, Cancel dissolves a found match for everyone. Matches run through our server (Poland or Germany — the lower delay for everyone), not Relic's in the USA; normal lobbies too go through our server nearest to you, with anybody.</p>
-      <small data-i="amv_s">Only vanilla players with this package are matched, never mixed with Elite. Queue and matches: <a href="/ladder/">ladder</a></small>
-      <div class="btns"><a class="btn main" href="dl/Automatch_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
-    </div>
-    <div class="card exp">
-      <h3><span data-i="srv_h">Our game servers</span> <span class="ver">Relay 15</span> <span class="badge b-exp" data-i="b_exp">experiment</span></h3>
-      <p data-i="srv_p">Online games through our servers (Poland, Germany, Moscow) instead of Relic's in the USA. Three variants, install one: <b>compatible</b> — only automatches go through our server, every other game on Relic, play with anybody; <b>normal</b> — every online game, Custom Games too, on our servers: everyone in the lobby needs the same package, otherwise the game closes with an error; <b>with anybody</b> — every game still on Relic, but through our server nearest to you: for those whose connection to Relic is cut or lags.</p>
-      <small data-i="srv_s">Test, at your own risk. Experiment: UDP=1 in Relay.ini sends the game to our server over UDP (when TCP gets cut on the way). The automatch package already includes the compatible variant.</small>
-      <div class="btns"><a class="btn main" href="dl/Servers_vanilla_compat.zip" data-i="srv_c">Compatible .zip</a><a class="btn" href="dl/Servers_vanilla_strict.zip" data-i="srv_n">Normal (ours only) .zip</a><a class="btn" href="dl/Servers_vanilla_bridge.zip" data-i="srv_b">With anybody .zip</a></div>
+      <h3><span data-i="am2_h">Automatch v2.0</span> <span class="ver">MMFind 0.45 + OwnLobby 2</span> <span class="badge b-test" data-i="b_test">test</span></h3>
+      <p data-i="am2_p">Find a Game works again in vanilla: Multiplayer → Find a Game → Start Searching finds a 1v1 / 2v2 / 3v3 opponent by rating, the match starts by itself within seconds. The search runs on our lobby server, the match through our game server; ordinary Custom Games lobbies are not affected. If it can't run, Find a Game says why.</p>
+      <small data-i="am2_s">Only vanilla players with this package are matched (their own queue, never mixed with Elite), so your opponents need it too. If your connection to Europe gets cut (Russia), add RelayForward. Queue and matches: <a href="/ladder/">ladder</a></small>
+      <div class="btns"><a class="btn main" href="dl/Automatch_v2_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
     </div>
     <div class="card">
-      <h3><span data-i="rf_h">Auto-reinforce after webway gates</span> <span class="ver">ReinforceFix v1</span> <span class="badge b-ok" data-i="b_ok">works</span></h3>
+      <h3><span data-i="rfw_h">Online games through our nearest server</span> <span class="ver">RelayForward 21</span> <span class="badge b-test" data-i="b_test">test</span></h3>
+      <p data-i="rfw_p">Every Relic online game (Custom Games, any lobby) goes through our server nearest to you — Poland, Germany or Moscow — which passes it on to Relic. For those whose way to Relic's servers is cut or slow (Russia: DPI / blocking); Moscow goes on to Relic through Germany. If our servers can't be reached, the game goes straight to Relic, as without the patch.</p>
+      <small data-i="rfw_s">The same game by another road: no desync, your opponents don't need it. If you still have <code>Relay.dll</code> from an old package, delete it. Turn off: delete <code>RelayForward.dll</code>. Log: <code>dow2-patches\Relay.log</code>.</small>
+      <div class="btns"><a class="btn main" href="dl/RelayForward_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
+    </div>
+    <div class="card">
+      <h3><span data-i="rf_h">Auto-reinforce after webway gates</span> <span class="ver">ReinforceFix 1</span> <span class="badge b-ok" data-i="b_ok">works</span></h3>
       <p data-i="rf_p">A squad with auto-reinforce on that goes through an Eldar webway gate no longer comes out with auto-reinforce switched off.</p>
       <small data-i="rf_s">Only the interface changes, no desync; your opponents don't need it.</small>
       <div class="btns"><a class="btn main" href="dl/ReinforceFix_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
@@ -157,10 +157,64 @@ footer { padding: 30px 0 50px; color: var(--muted); font-size: 15px; text-align:
       <div class="btns"><a class="btn main" href="dl/JumpRetry_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
     </div>
     <div class="card">
-      <h3><span data-i="rfw_h">Online games through our nearest server</span> <span class="ver">RelayForward 21</span> <span class="badge b-test" data-i="b_test">test</span></h3>
-      <p data-i="rfw_p">Every Relic online game (Custom Games, any lobby) goes through our server nearest to you — Poland, Germany or Moscow — which passes it on to Relic. For those whose way to Relic's servers is cut or slow (Russia: DPI / blocking); Moscow goes on to Relic through Germany. If our servers can't be reached, the game goes straight to Relic, as without the patch.</p>
-      <small data-i="rfw_s">The same game by another road: no desync, your opponents don't need it. Don't combine with the “Our game servers” and automatch packages (old Relay.dll). Turn off: delete <code>RelayForward.dll</code>. Log: <code>dow2-patches\Relay.log</code>.</small>
-      <div class="btns"><a class="btn main" href="dl/RelayForward_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
+      <h3><span data-i="skv_h">Don't drop out of the match when Steam goes away</span> <span class="ver">SteamKeep 2</span> <span class="badge b-test" data-i="b_test">test</span></h3>
+      <p data-i="skv_p">When Steam loses its connection during a match, the game leaves the match and often closes. With this the match is played to the end, however long Steam is away; Steam's request to close the game waits until the match is over. Your own Alt+F4, Quit and the close button work as usual.</p>
+      <small data-i="skv_s">No desync, your opponents don't need it. Settings: <code>SteamKeep.ini</code>.</small>
+      <div class="btns"><a class="btn main" href="dl/SteamKeep_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
+    </div>
+    <div class="card">
+      <h3><span data-i="mtv_h">Match timer</span> <span class="ver">MatchTimer 8</span> <span class="badge b-test" data-i="b_test">test</span></h3>
+      <p data-i="mtv_p">Match time (minutes:seconds of game time) in the game's own interface: at the top under the victory point counter, under the Menu button, or in it. Annihilation: under the Menu button.</p>
+      <small data-i="mtv_s">Only shows, no desync. <code>Place=top | under | menu</code> and the look in <code>MatchTimer.ini</code>, changed while the game runs.</small>
+      <div class="btns"><a class="btn main" href="dl/MatchTimer_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
+    </div>
+    <div class="card">
+      <h3><span data-i="apv_h">APM (actions per minute)</span> <span class="ver">APM 1</span> <span class="badge b-test" data-i="b_test">test</span></h3>
+      <p data-i="apv_p">Your clicks and key presses per minute over the last minute of the match: at the top next to the match timer or in the minimap corner. Only you see it.</p>
+      <small data-i="apv_s">Nothing goes to the game, no desync. Settings: <code>APM.ini</code>.</small>
+      <div class="btns"><a class="btn main" href="dl/APM_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
+    </div>
+    <div class="card">
+      <h3><span data-i="cdv_h">Cooldown seconds</span> <span class="ver">Cooldowns 7</span> <span class="badge b-test" data-i="b_test">test</span></h3>
+      <p data-i="cdv_p">Seconds left on recharging abilities and global abilities, in the middle of the button — as the button's own count text.</p>
+      <small data-i="cdv_s">Read-only, no desync. Size and colour: <code>Cooldowns.ini</code>.</small>
+      <div class="btns"><a class="btn main" href="dl/Cooldowns_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
+    </div>
+    <div class="card">
+      <h3><span data-i="lsv_h">Lobby rating</span> <span class="ver">LobbyStats 0.11.0</span> <span class="badge b-test" data-i="b_test">test</span></h3>
+      <p data-i="lsv_p">Relic rating next to each player in the lobby; on hover — win rate, games and Steam hours. Only shows information, never kicks anyone.</p>
+      <small data-i="lsv_s">Works alone, in any lobby. Replaces the old LobbyStats 0.7 / 0.10: overwrite the old <code>LobbyStats.dll</code>.</small>
+      <div class="btns"><a class="btn main" href="dl/LobbyStats_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
+    </div>
+    <div class="card">
+      <h3><span data-i="lrv_h">Ratings on the loading screen</span> <span class="ver">LoadingRatings 4</span> <span class="badge b-test" data-i="b_test">test</span></h3>
+      <p data-i="lrv_p">The Relic rating after each player's name on the loading screen of an online match.</p>
+      <small data-i="lrv_s">Works with or without LobbyStats.</small>
+      <div class="btns"><a class="btn main" href="dl/LoadingRatings_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
+    </div>
+    <div class="card">
+      <h3><span data-i="jsv_h">Sound when someone joins the lobby</span> <span class="ver">JoinSound 1</span> <span class="badge b-test" data-i="b_test">test</span></h3>
+      <p data-i="jsv_p">A sound and a flashing taskbar button when a player comes into your lobby while the game is in the background (alt-tab).</p>
+      <small data-i="jsv_s">Soft or sharp: <code>Sound=soft | sharp</code> in <code>JoinSound.ini</code>.</small>
+      <div class="btns"><a class="btn main" href="dl/JoinSound_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
+    </div>
+    <div class="card">
+      <h3><span data-i="rvv_h">Reverse</span> <span class="ver">Reverse 4</span> <span class="badge b-test" data-i="b_test">test</span></h3>
+      <p data-i="rvv_p">Like Company of Heroes: hold Ctrl and right-click behind your vehicles (or on the minimap) — they back off driving backwards, front armour to the enemy, instead of turning around.</p>
+      <small data-i="rvv_s">Uses the game's own orders, nothing changes for the other players. Key and legs: <code>Reverse.ini</code>.</small>
+      <div class="btns"><a class="btn main" href="dl/Reverse_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
+    </div>
+    <div class="card">
+      <h3><span data-i="ofv_h">Observer lag fix</span> <span class="ver">ObsFix 1</span> <span class="badge b-test" data-i="b_test">test</span></h3>
+      <p data-i="ofv_p">Spectating a live game no longer rebuilds the whole match info dozens of times per frame — live spectating runs as smoothly as a replay.</p>
+      <small data-i="ofv_s">Only the spectator needs it; no desync.</small>
+      <div class="btns"><a class="btn main" href="dl/ObsFix_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
+    </div>
+    <div class="card">
+      <h3><span data-i="clv_h">Record game crashes</span> <span class="ver">CrashLog 1</span> <span class="badge b-test" data-i="b_test">test</span></h3>
+      <p data-i="clv_p">If the game closes by itself with no message: where in the code it crashed and what closed it, plus a small dump — in <code>dow2-patches\CrashLog.log</code>. Changes nothing in the game, sends nothing anywhere.</p>
+      <small data-i="clv_s">For the developers: install, repeat the crash, send us <code>CrashLog.log</code> (and the <code>.dmp</code>), then remove it.</small>
+      <div class="btns"><a class="btn main" href="dl/CrashLog_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
     </div>
     <div class="card exp">
       <h3><span data-i="npv_h">Connection check</span> <span class="ver">NetProbe 2</span> <span class="badge b-exp" data-i="b_exp">experiment</span></h3>
@@ -169,9 +223,10 @@ footer { padding: 30px 0 50px; color: var(--muted); font-size: 15px; text-align:
       <div class="btns"><a class="btn main" href="dl/NetProbe_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
     </div>
     <div class="card">
-      <h3><span data-i="all_h">Set: observer fix + lobby rating + auto-reinforce</span> <span class="badge b-ok" data-i="b_ok">works</span></h3>
-      <p data-i="all_p">ObsFix, LobbyStats and ReinforceFix in one archive, with settings files (<code>.ini</code>) for each.</p>
-      <div class="btns"><a class="btn main" href="dl/DoW2-patches.zip" data-i="dl_zip">Download .zip</a></div>
+      <h3><span data-i="allv_h">Everything at once</span> <span class="badge b-test" data-i="b_test">test</span></h3>
+      <p data-i="allv_p">Automatch v2.0, ReinforceFix, JumpRetry, SteamKeep, match timer, APM, cooldowns, lobby rating, loading screen ratings, join sound, Reverse and ObsFix in one archive — still a separate DLL each in <code>dow2-patches</code>, with its <code>.ini</code>.</p>
+      <small data-i="allv_s">Not inside: RelayForward, NetProbe and CrashLog — take them separately if you need them. To turn one off, delete its DLL.</small>
+      <div class="btns"><a class="btn main" href="dl/All_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
     </div>
   </div>
 </div></section>
@@ -230,19 +285,26 @@ var RU = {
   la_win: "Лаунчер для Windows", la_port: "Windows без установки",
   h_van: "Для ванильной DoW2 (без лаунчера)",
   van_sub: "Распакуйте в папку игры рядом с DOW2.exe: появятся <code>winmm.dll</code> и папка <code>dow2-patches</code>. <code>winmm.dll</code> — маленький загрузчик: он подгружает все .dll из <code>dow2-patches</code>, поэтому пакеты можно совмещать — если он уже стоит, достаточно положить новую .dll в <code>dow2-patches</code>. Файлы игры не меняются; удалить — стереть <code>winmm.dll</code> и папку.",
-  amv_h: "Автоматч и наши серверы", amv_p: "В ванили снова работает Find a Game: Мультиплеер → Find a Game → Start Searching. 1v1 / 2v2 / 3v3 и карты как обычно; игра создаётся и подключается сама, «Отмена» распускает найденный матч у всех. Матчи идут через наш сервер (Польша или Германия — где у всех меньше задержка), а не через Relic в США; обычные лобби тоже идут через ближайший к вам наш сервер, с кем угодно.",
-  amv_s: "Сводит только игроков ванилы с этим пакетом, с Elite не смешивает. Очередь и матчи: <a href=\"/ladder/\">ладдер</a>",
-  srv_h: "Наши игровые серверы", srv_p: "Сетевые игры через наши серверы (Польша, Германия, Москва), а не через Relic в США. Три варианта, ставить один: <b>совместимый</b> — через наш сервер только автоматч, остальные игры через Relic, играть можно с кем угодно; <b>обычный</b> — все сетевые игры, и Custom Games тоже, через наши серверы: у всех в лобби должен стоять такой же пакет, иначе игра закроется с ошибкой; <b>с кем угодно</b> — все игры по-прежнему на Relic, но через ближайший к вам наш сервер: для тех, у кого связь с Relic режется или лагает.",
-  srv_s: "Тест, на свой страх и риск. Эксперимент: UDP=1 в Relay.ini — до нашего сервера игра идёт по UDP (если TCP режется по дороге). В пакете автоматча совместимый вариант уже есть.", srv_c: "Совместимый .zip", srv_n: "Обычный (только наши) .zip", srv_b: "С кем угодно .zip",
   rf_h: "Автопополнение после вебвей-ворот", rf_p: "Отряд с включённым автопополнением, прошедший через вебвей-ворота эльдар, больше не выходит из них с выключенным автопополнением.",
   rf_s: "Меняется только интерфейс, рассинхрона нет; соперникам ставить не нужно.",
   jr_h: "Прыжок не срывается о препятствия", jr_p: "Для аутарха и других прыгунов: если по пути к точке прыжка он сам перескочил препятствие и из-за этого приказ прыжка сорвался, приказ повторяется сразу после приземления (до 3 раз). Любой ваш новый приказ отряду отменяет повтор.",
   jr_s: "Повтор — обычный приказ игры, рассинхрона нет; соперникам ставить не нужно. Выключить: <code>Enabled=0</code> в <code>JumpRetry.ini</code>.",
   rfw_h: "Сетевые игры через наш ближайший сервер", rfw_p: "Каждая онлайн-игра Relic (Custom Games, любые лобби) идёт через ближайший к вам наш сервер — Польша, Германия или Москва, — а он передаёт её в Relic. Для тех, у кого путь до серверов Relic режется или медленный (Россия: DPI/РКН); Москва дальше ходит к Relic через Германию. Если наши серверы недоступны — игра идёт напрямую к Relic, как без патча.",
-  rfw_s: "Та же игра, только другой дорогой: рассинхрона нет, соперникам ставить не нужно. Не ставить вместе с пакетами «Наши игровые серверы» и автоматча (там старый Relay.dll). Выключить: удалить <code>RelayForward.dll</code>. Лог: <code>dow2-patches\\Relay.log</code>.",
+  rfw_s: "Та же игра, только другой дорогой: рассинхрона нет, соперникам ставить не нужно. Если остался <code>Relay.dll</code> из старых пакетов — удалите его. Выключить: удалить <code>RelayForward.dll</code>. Лог: <code>dow2-patches\\Relay.log</code>.",
   npv_h: "Проверка связи", npv_p: "Та же проверка, что в лаунчере: запустить игру, подождать 2 минуты в меню — результат уйдёт нам сам (только проверка и ваш Steam ID).",
   npv_s: "Чистый эксперимент, на свой страх и риск. Запускается при каждом старте игры, поэтому после теста удалите NetProbe.dll.",
-  all_h: "Набор: обсервер + рейтинг в лобби + автопополнение", all_p: "ObsFix, LobbyStats и ReinforceFix одним архивом, с файлами настроек (<code>.ini</code>) для каждого.",
+  am2_h: "Автоматч v2.0", am2_p: "В ванили снова работает Find a Game: Мультиплеер → Find a Game → Start Searching находит соперника 1v1 / 2v2 / 3v3 по рейтингу, матч стартует сам за секунды. Поиск ведёт наш лобби-сервер, матч идёт через наш игровой сервер; обычные лобби Custom Games не затрагиваются. Если автоматч недоступен — на экране Find a Game написано почему.", am2_s: "Сводит только игроков ванили с этим пакетом (своя очередь, с Elite не смешивает), так что соперникам он тоже нужен. Если связь с Европой режется (Россия) — поставьте ещё RelayForward. Очередь и матчи: <a href=\"/ladder/\">ладдер</a>",
+  skv_h: "Не вылетать из матча при отвале Steam", skv_p: "Когда во время матча у Steam пропадает связь, игра выходит из матча и часто закрывается. С патчем матч доигрывается до конца, сколько бы Steam ни отсутствовал; просьба Steam закрыть игру ждёт конца матча. Свои Alt+F4, выход через меню и крестик работают как обычно.", skv_s: "Рассинхрона нет, соперникам ставить не нужно. Настройки: <code>SteamKeep.ini</code>.",
+  mtv_h: "Таймер матча", mtv_p: "Время матча (минуты:секунды игрового времени) в интерфейсе самой игры: сверху под счётчиком очков, под кнопкой Menu или в ней. В аннигиляции — под кнопкой Menu.", mtv_s: "Только показывает, рассинхрона нет. <code>Place=top | under | menu</code> и вид — в <code>MatchTimer.ini</code>, меняются прямо во время игры.",
+  apv_h: "APM (действий в минуту)", apv_p: "Ваши клики и нажатия клавиш в минуту за последнюю минуту матча: сверху рядом с таймером или в углу миникарты. Видите только вы.", apv_s: "В игру ничего не отправляется, рассинхрона нет. Настройки: <code>APM.ini</code>.",
+  cdv_h: "Секунды перезарядки", cdv_p: "Сколько секунд осталось до готовности способности и глобальной способности — в центре кнопки, текстом самой кнопки.", cdv_s: "Только читает, рассинхрона нет. Размер и цвет: <code>Cooldowns.ini</code>.",
+  lsv_h: "Рейтинг в лобби", lsv_p: "Рейтинг Relic у каждого игрока в лобби; при наведении — винрейт, число игр и часы в Steam. Только показывает, никого не кикает.", lsv_s: "Работает в одиночку, в любом лобби. Заменяет старый LobbyStats 0.7 / 0.10: старый <code>LobbyStats.dll</code> перезапишите.",
+  lrv_h: "Рейтинги на экране загрузки", lrv_p: "Рейтинг Relic после имени каждого игрока на экране загрузки онлайн-матча.", lrv_s: "Работает и с LobbyStats, и без него.",
+  jsv_h: "Звук, когда заходят в лобби", jsv_p: "Звук и мигающая кнопка на панели задач, когда в ваше лобби заходит игрок, а игра свёрнута (alt-tab).", jsv_s: "Мягкий или резкий: <code>Sound=soft | sharp</code> в <code>JoinSound.ini</code>.",
+  rvv_h: "Задний ход", rvv_p: "Как в Company of Heroes: зажмите Ctrl и щёлкните правой кнопкой позади техники (или по миникарте) — она отходит задом, лобовой бронёй к врагу, а не разворачивается.", rvv_s: "Работает через обычные приказы игры, для остальных игроков ничего не меняется. Клавиша и отрезки: <code>Reverse.ini</code>.",
+  ofv_h: "Исправление тормозов обсервера", ofv_p: "Обсервер больше не пересобирает всю информацию о матче десятки раз за кадр — живая игра обсом идёт так же плавно, как реплей.", ofv_s: "Нужен только тому, кто смотрит; рассинхрона нет.",
+  clv_h: "Запись вылетов игры", clv_p: "Если игра закрывается сама без сообщений: где в коде случилась ошибка и кто закрыл игру, плюс маленький дамп — в <code>dow2-patches\\CrashLog.log</code>. В игре ничего не меняет, никуда ничего не отправляет.", clv_s: "Для разработчиков: поставьте, повторите вылет, пришлите нам <code>CrashLog.log</code> (и <code>.dmp</code>), потом удалите.",
+  allv_h: "Всё вместе", allv_p: "Автоматч v2.0, ReinforceFix, JumpRetry, SteamKeep, таймер матча, APM, перезарядки, рейтинг в лобби, рейтинги на экране загрузки, звук входа в лобби, Reverse и ObsFix одним архивом — каждое по-прежнему своей DLL в <code>dow2-patches</code>, со своим <code>.ini</code>.", allv_s: "Не вошли: RelayForward, NetProbe и CrashLog — их берите отдельно, если нужны. Чтобы выключить одно — удалите его DLL.",
   dl_zip: "Скачать .zip",
   h_tools: "Веб-инструменты",
   st_h: "Статистика игроков", st_p: "Рейтинг Relic, винрейт по расам и последние матчи любого игрока Elite — те же данные, что показывает дополнение в лобби.",
