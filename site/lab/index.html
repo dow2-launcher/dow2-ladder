@@ -79,52 +79,106 @@ footer { padding: 30px 0 50px; color: var(--muted); font-size: 15px; text-align:
   <p class="sub" data-i="addons_sub">Launcher → “Add-ons” → tick the ones you want. Each add-on is a separate file: switched off, it is not loaded at all.</p>
   <div class="cards">
     <div class="card">
-      <h3><span data-i="mm_h">Automatch</span> <span class="ver">mmfind-0.32</span> <span class="badge b-test" data-i="b_test">test</span></h3>
-      <p data-i="mm_p">One-button matchmaking: Multiplayer → Find a Game → Start Searching. 1v1 / 2v2 / 3v3 and your maps in Map Preferences; “Watch a match” joins the next game as an observer. The game is created and joined for you; Cancel dissolves the found match for everyone.</p>
-      <small data-i="mm_s">Every player in the match needs it. Queue and live matches: <a href="/ladder/">ladder</a></small>
+      <h3><span data-i="a_relay_r2_h">Use our servers for games</span> <span class="ver">relay-21</span> <span class="badge b-ok" data-i="b_ok">works</span></h3>
+      <p data-i="a_relay_r2_p">A game goes straight through our server (Poland, Germany, Moscow - the nearest is picked by itself) when everyone in it reaches our servers. That is our automatch (Find a Game): the matchmaker knows every player's delay and puts the match on the server best for all. Ordinary lobbies (Custom Games) play on Relic as without this tick - or through a forwarding server when "Use forwarding servers in all games" is on. UDP only to our servers.</p>
+      <small><span data-i="cat_network">Network and automatch</span> · <span data-i="def_on">on by default</span></small>
     </div>
     <div class="card">
-      <h3><span data-i="rl_h">Our game servers</span> <span class="ver">relay-14</span> <span class="badge b-test" data-i="b_test">test</span></h3>
-      <p data-i="rl_p">Matches go through our servers (Poland, Germany or Moscow) instead of Relic's in the USA: much lower delay.</p>
-      <small data-i="rl_s">Works when everyone in the match has it on.</small>
-    </div>
-    <div class="card">
-      <h3><span data-i="ls_h">Lobby rating</span> <span class="ver">0.10.0</span> <span class="badge b-ok" data-i="b_ok">works</span></h3>
-      <p data-i="ls_p">Relic rating next to each player in the lobby; on hover — win rate, games and Steam hours. Only shows information, never kicks anyone.</p>
-      <small data-i="ls_s">Works alone, in any lobby.</small>
-    </div>
-    <div class="card">
-      <h3><span data-i="lr_h">Ratings on the loading screen</span> <span class="ver">loadingratings-2</span> <span class="badge b-ok" data-i="b_ok">works</span></h3>
-      <p data-i="lr_p">The Relic rating after each player's name on the loading screen of an online match.</p>
-    </div>
-    <div class="card">
-      <h3><span data-i="mt_h">Match timer</span> <span class="ver">matchtimer-5</span> <span class="badge b-test" data-i="b_test">test</span></h3>
-      <p data-i="mt_p">Match time (minutes:seconds of game time) next to the Menu button.</p>
-    </div>
-    <div class="card">
-      <h3><span data-i="cd_h">Cooldown seconds</span> <span class="ver">cooldowns-2</span> <span class="badge b-test" data-i="b_test">test</span></h3>
-      <p data-i="cd_p">Seconds left on recharging abilities and global abilities, in the middle of the button.</p>
-    </div>
-    <div class="card">
-      <h3><span data-i="rv_h">Reverse</span> <span class="ver">reverse-4</span> <span class="badge b-test" data-i="b_test">test</span></h3>
-      <p data-i="rv_p">Like Company of Heroes: hold Ctrl and right-click behind your vehicles (or on the minimap) — they back off driving backwards, front armour to the enemy, instead of turning around.</p>
-      <small data-i="rv_s">Uses the game's own orders, nothing changes for the other players.</small>
-    </div>
-    <div class="card">
-      <h3><span data-i="of_h">Observer lag fix</span> <span class="ver">obsfix-1</span> <span class="badge b-test" data-i="b_test">test</span></h3>
-      <p data-i="of_p">Spectating a live game no longer rebuilds the whole match info dozens of times per frame — live spectating runs as smoothly as a replay.</p>
+      <h3><span data-i="a_automatch_h">Automatch v2.0</span> <span class="ver">mmfind-0.45</span> <span class="badge b-test" data-i="b_test">test</span></h3>
+      <p data-i="a_automatch_p">The new Elite automatch, entirely on our servers: Multiplayer → Find a Game → Start Searching. Matched by rating in 1v1 / 2v2 / 3v3, no friends or private rooms needed, the match starts within seconds; the lobby and the game run through our servers (Moscow, Poland, Germany). Ordinary Custom Games lobbies are not affected. If it cannot run, Find a Game shows why and what to do.</p>
+      <small><span data-i="cat_network">Network and automatch</span> · <span data-i="def_on">on by default</span></small>
     </div>
     <div class="card exp">
-      <h3><span data-i="np_h">Connection check</span> <span class="ver">netprobe-2</span> <span class="badge b-exp" data-i="b_exp">experiment</span></h3>
-      <p data-i="np_p">Nothing in the game changes: 15 s after the game starts it checks for 1–2 minutes in the background what gets through from your computer to our servers (TCP and UDP on several ports, ~5 MB) and sends the result to us by itself.</p>
-      <small data-i="np_s">Pure experiment, at your own risk. Test alone: tick it, start the game, wait 2 minutes in the menu. Helps us make our servers work where the connection gets cut on the way (Russia, Ukraine).</small>
+      <h3><span data-i="a_netprobe_h">EXPERIMENT: connection check to our servers</span> <span class="ver">netprobe-2</span> <span class="badge b-exp" data-i="b_exp">experiment</span></h3>
+      <p data-i="a_netprobe_p">Pure experiment, at your own risk. Nothing in the game changes: 15 s after the game starts it checks for 1-2 minutes in the background what gets through from your computer to our game servers (TCP and UDP on several ports, ~5 MB) and sends the result to us by itself (NetProbe.log). How to test: alone, no lobby or opponent needed - tick it, start the game and wait 2 minutes in the menu. It helps us make our servers work for players whose connection gets cut on the way (Russia, Ukraine).</p>
+      <small><span data-i="cat_network">Network and automatch</span></small>
+    </div>
+    <div class="card">
+      <h3><span data-i="a_lobbystats_r3_h">Lobby rating</span> <span class="ver">lobbystats-0.11.0</span> <span class="badge b-ok" data-i="b_ok">works</span></h3>
+      <p data-i="a_lobbystats_r3_p">Relic rating next to each player in the lobby; on hover - win rate, games and Steam hours. Only shows, kicks nobody.</p>
+      <small><span data-i="cat_interface">Interface</span></small>
+    </div>
+    <div class="card">
+      <h3><span data-i="a_loadingratings_r3_h">Ratings on the loading screen</span> <span class="ver">loadingratings-4</span> <span class="badge b-ok" data-i="b_ok">works</span></h3>
+      <p data-i="a_loadingratings_r3_p">The Relic rating after each player's name on the loading screen of an online match.</p>
+      <small><span data-i="cat_interface">Interface</span></small>
+    </div>
+    <div class="card">
+      <h3><span data-i="a_matchtimer_r2_h">Match timer</span> <span class="ver">matchtimer-8</span> <span class="badge b-ok" data-i="b_ok">works</span></h3>
+      <p data-i="a_matchtimer_r2_p">Match time (minutes:seconds of game time) in the game's own interface: at the top under the victory point counter, under the Menu button, or in the Menu button. A match without the counter (annihilation) shows it under the Menu button.</p>
+      <small><span data-i="cat_interface">Interface</span></small>
+    </div>
+    <div class="card">
+      <h3><span data-i="a_cooldowns_r2_h">Cooldown seconds on ability buttons</span> <span class="ver">cooldowns-7</span> <span class="badge b-ok" data-i="b_ok">works</span></h3>
+      <p data-i="a_cooldowns_r2_p">Seconds left on recharging abilities and global abilities, in the middle of the button.</p>
+      <small><span data-i="cat_interface">Interface</span></small>
+    </div>
+    <div class="card">
+      <h3><span data-i="a_apm_h">APM (actions per minute)</span> <span class="ver">apm-1</span> <span class="badge b-test" data-i="b_test">test</span></h3>
+      <p data-i="a_apm_p">Your clicks and key presses per minute over the last minute of the match, in the game's own interface: at the top next to the match timer, or in the bottom left corner of the minimap. Only you see it; nothing is sent to the game.</p>
+      <small><span data-i="cat_interface">Interface</span></small>
+    </div>
+    <div class="card">
+      <h3><span data-i="a_obsfix_r2_h">Observer lag fix (experimental)</span> <span class="ver">obsfix-1</span> <span class="badge b-ok" data-i="b_ok">works</span></h3>
+      <p data-i="a_obsfix_r2_p">Spectating a live game no longer rebuilds the whole match info dozens of times per frame. Turn on, spectate, send logs.</p>
+      <small><span data-i="cat_gameplay">Gameplay</span></small>
+    </div>
+    <div class="card">
+      <h3><span data-i="a_reverse_r2_h">Reverse (test)</span> <span class="ver">reverse-4</span> <span class="badge b-ok" data-i="b_ok">works</span></h3>
+      <p data-i="a_reverse_r2_p">Like Company of Heroes: hold Ctrl and right-click behind your units (or on the minimap) - vehicles back off to that point driving backwards, front armour to the enemy, instead of turning around. Works through the game's own orders, nothing changes for the other players.</p>
+      <small><span data-i="cat_gameplay">Gameplay</span></small>
+    </div>
+    <div class="card">
+      <h3><span data-i="a_reinforcefix_h">Auto-reinforce through the webway gate</span> <span class="ver">reinforcefix-1</span> <span class="badge b-ok" data-i="b_ok">works</span></h3>
+      <p data-i="a_reinforcefix_p">A squad that goes into an Eldar webway gate comes out with auto-reinforce still on (the game turns it off). The reinforce orders are the game's own - nothing else changes.</p>
+      <small><span data-i="cat_gameplay">Gameplay</span></small>
+    </div>
+    <div class="card">
+      <h3><span data-i="a_steamkeep_h">Don't drop out of the match when Steam goes away</span> <span class="ver">steamkeep-2</span> <span class="badge b-test" data-i="b_test">test</span></h3>
+      <p data-i="a_steamkeep_p">When Steam loses its connection during a match (a failure, Steam updating its servers, Steam restarting), the game leaves the match and often closes. With this the whole match is played to the end, however long Steam is away and however often it drops - the game itself runs through the game server, Steam is not needed for it. Steam's request to close the game is not followed until the match is over; your own Alt+F4, Quit in the menu and the close button work. After the match the game stays open, the result and the replay go out as usual. A match over Steam P2P without a relay can't be saved.</p>
+      <small><span data-i="cat_gameplay">Gameplay</span></small>
+    </div>
+    <div class="card">
+      <h3><span data-i="a_jumpretry_h">Jumps don't break on obstacles</span> <span class="ver">jumpretry-2</span> <span class="badge b-test" data-i="b_test">test</span></h3>
+      <p data-i="a_jumpretry_p">For the Autarch and other jumpers: if, on the way to the jump point, he hopped over an obstacle by himself and that broke the jump order, the order is repeated right after the landing (up to 3 times). The repeat is the game's own order - nothing changes for the other players; any new order you give the squad cancels it.</p>
+      <small><span data-i="cat_gameplay">Gameplay</span></small>
+    </div>
+    <div class="card exp">
+      <h3><span data-i="a_roomjoin_h">Join a lobby from the launcher (test)</span> <span class="ver">roomjoin-1</span> <span class="badge b-exp" data-i="b_exp">experiment</span></h3>
+      <p data-i="a_roomjoin_p">EXPERIMENT. A Join button on the Lobbies tab for Elite rooms without a password: the game starts and walks into the room by itself (a 'Joining the Game' screen). If it can't, the game shows the public games list. The automatch is not touched.</p>
+      <small><span data-i="cat_experiment">Experiments</span></small>
+    </div>
+    <div class="card">
+      <h3><span data-i="a_relay_fwd_h">Use forwarding servers in all games</span> <span class="ver">relayfwd-21</span> <span class="badge b-ok" data-i="b_ok">works</span></h3>
+      <p data-i="a_relay_fwd_p">Every online game that does not go straight through our server (ordinary lobbies, games with players without our ticks) goes through our server nearest to you, which passes it on to Relic's server. For players whose connection to Relic gets cut or lags. None of ours answers - straight to Relic. Together with "Use our servers for games": straight through ours when possible, otherwise the nearest forwarding server. UDP only to our servers.</p>
+      <small><span data-i="cat_other">Other</span></small>
+    </div>
+    <div class="card">
+      <h3><span data-i="a_joinsound_h">Sound when someone joins the lobby</span> <span class="ver">joinsound-1</span> <span class="badge b-ok" data-i="b_ok">works</span></h3>
+      <p data-i="a_joinsound_p">A sound when a player comes into your lobby while the game is in the background (alt-tab), and the taskbar button flashes. Soft or sharp; no tick - no sound.</p>
+      <small><span data-i="cat_other">Other</span></small>
+    </div>
+    <div class="card">
+      <h3><span data-i="a_rusifikator_h">Russian translation (by Gosudar)</span> <span class="ver">rusifikator-text-1</span></h3>
+      <p data-i="a_rusifikator_p">Russian text for Dawn of War II and Elite 3.2 by Gosudar (steamcommunity.com/sharedfiles/filedetails/?id=3476365376). The English files are kept and come back when it is off. Support the author: boosty.to/gosudar412th</p>
+      <small><span data-i="cat_other">Other</span></small>
+    </div>
+    <div class="card">
+      <h3><span data-i="a_elitefix_wmic_h">Fix: Elite.exe crash on Windows 11 25H2</span> <span class="ver">elitefix-nowmic-1</span> <span class="badge b-test" data-i="b_test">test</span></h3>
+      <p data-i="a_elitefix_wmic_p">After starting the game Elite.exe checks its launch parameters with the old Windows tool wmic, which Windows 11 25H2 no longer has - so Elite.exe crashes (Windows log: Elite.exe, 0xc0000409). The game itself keeps running. This tick puts an Elite.exe without that check (one instruction changed into a jump to its normal ending); everything else is as it was. Untick to get the original Elite.exe back.</p>
+      <small><span data-i="cat_other">Other</span></small>
+    </div>
+    <div class="card">
+      <h3><span data-i="a_crashlog_h">Record game crashes (for the developers)</span> <span class="ver">crashlog-1</span> <span class="badge b-test" data-i="b_test">test</span></h3>
+      <p data-i="a_crashlog_p">If the game closes by itself (the window vanishes, Windows records nothing), tick this, repeat the crash and press "Send logs" in the launcher. Elite_DLLs gets CrashLog.log - where in the code the error happened and what closed the game (the game's built-in BugSplat crash reporter closes it silently) - and a small dump CrashLog_*.dmp. Changes nothing in the game, sends nothing anywhere.</p>
+      <small><span data-i="cat_other">Other</span></small>
     </div>
   </div>
   <div class="btns center">
-    <a class="btn main" href="../dl/EliteLauncher-1.3.15-setup.exe" data-i="la_win">Launcher for Windows</a>
-    <a class="btn" href="../dl/EliteLauncher-1.3.15-windows-portable.zip" data-i="la_port">Windows portable</a>
-    <a class="btn" href="../dl/EliteLauncher-1.3.15.AppImage">Linux</a>
-    <a class="btn" href="../dl/EliteLauncher-1.3.15-mac.zip">macOS</a>
+    <a class="btn main" href="../dl/EliteLauncher-1.4.7-setup.exe" data-i="la_win">Launcher for Windows</a>
+    <a class="btn" href="../dl/EliteLauncher-1.4.7-windows-portable.zip" data-i="la_port">Windows portable</a>
+    <a class="btn" href="../dl/EliteLauncher-1.4.7.AppImage">Linux</a>
+    <a class="btn" href="../dl/EliteLauncher-1.4.7-mac.zip">macOS</a>
   </div>
 </div></section>
 
@@ -267,20 +321,26 @@ var RU = {
   h_addons: "В лаунчере (Elite)",
   addons_sub: "Лаунчер → «Дополнения» → отметьте нужные. Каждое дополнение — отдельный файл: выключенное вообще не загружается.",
   b_test: "тест", b_ok: "работает", b_exp: "эксперимент",
-  mm_h: "Автоматч", mm_p: "Поиск матча одной кнопкой: Мультиплеер → Find a Game → Start Searching. Режим 1v1 / 2v2 / 3v3 и карты — в Map Preferences; «Watch a match» — зайти наблюдателем в ближайший матч. Игра создаётся и подключается сама; кнопка «Отмена» распускает найденный матч у всех.",
-  mm_s: "Нужно всем игрокам матча. Очередь и матчи: <a href=\"/ladder/\">ладдер</a>",
-  rl_h: "Свои игровые серверы", rl_p: "Матчи идут через наши серверы (Польша, Германия или Москва), а не через серверы Relic в США: задержка намного меньше.",
-  rl_s: "Работает, когда галочка включена у всех игроков матча.",
-  ls_h: "Рейтинг в лобби", ls_p: "Рейтинг Relic у каждого игрока в лобби; при наведении — винрейт, число игр и часы в Steam. Только показывает, никого не кикает.",
-  ls_s: "Работает в одиночку, в любом лобби.",
-  lr_h: "Рейтинги на экране загрузки", lr_p: "Рейтинг Relic после имени каждого игрока на экране загрузки онлайн-матча.",
-  mt_h: "Таймер матча", mt_p: "Время матча (минуты:секунды игрового времени) рядом с кнопкой Menu.",
-  cd_h: "Секунды перезарядки", cd_p: "Сколько секунд осталось до готовности способности и глобальной способности — в центре кнопки.",
-  rv_h: "Задний ход", rv_p: "Как в Company of Heroes: зажмите Ctrl и щёлкните правой кнопкой позади техники (или по миникарте) — она отходит задом, лобовой бронёй к врагу, а не разворачивается.",
-  rv_s: "Работает через обычные приказы игры, для остальных игроков ничего не меняется.",
-  of_h: "Исправление тормозов обсервера", of_p: "Обсервер больше не пересобирает всю информацию о матче десятки раз за кадр — живая игра обсом идёт так же плавно, как реплей.",
-  np_h: "Проверка связи", np_p: "В игре ничего не меняется: через 15 секунд после запуска игры 1–2 минуты в фоне проверяет, что доходит с вашего компьютера до наших серверов (TCP и UDP на нескольких портах, ~5 МБ), и сам присылает нам результат.",
-  np_s: "Чистый эксперимент, на свой страх и риск. Проверять одному: поставить галочку, запустить игру, подождать 2 минуты в меню. Помогает сделать наши серверы рабочими там, где связь режется по дороге (Россия, Украина).",
+  cat_network: "Сеть и автоматч", cat_interface: "Интерфейс", cat_gameplay: "Игра", cat_experiment: "Эксперименты", cat_other: "Другое", def_on: "по умолчанию вкл",
+  a_relay_r2_h: "Использовать свои серверы для игр", a_relay_r2_p: "Игра идёт прямо через наш сервер (Польша, Германия, Москва — ближайший выбирается сам), когда до наших серверов дотягиваются все её участники. Это наш автоматч (Find a Game): матчмейкер знает задержку каждого игрока и ставит матч на сервер, лучший для всех. Обычные лобби (Custom Games) идут через Relic, как без галочки, — или через форвардинг-сервер, если включена галочка «Использовать форвардинг-серверы во всех играх». Связь с нашими серверами — только UDP.",
+  a_automatch_h: "Автоматч v2.0", a_automatch_p: "Новый автоматч Elite, полностью на наших серверах: Мультиплеер → Find a Game → Start Searching. Подбор по рейтингу в 1v1 / 2v2 / 3v3, без друзей и приватных комнат, старт за секунды; лобби и сама игра идут через наши серверы (Москва, Польша, Германия). Обычные лобби Custom Games это не затрагивает. Если автоматч недоступен, на экране Find a Game написано почему и что сделать.",
+  a_netprobe_h: "ЭКСПЕРИМЕНТ: проверка связи с нашими серверами", a_netprobe_p: "Чистый эксперимент, на свой страх и риск. В игре ничего не меняется: через 15 секунд после запуска игры 1–2 минуты в фоне проверяет, что доходит с вашего компьютера до наших игровых серверов (TCP и UDP на нескольких портах, ~5 МБ), и сам присылает нам результат (NetProbe.log). Как проверить: одному, лобби и соперник не нужны — поставьте галочку, запустите игру и подождите 2 минуты в меню. Это поможет сделать наши серверы рабочими для тех, у кого связь режется по дороге (Россия, Украина).",
+  a_lobbystats_r3_h: "Рейтинг в лобби", a_lobbystats_r3_p: "Рейтинг Relic у каждого игрока в лобби; при наведении — винрейт, число игр и часы в Steam. Только показывает, никого не кикает.",
+  a_loadingratings_r3_h: "Рейтинги на экране загрузки", a_loadingratings_r3_p: "Рейтинг Relic после имени каждого игрока на экране загрузки онлайн-матча.",
+  a_matchtimer_r2_h: "Таймер матча", a_matchtimer_r2_p: "Время матча (минуты:секунды игрового времени) в интерфейсе самой игры: сверху под счётчиком очков, под кнопкой Menu или в самой кнопке Menu. В матче без счётчика (аннигиляция) — под кнопкой Menu.",
+  a_cooldowns_r2_h: "Секунды перезарядки на кнопках способностей", a_cooldowns_r2_p: "Сколько секунд осталось до готовности способности и глобальной способности — в центре кнопки.",
+  a_apm_h: "APM (действий в минуту)", a_apm_p: "Ваши клики и нажатия клавиш в минуту за последнюю минуту матча, в интерфейсе самой игры: сверху рядом с таймером матча или в левом нижнем углу миникарты. Видите только вы, в игру ничего не отправляется.",
+  a_obsfix_r2_h: "Исправление тормозов обсервера (тест)", a_obsfix_r2_p: "Обсервер больше не пересобирает всю информацию о матче десятки раз за кадр. Включи, посмотри игру обсом, отправь логи.",
+  a_reverse_r2_h: "Задний ход (тест)", a_reverse_r2_p: "Как в Company of Heroes: зажмите Ctrl и щёлкните правой кнопкой позади отряда (или по миникарте) — техника отходит туда задом, лобовой бронёй к врагу, а не разворачивается. Работает через обычные приказы игры, для остальных игроков ничего не меняется.",
+  a_reinforcefix_h: "Автоподкрепление после врат", a_reinforcefix_p: "Отряд, зашедший во врата Паутины эльдар, выходит с включённым автоподкреплением (игра его сбрасывает). Подкрепление заказывает сама игра обычными приказами — больше ничего не меняется.",
+  a_steamkeep_h: "Не вылетать из матча при отвале Steam", a_steamkeep_p: "Когда во время матча у Steam пропадает связь (сбой, обновление серверов Steam, перезапуск Steam), игра выходит из матча и часто закрывается. С этой галочкой матч доигрывается до конца — весь матч, сколько бы Steam ни отсутствовал и сколько бы раз ни отваливался: сама игра идёт через игровой сервер, Steam для неё не нужен. Просьбу Steam закрыть игру до конца матча не выполняем; свои Alt+F4, выход через меню и крестик работают. После матча игра не закрывается, результат и реплей уходят как обычно. Матч через Steam P2P без релея спасти нельзя.",
+  a_jumpretry_h: "Прыжок не срывается о препятствия", a_jumpretry_p: "Для аутарха и других прыгунов: если по пути к точке прыжка он сам перескочил препятствие и из-за этого приказ прыжка сорвался, приказ повторяется сразу после приземления (до 3 раз). Повтор — обычный приказ игры, для остальных игроков ничего не меняется; любой ваш новый приказ отряду отменяет повтор.",
+  a_roomjoin_h: "Вход в комнату из лаунчера (тест)", a_roomjoin_p: "ЭКСПЕРИМЕНТ. Кнопка «Войти» во вкладке «Комнаты» для Elite-комнат без пароля: игра запускается и сама заходит в комнату (экран «Joining the Game»). Если не вышло — игра показывает список публичных игр. Автоматч не затрагивается.",
+  a_relay_fwd_h: "Использовать форвардинг-серверы во всех играх", a_relay_fwd_p: "Все сетевые игры, которые не идут прямо через наш сервер (обычные лобби, игры с теми, у кого нет наших галочек), идут через ближайший к вам наш сервер, а он передаёт их на сервер Relic. Для тех, у кого связь с Relic режется или лагает. Ни один наш сервер не отвечает — игра идёт к Relic напрямую. Вместе с «Использовать свои серверы для игр»: прямо через наш сервер, когда можно, иначе — через ближайший форвардинг. Связь с нашими серверами — только UDP.",
+  a_joinsound_h: "Звук, когда заходят в лобби", a_joinsound_p: "Звук, когда в ваше лобби заходит игрок, пока игра свёрнута (alt-tab), и мигает кнопка на панели задач. Мягкий или резкий; без галочки — без звука.",
+  a_rusifikator_h: "Русификатор (автор — Gosudar)", a_rusifikator_p: "Русский текст Dawn of War II и Elite 3.2 от Gosudar (руководство в Steam: steamcommunity.com/sharedfiles/filedetails/?id=3476365376). Английские файлы сохраняются и возвращаются, если снять галочку. Поддержать автора: boosty.to/gosudar412th",
+  a_elitefix_wmic_h: "Исправление: вылет Elite.exe на Windows 11 25H2", a_elitefix_wmic_p: "Elite.exe после запуска игры проверяет её параметры старой программой Windows wmic, а в Windows 11 25H2 её убрали — Elite.exe падает (в журнале Windows: Elite.exe, 0xc0000409). Сама игра при этом работает. Галочка ставит Elite.exe без этой проверки (одна команда в нём заменена переходом к его обычному завершению); всё остальное в нём как было. Снять галочку — вернётся исходный Elite.exe.",
+  a_crashlog_h: "Запись вылетов игры (для разработчиков)", a_crashlog_p: "Если игра у вас закрывается сама (окно пропадает, а Windows ничего не пишет) — включите эту галочку, повторите вылет и нажмите в лаунчере «Отправить логи». В Elite_DLLs появится CrashLog.log: где именно в коде случилась ошибка и кто закрыл игру (встроенный в игру сборщик ошибок BugSplat закрывает её молча), и маленький дамп CrashLog_*.dmp. В игру ничего не встраивает, никуда ничего не отправляет.",
   j_elite: "Elite (лаунчер) ↓", j_van: "Ванильная DoW2 ↓",
   la_win: "Лаунчер для Windows", la_port: "Windows без установки",
   h_van: "Для ванильной DoW2 (без лаунчера)",
