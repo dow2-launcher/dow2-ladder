@@ -150,6 +150,18 @@ footer { padding: 30px 0 50px; color: var(--muted); font-size: 15px; text-align:
       <small data-i="rf_s">Only the interface changes, no desync; your opponents don't need it.</small>
       <div class="btns"><a class="btn main" href="dl/ReinforceFix_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
     </div>
+    <div class="card">
+      <h3><span data-i="jr_h">Jumps don't break on obstacles</span> <span class="ver">JumpRetry 2</span> <span class="badge b-ok" data-i="b_ok">works</span></h3>
+      <p data-i="jr_p">For the Autarch and other jumpers: if, on the way to the jump point, he hopped over an obstacle by himself and that broke the jump order, the order is repeated right after the landing (up to 3 times). Any new order you give the squad cancels the repeat.</p>
+      <small data-i="jr_s">The repeat is the game's own order, no desync; your opponents don't need it. Turn off: <code>Enabled=0</code> in <code>JumpRetry.ini</code>.</small>
+      <div class="btns"><a class="btn main" href="dl/JumpRetry_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
+    </div>
+    <div class="card">
+      <h3><span data-i="rfw_h">Online games through our nearest server</span> <span class="ver">RelayForward 21</span> <span class="badge b-test" data-i="b_test">test</span></h3>
+      <p data-i="rfw_p">Every Relic online game (Custom Games, any lobby) goes through our server nearest to you — Poland, Germany or Moscow — which passes it on to Relic. For those whose way to Relic's servers is cut or slow (Russia: DPI / blocking); Moscow goes on to Relic through Germany. If our servers can't be reached, the game goes straight to Relic, as without the patch.</p>
+      <small data-i="rfw_s">The same game by another road: no desync, your opponents don't need it. Don't combine with the “Our game servers” and automatch packages (old Relay.dll). Turn off: delete <code>RelayForward.dll</code>. Log: <code>dow2-patches\Relay.log</code>.</small>
+      <div class="btns"><a class="btn main" href="dl/RelayForward_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
+    </div>
     <div class="card exp">
       <h3><span data-i="npv_h">Connection check</span> <span class="ver">NetProbe 2</span> <span class="badge b-exp" data-i="b_exp">experiment</span></h3>
       <p data-i="npv_p">The same check as in the launcher: start the game, wait 2 minutes in the menu — the result is sent to us by itself (only the check and your Steam ID).</p>
@@ -224,6 +236,10 @@ var RU = {
   srv_s: "Тест, на свой страх и риск. Эксперимент: UDP=1 в Relay.ini — до нашего сервера игра идёт по UDP (если TCP режется по дороге). В пакете автоматча совместимый вариант уже есть.", srv_c: "Совместимый .zip", srv_n: "Обычный (только наши) .zip", srv_b: "С кем угодно .zip",
   rf_h: "Автопополнение после вебвей-ворот", rf_p: "Отряд с включённым автопополнением, прошедший через вебвей-ворота эльдар, больше не выходит из них с выключенным автопополнением.",
   rf_s: "Меняется только интерфейс, рассинхрона нет; соперникам ставить не нужно.",
+  jr_h: "Прыжок не срывается о препятствия", jr_p: "Для аутарха и других прыгунов: если по пути к точке прыжка он сам перескочил препятствие и из-за этого приказ прыжка сорвался, приказ повторяется сразу после приземления (до 3 раз). Любой ваш новый приказ отряду отменяет повтор.",
+  jr_s: "Повтор — обычный приказ игры, рассинхрона нет; соперникам ставить не нужно. Выключить: <code>Enabled=0</code> в <code>JumpRetry.ini</code>.",
+  rfw_h: "Сетевые игры через наш ближайший сервер", rfw_p: "Каждая онлайн-игра Relic (Custom Games, любые лобби) идёт через ближайший к вам наш сервер — Польша, Германия или Москва, — а он передаёт её в Relic. Для тех, у кого путь до серверов Relic режется или медленный (Россия: DPI/РКН); Москва дальше ходит к Relic через Германию. Если наши серверы недоступны — игра идёт напрямую к Relic, как без патча.",
+  rfw_s: "Та же игра, только другой дорогой: рассинхрона нет, соперникам ставить не нужно. Не ставить вместе с пакетами «Наши игровые серверы» и автоматча (там старый Relay.dll). Выключить: удалить <code>RelayForward.dll</code>. Лог: <code>dow2-patches\\Relay.log</code>.",
   npv_h: "Проверка связи", npv_p: "Та же проверка, что в лаунчере: запустить игру, подождать 2 минуты в меню — результат уйдёт нам сам (только проверка и ваш Steam ID).",
   npv_s: "Чистый эксперимент, на свой страх и риск. Запускается при каждом старте игры, поэтому после теста удалите NetProbe.dll.",
   all_h: "Набор: обсервер + рейтинг в лобби + автопополнение", all_p: "ObsFix, LobbyStats и ReinforceFix одним архивом, с файлами настроек (<code>.ini</code>) для каждого.",
