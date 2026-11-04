@@ -114,8 +114,8 @@ footer { padding: 30px 0 50px; color: var(--muted); font-size: 15px; text-align:
       <small><span data-i="cat_interface">Interface</span></small>
     </div>
     <div class="card">
-      <h3><span data-i="a_apm_h">APM (actions per minute)</span> <span class="ver">apm-1</span> <span class="badge b-test" data-i="b_test">test</span></h3>
-      <p data-i="a_apm_p">Your clicks and key presses per minute over the last minute of the match, in the game's own interface: at the top next to the match timer, or in the bottom left corner of the minimap. Only you see it; nothing is sent to the game.</p>
+      <h3><span data-i="a_apm_h">APM (actions per minute)</span> <span class="ver">apm-2</span> <span class="badge b-test" data-i="b_test">test</span></h3>
+      <p data-i="a_apm_p">Your clicks and key presses per minute, smoothed over about the last 5 seconds (a fight shows at once), in the game's own interface: at the top next to the match timer, or in the bottom left corner of the minimap. Only you see it; nothing is sent to the game.</p>
       <small><span data-i="cat_interface">Interface</span></small>
     </div>
     <div class="card">
@@ -223,8 +223,8 @@ footer { padding: 30px 0 50px; color: var(--muted); font-size: 15px; text-align:
       <div class="btns"><a class="btn main" href="dl/MatchTimer_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
     </div>
     <div class="card">
-      <h3><span data-i="apv_h">APM (actions per minute)</span> <span class="ver">APM 1</span> <span class="badge b-test" data-i="b_test">test</span></h3>
-      <p data-i="apv_p">Your clicks and key presses per minute over the last minute of the match: at the top next to the match timer or in the minimap corner. Only you see it.</p>
+      <h3><span data-i="apv_h">APM (actions per minute)</span> <span class="ver">APM 2</span> <span class="badge b-test" data-i="b_test">test</span></h3>
+      <p data-i="apv_p">Your clicks and key presses per minute, smoothed over about the last 5 seconds (a fight shows at once): at the top next to the match timer or in the minimap corner. Only you see it.</p>
       <small data-i="apv_s">Nothing goes to the game, no desync. Settings: <code>APM.ini</code>.</small>
       <div class="btns"><a class="btn main" href="dl/APM_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
     </div>
@@ -329,7 +329,7 @@ var RU = {
   a_loadingratings_r3_h: "Рейтинги на экране загрузки", a_loadingratings_r3_p: "Рейтинг Relic после имени каждого игрока на экране загрузки онлайн-матча.",
   a_matchtimer_r2_h: "Таймер матча", a_matchtimer_r2_p: "Время матча (минуты:секунды игрового времени) в интерфейсе самой игры: сверху под счётчиком очков, под кнопкой Menu или в самой кнопке Menu. В матче без счётчика (аннигиляция) — под кнопкой Menu.",
   a_cooldowns_r2_h: "Секунды перезарядки на кнопках способностей", a_cooldowns_r2_p: "Сколько секунд осталось до готовности способности и глобальной способности — в центре кнопки.",
-  a_apm_h: "APM (действий в минуту)", a_apm_p: "Ваши клики и нажатия клавиш в минуту за последнюю минуту матча, в интерфейсе самой игры: сверху рядом с таймером матча или в левом нижнем углу миникарты. Видите только вы, в игру ничего не отправляется.",
+  a_apm_h: "APM (действий в минуту)", a_apm_p: "Ваши клики и нажатия клавиш в минуту со сглаживанием примерно за последние 5 секунд (бой виден сразу), в интерфейсе самой игры: сверху рядом с таймером матча или в левом нижнем углу миникарты. Видите только вы, в игру ничего не отправляется.",
   a_obsfix_r2_h: "Исправление тормозов обсервера", a_obsfix_r2_p: "Обсервер больше не пересобирает всю информацию о матче десятки раз за кадр. Включи, посмотри игру обсом, отправь логи.",
   a_reverse_r2_h: "Задний ход", a_reverse_r2_p: "Как в Company of Heroes: зажмите Ctrl и щёлкните правой кнопкой позади отряда (или по миникарте) — техника отходит туда задом, лобовой бронёй к врагу, а не разворачивается. Работает через обычные приказы игры, для остальных игроков ничего не меняется.",
   a_reinforcefix_h: "Автоподкрепление после врат", a_reinforcefix_p: "Отряд, зашедший во врата Паутины эльдар, выходит с включённым автоподкреплением (игра его сбрасывает). Подкрепление заказывает сама игра обычными приказами — больше ничего не меняется.",
@@ -356,7 +356,7 @@ var RU = {
   am2_h: "Автоматч v2.0", am2_p: "В ванили снова работает Find a Game: Мультиплеер → Find a Game → Start Searching находит соперника 1v1 / 2v2 / 3v3 по рейтингу, матч стартует сам за секунды. Поиск ведёт наш лобби-сервер, матч идёт через наш игровой сервер; обычные лобби Custom Games не затрагиваются. Если автоматч недоступен — на экране Find a Game написано почему.", am2_s: "Сводит только игроков ванили с этим пакетом (своя очередь, с Elite не смешивает), так что соперникам он тоже нужен. Если связь с Европой режется (Россия) — поставьте ещё RelayForward. Очередь и матчи: <a href=\"/ladder/\">ладдер</a>",
   skv_h: "Не вылетать из матча при отвале Steam", skv_p: "Когда во время матча у Steam пропадает связь, игра выходит из матча и часто закрывается. С патчем матч доигрывается до конца, сколько бы Steam ни отсутствовал; просьба Steam закрыть игру ждёт конца матча. Свои Alt+F4, выход через меню и крестик работают как обычно.", skv_s: "Рассинхрона нет, соперникам ставить не нужно. Настройки: <code>SteamKeep.ini</code>.",
   mtv_h: "Таймер матча", mtv_p: "Время матча (минуты:секунды игрового времени) в интерфейсе самой игры: сверху под счётчиком очков, под кнопкой Menu или в ней. В аннигиляции — под кнопкой Menu.", mtv_s: "Только показывает, рассинхрона нет. <code>Place=top | under | menu</code> и вид — в <code>MatchTimer.ini</code>, меняются прямо во время игры.",
-  apv_h: "APM (действий в минуту)", apv_p: "Ваши клики и нажатия клавиш в минуту за последнюю минуту матча: сверху рядом с таймером или в углу миникарты. Видите только вы.", apv_s: "В игру ничего не отправляется, рассинхрона нет. Настройки: <code>APM.ini</code>.",
+  apv_h: "APM (действий в минуту)", apv_p: "Ваши клики и нажатия клавиш в минуту со сглаживанием примерно за последние 5 секунд (бой виден сразу): сверху рядом с таймером или в углу миникарты. Видите только вы.", apv_s: "В игру ничего не отправляется, рассинхрона нет. Настройки: <code>APM.ini</code>.",
   cdv_h: "Секунды перезарядки", cdv_p: "Сколько секунд осталось до готовности способности и глобальной способности — в центре кнопки, текстом самой кнопки.", cdv_s: "Только читает, рассинхрона нет. Размер и цвет: <code>Cooldowns.ini</code>.",
   lsv_h: "Рейтинг в лобби", lsv_p: "Рейтинг Relic у каждого игрока в лобби; при наведении — винрейт, число игр и часы в Steam. Только показывает, никого не кикает.", lsv_s: "Работает в одиночку, в любом лобби. Заменяет старый LobbyStats 0.7 / 0.10: старый <code>LobbyStats.dll</code> перезапишите.",
   lrv_h: "Рейтинги на экране загрузки", lrv_p: "Рейтинг Relic после имени каждого игрока на экране загрузки онлайн-матча.", lrv_s: "Работает и с LobbyStats, и без него.",
