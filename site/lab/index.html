@@ -104,7 +104,7 @@ footer { padding: 30px 0 50px; color: var(--muted); font-size: 15px; text-align:
       <small><span data-i="cat_interface">Interface</span></small>
     </div>
     <div class="card">
-      <h3><span data-i="a_cooldowns_r2_h">Cooldown seconds on ability buttons</span> <span class="ver">cooldowns-7</span> <span class="badge b-ok" data-i="b_ok">works</span></h3>
+      <h3><span data-i="a_cooldowns_r2_h">Cooldown seconds on ability buttons</span> <span class="ver">cooldowns-9</span> <span class="badge b-ok" data-i="b_ok">works</span></h3>
       <p data-i="a_cooldowns_r2_p">Seconds left on recharging abilities and global abilities, in the middle of the button.</p>
       <small><span data-i="cat_interface">Interface</span></small>
     </div>
@@ -194,8 +194,8 @@ footer { padding: 30px 0 50px; color: var(--muted); font-size: 15px; text-align:
       <div class="btns"><a class="btn main" href="dl/RelayForward_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
     </div>
     <div class="card">
-      <h3><span data-i="rf_h">Auto-reinforce after webway gates</span> <span class="ver">ReinforceFix 1</span> <span class="badge b-ok" data-i="b_ok">works</span></h3>
-      <p data-i="rf_p">A squad with auto-reinforce on that goes through an Eldar webway gate no longer comes out with auto-reinforce switched off.</p>
+      <h3><span data-i="rf_h">Auto-reinforce after webway gates and Ravener tunnels</span> <span class="ver">ReinforceFix 1</span> <span class="badge b-ok" data-i="b_ok">works</span></h3>
+      <p data-i="rf_p">A squad with auto-reinforce on that goes into an Eldar webway gate or a Tyranid Ravener tunnel (or anything else that takes it off the map for a while) no longer comes out with auto-reinforce switched off.</p>
       <small data-i="rf_s">Only the interface changes, no desync; your opponents don't need it.</small>
       <div class="btns"><a class="btn main" href="dl/ReinforceFix_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
     </div>
@@ -224,7 +224,7 @@ footer { padding: 30px 0 50px; color: var(--muted); font-size: 15px; text-align:
       <div class="btns"><a class="btn main" href="dl/APM_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
     </div>
     <div class="card">
-      <h3><span data-i="cdv_h">Cooldown seconds</span> <span class="ver">Cooldowns 7</span> <span class="badge b-test" data-i="b_test">test</span></h3>
+      <h3><span data-i="cdv_h">Cooldown seconds</span> <span class="ver">Cooldowns 9</span> <span class="badge b-test" data-i="b_test">test</span></h3>
       <p data-i="cdv_p">Seconds left on recharging abilities and global abilities, in the middle of the button — as the button's own count text.</p>
       <small data-i="cdv_s">Read-only, no desync. Size and colour: <code>Cooldowns.ini</code>.</small>
       <div class="btns"><a class="btn main" href="dl/Cooldowns_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
@@ -337,7 +337,7 @@ var RU = {
   la_win: "Лаунчер для Windows", la_port: "Windows без установки",
   h_van: "Для ванильной DoW2 (без лаунчера)",
   van_sub: "Распакуйте в папку игры рядом с DOW2.exe: появятся <code>winmm.dll</code> и папка <code>dow2-patches</code>. <code>winmm.dll</code> — маленький загрузчик: он подгружает все .dll из <code>dow2-patches</code>, поэтому пакеты можно совмещать — если он уже стоит, достаточно положить новую .dll в <code>dow2-patches</code>. Файлы игры не меняются; удалить — стереть <code>winmm.dll</code> и папку.",
-  rf_h: "Автопополнение после вебвей-ворот", rf_p: "Отряд с включённым автопополнением, прошедший через вебвей-ворота эльдар, больше не выходит из них с выключенным автопополнением.",
+  rf_h: "Автопополнение после вебвей-ворот и туннелей равенеров", rf_p: "Отряд с включённым автопополнением, ушедший во вебвей-ворота эльдар или в туннель равенеров тиранид (и вообще куда угодно, где он на время пропадает с карты), больше не выходит оттуда с выключенным автопополнением.",
   rf_s: "Меняется только интерфейс, рассинхрона нет; соперникам ставить не нужно.",
   jr_h: "Прыжок не срывается о препятствия", jr_p: "Для аутарха и других прыгунов: если по пути к точке прыжка он сам перескочил препятствие и из-за этого приказ прыжка сорвался, приказ повторяется сразу после приземления (до 3 раз). Любой ваш новый приказ отряду отменяет повтор.",
   jr_s: "Повтор — обычный приказ игры, рассинхрона нет; соперникам ставить не нужно. Выключить: <code>Enabled=0</code> в <code>JumpRetry.ini</code>.",
