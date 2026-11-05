@@ -181,6 +181,12 @@ footer { padding: 30px 0 50px; color: var(--muted); font-size: 15px; text-align:
   <h2 data-i="h_van">For vanilla DoW2 (no launcher)</h2>
   <p class="sub" data-i="van_sub">Unpack into the game folder next to DOW2.exe: you get <code>winmm.dll</code> and the <code>dow2-patches</code> folder. <code>winmm.dll</code> is a small loader: it loads every .dll from <code>dow2-patches</code>, so the packages can be combined — if you already have it, copy only the new .dll into <code>dow2-patches</code>. Game files are not changed; to remove, delete <code>winmm.dll</code> and the folder.</p>
   <div class="cards">
+    <div class="card exp">
+      <h3><span data-i="lpre_h">Elite launcher 1.4.11 (preview): vanilla Retribution</span> <span class="ver">1.4.11 pre</span> <span class="badge b-test" data-i="b_test">test</span></h3>
+      <p data-i="lpre_p">The launcher can start plain vanilla Retribution too: the picker next to Play → "Vanilla Retribution". It puts our loader and only the add-ons that work in vanilla into dow2-patches, Elite's files stay untouched; Join in Lobbies works for vanilla rooms as well.</p>
+      <small data-i="lpre_s">Preview build, not checked on our stand yet. It updates itself to the final version later. Windows installer.</small>
+      <div class="btns"><a class="btn main" href="dl/EliteLauncher-1.4.11-pre-setup.exe" data-i="lpre_dl">Download installer</a></div>
+    </div>
     <div class="card">
       <h3><span data-i="am2_h">Automatch v2.0</span> <span class="ver">MMFind 0.45 + OwnLobby 2</span> <span class="badge b-test" data-i="b_test">test</span></h3>
       <p data-i="am2_p">Find a Game works again in vanilla: Multiplayer → Find a Game → Start Searching finds a 1v1 / 2v2 / 3v3 opponent by rating, the match starts by itself within seconds. The search runs on our lobby server, the match through our game server; ordinary Custom Games lobbies are not affected. If it can't run, Find a Game says why.</p>
@@ -353,6 +359,7 @@ var RU = {
   rvv_h: "Задний ход", rvv_p: "Как в Company of Heroes: зажмите Ctrl и щёлкните правой кнопкой позади техники (или по миникарте) — она отходит задом, лобовой бронёй к врагу, а не разворачивается.", rvv_s: "Работает через обычные приказы игры, для остальных игроков ничего не меняется. Клавиша и отрезки: <code>Reverse.ini</code>.",
   ofv_h: "Исправление тормозов обсервера", ofv_p: "Обсервер больше не пересобирает всю информацию о матче десятки раз за кадр — живая игра обсом идёт так же плавно, как реплей.", ofv_s: "Нужен только тому, кто смотрит; рассинхрона нет.",
   clv_h: "Запись вылетов игры", clv_p: "Если игра закрывается сама без сообщений: где в коде случилась ошибка и кто закрыл игру, плюс маленький дамп — в <code>dow2-patches\\CrashLog.log</code>. В игре ничего не меняет, никуда ничего не отправляет.", clv_s: "Для разработчиков: поставьте, повторите вылет, пришлите нам <code>CrashLog.log</code> (и <code>.dmp</code>), потом удалите.",
+  lpre_h: "Лаунчер Elite 1.4.11 (предварительная): ваниль Retribution", lpre_p: "Лаунчер умеет запускать и чистую ванильную Retribution: выбор рядом с «Играть» → «Ваниль Retribution». Он кладёт наш загрузчик и только те дополнения, что работают в ванили, в dow2-patches; файлы Elite не трогает. Вход в лобби из лаунчера работает и для ванильных комнат.", lpre_s: "Предварительная сборка, на нашем стенде ещё не проверена. Потом сама обновится до финальной версии. Установщик для Windows.", lpre_dl: "Скачать установщик",
   allv_h: "Всё вместе", allv_p: "Автоматч v2.0, ReinforceFix, JumpRetry, SteamKeep, таймер матча, APM, перезарядки, рейтинг в лобби, рейтинги на экране загрузки, звук входа в лобби, Reverse и ObsFix одним архивом — каждое по-прежнему своей DLL в <code>dow2-patches</code>, со своим <code>.ini</code>.", allv_s: "Не вошли: RelayForward и CrashLog — их берите отдельно, если нужны. Чтобы выключить одно — удалите его DLL.",
   dl_zip: "Скачать .zip",
   h_tools: "Веб-инструменты",
