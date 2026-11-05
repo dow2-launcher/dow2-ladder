@@ -18,165 +18,115 @@ Packet: "DU" + type (1) + connection id (u32 LE, random, chosen by the player) +
             datagram stays within BUDGET - a single lost packet (or two in a row) is filled by the next one, no resend wait.
   9 ACK2    both, version 2: ack + sack + k (u8) + k copies as in DATA2 - an ACK carrying copies (k >= 1, else a plain
             ACK): the acks of the other way's packets come about as often as the data, so a lost packet is filled sooner.
-            Answered only when a copy filled something (DATA always is), so the two sides never bounce acks.
+            Since 05.11.2026 (du_proto rule 5) never answered at once: a hole it filled is told with the next packet or a
+            plain ACK at the next tick, and a plain ACK nobody answers - the two sides never bounce acks.
             Version 1 connections get DATA and ACK as before. The stream after the SYN is carried as is: battle_relay tells a
             Relay.dll preamble (DWR1-3) from a native game stream (our lobby server's rooms, no preamble) by itself.
-Packets are numbered from 0 on each side. Lost ones are sent again after an RTO from the measured round trip, or at once
-when a later one was acknowledged twice past it. Keepalive: an ACK each second; 30 s without a packet = gone.
+Packets are numbered from 0 on each side. The delivery itself (resends, copies, acks, the limits) is du_proto.py since
+05.11.2026 - the same code as du_client.py / du_egress.py and, in C, Relay.dll 23 (relay/du_tunnel.h): one resend timer
+(oldest first, doubling 200 ms .. 3 s), 10 resends at most then FIN (ev=dead), a resend budget, copies at most twice per
+packet, 64 packets / 64 KB in flight with back pressure, duplicate acks at most every 20 ms, a fuse (ev=storm). The
+wire format did not change: old Relay.dll 15-22 work with this gateway and Relay.dll 23 with an old one.
+Per player address at most ADDR_RATE packets/s come in (burst ADDR_BURST), our own nodes (TRUSTED) excepted - a client
+in a storm can't flood the node (05.11.2026: one 2v2 host sent 2380 packets/s for 10 minutes).
+Keepalive: an ACK each second; 30 s without a packet = gone.
+Monitoring: every UDPGW_STATS_EVERY s (15) one ev=conn_stats line per live connection - packets/s in / out in that interval,
+data packets, resends, holes (lost_in), copies, filled, srtt, unacked, storm (the fuse) - and ev=storm / ev=dead / addr_limit
+as they happen. `journalctl -u dow2-udpgw | grep conn_stats`.
 Usage: udp_gateway.py [port] [battle_relay host:port]   (default 47100 127.0.0.1:47100)
 """
-import asyncio, os, random, struct, sys, time
+import asyncio, os, struct, sys, time
+import du_proto
+from du_proto import SYN, SYNACK, DATA, ACK, FIN, PING, PONG, DATA2, ACK2, MAXP
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 47100
 BR = (sys.argv[2].rsplit(':', 1) if len(sys.argv) > 2 else ['127.0.0.1', '47100'])
 BR = (BR[0], int(BR[1]))
-MAXP = 1200            # payload bytes per packet
-WINDOW = 512           # packets in flight
 PER_IP = 16            # connections per address
 # our nodes: no per-address limit - all bridges of a Moscow node (du_egress, 03.11.2026) and all players another node passes on
 # here (battle_relay over du_client, the relay chain 04.11.2026) come from that node's one address
 TRUSTED = set(os.environ.get('UDPGW_TRUSTED', '83.217.192.34,91.107.122.186,15.220.68.107,116.202.106.150').split(','))
-IDLE = 30.0
-SYN, SYNACK, DATA, ACK, FIN, PING, PONG, DATA2, ACK2 = 1, 2, 3, 4, 5, 6, 7, 8, 9
+ADDR_RATE = float(os.environ.get('UDPGW_ADDR_RATE', '1000'))   # packets/s from one player address (all its connections)
+ADDR_BURST = 2 * ADDR_RATE
 # the newest we speak: 2 = DATA2 with copies. UDPGW_VERSION=1 (05.11.2026, owner): no copies at all - a bare SYNACK, so every
 # Relay.dll falls back to plain DATA / ACK and resends only what is really lost (a 2v2 on Relay 22 went into a storm of copies:
 # ~650 packets/s, 1.07 M copies in 10 min, the game choking on old retries)
 VERSION = max(1, min(2, int(os.environ.get('UDPGW_VERSION', '2'))))
-COPIES = 2             # earlier unacknowledged packets copied into each DATA2
-BUDGET = 1240          # bytes per datagram with the copies (no copy that does not fit)
+STATS_EVERY = float(os.environ.get('UDPGW_STATS_EVERY', '15'))   # s: an ev=conn_stats line per live connection, 0 = none
 
 
 def log(**k):
     print(time.strftime('%H:%M:%S') + ' ' + ' '.join('%s=%s' % kv for kv in k.items()), flush=True)
 
 
-# 05.11.2026: the resend timer never below DU_MIN_RTO (0.2 s, as TCP's minimum; was 0.06): with a 20-30 ms round trip a packet was
-# sent again after 60 ms and a whole window (up to 64, each with its copies) every 20 ms tick - the gateway logged 6x more resends
-# than packets (resent 3265, tx 535) and 4-player games choked; the copies still fill a single loss at once. RESEND_TICK: at most
-# that many packets are sent again per 20 ms tick
-MIN_RTO = float(os.environ.get('DU_MIN_RTO', '0.2'))
-RESEND_TICK = int(os.environ.get('DU_RESEND_TICK', '8'))
-
 class Conn:
     def __init__(self, gw, cid, addr, ver=1):
         self.gw, self.cid, self.addr, self.ver = gw, cid, addr, ver
-        self.w = None; self.ready = False; self.closed = False
-        self.snd_next = 0; self.unacked = {}                   # seq -> [payload, first_sent, last_sent, sends]
-        self.rcv_next = 0; self.ooo = {}                       # out of order: seq -> payload
-        self.srtt = 0.15; self.rttvar = 0.05; self.dup = 0; self.last_ack_seen = -1
-        self.seen = self.sent = time.time()
-        self.stats = dict(rx=0, tx=0, resent=0, lost_in=0, ver=ver, copies=0, filled=0)
-        self.can_send = asyncio.Event(); self.can_send.set()
+        self.w = None; self.ready = False; self.prev_stats = None
+        self.room = asyncio.Event(); self.room.set()
+        self.core = du_proto.DuCore(cid, ver, out=lambda pkt: gw.tr.sendto(pkt, self.addr), deliver=self.deliver,
+                                    log=lambda ev, **k: log(ev=ev, peer=self.addr[0], **k),
+                                    on_room=self.on_room, on_close=self.on_close)
+        self.started = time.time()
 
-    def hdr(self, t): return b'DU' + bytes([t]) + struct.pack('<I', self.cid)
+    @property
+    def closed(self): return self.core.closed
 
-    def sack(self):
-        m = 0
-        for i in range(32):
-            if self.rcv_next + 1 + i in self.ooo: m |= 1 << i
-        return m
+    def deliver(self, d):
+        if self.w: self.w.write(d)
 
-    def out(self, pkt):
-        self.gw.tr.sendto(pkt, self.addr); self.sent = time.time()
+    def on_room(self):
+        if self.core.room(): self.room.set()
+        else: self.room.clear()
 
-    def send_ack(self):
-        if self.ver >= 2:
-            c = self.copies(self.snd_next, BUDGET - 16)
-            if c: self.out(self.hdr(ACK2) + struct.pack('<IIB', self.rcv_next, self.sack(), len(c)) + b''.join(c)); return
-        self.out(self.hdr(ACK) + struct.pack('<II', self.rcv_next, self.sack()))
-
-    def copies(self, below, room):
-        """copies of the newest (up to COPIES) packets below number `below` still unacknowledged, within room bytes"""
-        out = []
-        for s in range(below - 1, max(-1, below - 17), -1):
-            if len(out) == COPIES: break
-            u = self.unacked.get(s)
-            if u is None or 6 + len(u[0]) > room: continue
-            out.append(struct.pack('<IH', s, len(u[0])) + u[0]); room -= 6 + len(u[0])
-        self.stats['copies'] += len(out)
-        return out
-
-    def synack(self): return self.hdr(SYNACK) + (bytes([VERSION]) if self.ver >= 2 else b'')
-
-    def packet(self, seq):
-        payload = self.unacked[seq][0]
-        if self.ver < 2: return self.hdr(DATA) + struct.pack('<III', seq, self.rcv_next, self.sack()) + payload
-        copies = self.copies(seq, BUDGET - 20 - len(payload))   # the newest earlier ones still unacknowledged
-        return self.hdr(DATA2) + struct.pack('<IIIB', seq, self.rcv_next, self.sack(), len(copies)) + b''.join(copies) + payload
-
-    def send_data(self, payload):
-        seq = self.snd_next; self.snd_next += 1; now = time.time()
-        self.unacked[seq] = [payload, now, now, 1]
-        self.out(self.packet(seq))
-        self.stats['tx'] += 1
-        if len(self.unacked) >= WINDOW: self.can_send.clear()
-
-    def resend(self, seq, now):
-        u = self.unacked[seq]; u[2] = now; u[3] += 1; self.stats['resent'] += 1
-        self.out(self.packet(seq))
-
-    def rto(self): return min(1.0, max(MIN_RTO, self.srtt + 4 * self.rttvar))
-
-    def on_ack(self, ack, sack):
-        now = time.time()
-        for s in [s for s in self.unacked if s < ack or (s > ack and s - ack - 1 < 32 and sack >> (s - ack - 1) & 1)]:
-            u = self.unacked.pop(s)
-            if u[3] == 1:                                       # round trip only from packets sent once (Karn)
-                r = now - u[1]; self.rttvar = 0.75 * self.rttvar + 0.25 * abs(self.srtt - r); self.srtt = 0.875 * self.srtt + 0.125 * r
-        if ack == self.last_ack_seen and self.unacked and ack in self.unacked and sack:
-            self.dup += 1
-            if self.dup == 2: self.resend(ack, now)              # later ones arrived, this one not: send it again now
-        else: self.dup = 0
-        self.last_ack_seen = ack
-        if len(self.unacked) < WINDOW: self.can_send.set()
-
-    def on_data(self, seq, payload, copy=False):
-        if seq < self.rcv_next or seq in self.ooo: return False  # a copy
-        if seq - self.rcv_next > 4 * WINDOW: return False
-        self.ooo[seq] = payload
-        if copy: self.stats['filled'] += 1                      # its own packet was lost (or is late): the copy filled it
-        elif seq != self.rcv_next: self.stats['lost_in'] += 1
-        while self.rcv_next in self.ooo:
-            d = self.ooo.pop(self.rcv_next); self.rcv_next += 1; self.stats['rx'] += 1
-            if self.w and d: self.w.write(d)
-        return True
+    def synack(self): return du_proto.hdr(SYNACK, self.cid) + (bytes([VERSION]) if self.ver >= 2 else b'')
 
     async def run(self):
         try:
             r, self.w = await asyncio.wait_for(asyncio.open_connection(*BR), 5)
         except Exception as e:
-            log(ev='br_fail', cid=self.cid, peer=self.addr[0], err=repr(e)); self.close(); return
-        self.ready = True; self.out(self.synack())
+            log(ev='br_fail', cid=self.cid, peer=self.addr[0], err=repr(e)); self.core.close('br_fail'); return
+        self.ready = True; self.gw.tr.sendto(self.synack(), self.addr)
         log(ev='open', cid=self.cid, peer='%s:%d' % self.addr, ver=self.ver)
         try:
             while not self.closed:
+                if not self.core.room():                    # window full: battle_relay waits in its TCP socket (back pressure)
+                    self.room.clear(); await self.room.wait(); continue
                 d = await r.read(MAXP)
                 if not d: break
-                await self.can_send.wait()
-                self.send_data(d)
+                self.core.write(d)
         except Exception: pass
-        self.close()
+        self.core.close('battle_relay')
 
-    def close(self, send_fin=True):
-        if self.closed: return
-        self.closed = True
-        if send_fin:
-            for _ in range(3): self.out(self.hdr(FIN))
+    def on_close(self, by):
         try:
             if self.w: self.w.close()
         except Exception: pass
         self.gw.conns.pop(self.cid, None)
-        log(ev='close', cid=self.cid, peer=self.addr[0], secs=round(time.time() - self.started, 1), srtt_ms=round(self.srtt * 1000),
-            **self.stats)
+        st = self.core.stats
+        log(ev='close', cid=self.cid, peer=self.addr[0], secs=round(time.time() - self.started, 1), srtt_ms=round(self.core.srtt * 1000),
+            by=by, storm=int(self.core.fuse_tripped), **st)
 
 
 class Gateway(asyncio.DatagramProtocol):
-    def __init__(self): self.conns = {}
+    def __init__(self): self.conns = {}; self.addr_buckets = {}; self.limited = {}
 
     def connection_made(self, tr): self.tr = tr
 
+    def addr_ok(self, ip):
+        """rule 7: at most ADDR_RATE packets/s from one player address (all its connections), our nodes excepted"""
+        if ip in TRUSTED: return True
+        b = self.addr_buckets.get(ip)
+        if b is None: b = self.addr_buckets[ip] = du_proto.Bucket(ADDR_RATE, ADDR_BURST)
+        if b.take(time.monotonic()): return True
+        n = self.limited.get(ip, [0, 0.0]); n[0] += 1
+        if time.time() - n[1] > 10: log(ev='addr_limit', peer=ip, dropped=n[0], rate=ADDR_RATE); n = [0, time.time()]
+        self.limited[ip] = n
+        return False
+
     def datagram_received(self, d, addr):
         if len(d) < 7 or d[:2] != b'DU': return
+        if not self.addr_ok(addr[0]): return
         t, cid = d[2], struct.unpack('<I', d[3:7])[0]; body = d[7:]
         if t == PING:                                           # stateless echo, small (no amplification)
             if len(body) <= 1200: self.tr.sendto(b'DU' + bytes([PONG]) + d[3:7] + body[:32], addr)
@@ -186,53 +136,43 @@ class Gateway(asyncio.DatagramProtocol):
         if t == SYN:
             if not c:
                 if addr[0] not in TRUSTED and sum(1 for x in self.conns.values() if x.addr[0] == addr[0]) >= PER_IP: return
-                c = self.conns[cid] = Conn(self, cid, addr, min(VERSION, body[0]) if body else 1); c.started = time.time()
+                c = self.conns[cid] = Conn(self, cid, addr, min(VERSION, body[0]) if body else 1)
                 asyncio.ensure_future(c.run())
-            elif c.ready: c.out(c.synack())
+            elif c.ready: self.tr.sendto(c.synack(), addr)
             return
-        if not c: return
-        c.addr = addr; c.seen = time.time()
-        if t == DATA and len(body) >= 12:
-            seq, ack, sack = struct.unpack('<III', body[:12])
-            c.on_ack(ack, sack); c.on_data(seq, body[12:]); c.send_ack()
-        elif (t == DATA2 and len(body) >= 13) or (t == ACK2 and len(body) >= 9):
-            if t == DATA2: seq, ack, sack, k = struct.unpack('<IIIB', body[:13]); o = 13
-            else: seq = None; ack, sack, k = struct.unpack('<IIB', body[:9]); o = 9
-            copies, bad = [], False
-            for _ in range(k):
-                if o + 6 > len(body): bad = True; break
-                s, n = struct.unpack('<IH', body[o:o + 6])
-                if n > MAXP or o + 6 + n > len(body): bad = True; break
-                copies.append((s, body[o + 6:o + 6 + n])); o += 6 + n
-            c.on_ack(ack, sack)
-            took = sum([c.on_data(s, b, copy=True) for s, b in reversed(copies)])   # oldest first
-            if seq is not None and not bad and len(body) - o <= MAXP: c.on_data(seq, body[o:])
-            if seq is not None or took: c.send_ack()               # an ACK2 only when its copy filled something
-        elif t == ACK and len(body) >= 8:
-            c.on_ack(*struct.unpack('<II', body[:8]))
-        elif t == FIN:
-            c.close(send_fin=False)
+        if not c or not c.ready: return
+        c.addr = addr
+        c.core.datagram(t, body)
 
     async def timers(self):
+        last_stats = time.monotonic()
         while True:
-            await asyncio.sleep(0.02)
-            now = time.time()
+            await asyncio.sleep(0.01)
+            now = time.monotonic()
             for c in list(self.conns.values()):
-                if now - c.seen > IDLE: c.close(); continue
-                if not c.ready: continue
-                rto = c.rto()
-                n = 0
-                for s in sorted(c.unacked)[:64]:
-                    if now - c.unacked[s][2] > rto * min(8, 2 ** (c.unacked[s][3] - 1)):
-                        c.resend(s, now); n += 1
-                        if n >= RESEND_TICK: break           # the oldest few per tick, not a burst of the whole window
-                if now - c.sent > 1.0: c.send_ack()
+                if c.ready: c.core.tick(now)
+            if len(self.addr_buckets) > 4096: self.addr_buckets.clear()
+            if STATS_EVERY > 0 and now - last_stats >= STATS_EVERY:
+                self.conn_stats(now - last_stats); last_stats = now
+
+    def conn_stats(self, secs):
+        """live monitoring (owner 05.11.2026): one line per live connection every STATS_EVERY s - packets/s in and out in that
+        interval (a game is ~10-40/s; the storm of 05.11 was 650-2400/s), and what of it were resends / copies / holes"""
+        for c in list(self.conns.values()):
+            if not c.ready: continue
+            st = c.core.stats; prev = c.prev_stats or {}
+            d = {k: st[k] - prev.get(k, 0) for k in ('pkts_in', 'pkts_out', 'tx', 'rx', 'resent', 'lost_in', 'copies', 'filled')}
+            c.prev_stats = dict(st)
+            log(ev='conn_stats', cid=c.cid, peer='%s:%d' % c.addr, ver=c.ver, secs=round(time.time() - c.started),
+                pps_in=round(d['pkts_in'] / secs, 1), pps_out=round(d['pkts_out'] / secs, 1), data_in=d['rx'], data_out=d['tx'],
+                resent=d['resent'], lost_in=d['lost_in'], copies=d['copies'], filled=d['filled'], srtt_ms=round(c.core.srtt * 1000),
+                unacked=len(c.core.unacked), storm=int(c.core.fuse_tripped))
 
 
 async def main():
     loop = asyncio.get_running_loop()
     tr, gw = await loop.create_datagram_endpoint(Gateway, local_addr=('0.0.0.0', PORT))
-    log(ev='start', port=PORT, battle_relay='%s:%d' % BR)
+    log(ev='start', port=PORT, battle_relay='%s:%d' % BR, version=VERSION)
     await gw.timers()
 
 if __name__ == '__main__':

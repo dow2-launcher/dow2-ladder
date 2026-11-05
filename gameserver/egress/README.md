@@ -11,8 +11,11 @@ redirected to iggy (116.202.106.150, Hetzner) - Relic sees iggy. battle_relay.py
       --our UDP tunnel (DU v2, copies)--> iggy udp_gateway :47100 --> iggy battle_relay, preamble "DWR3"+IP+port --TCP--> Relic
 
   du_egress.py reads the wanted Relic address (SO_ORIGINAL_DST), opens DU to iggy (SYN version 2, 1.5 s), sends
-  "DWR3" + IPv4 + port BE and carries the bytes (the same delivery as udp_gateway/Relay.dll 20: seq/ack/sack, RTO from the
-  round trip min 60 ms, fast resend on 2 duplicate acks, keepalive ACK 1 s, 30 s silence = end, DATA2/ACK2 copies).
+  "DWR3" + IPv4 + port BE and carries the bytes. Since 05.11.2026 the delivery is ../du_proto.py, the same code as
+  udp_gateway / du_client and (in C) Relay.dll 23: one resend timer 200 ms .. 3 s, at most 10 resends then FIN (ev=dead),
+  resend budget, copies at most twice per packet, 64 packets in flight with back pressure, a storm fuse (ev=storm).
+  du_egress.py finds du_proto.py next to itself or in /srv/dow2battle (the deploy puts it there) - when installing a new
+  du_egress.py by hand, the node must already have /srv/dow2battle/du_proto.py (or copy it to /usr/local/lib too).
   No SYNACK within 1.5 s -> that connection goes straight to Relic over TCP. Log: `journalctl -u du-egress` (open/close and
   every 60 s: srtt, resent, lost_in, copies, filled). udp_gateway: our Moscow addresses have no per-address limit (UDPGW_TRUSTED).
   `du-egress.service` -> /etc/systemd/system, `du_egress.py` -> /usr/local/lib.
