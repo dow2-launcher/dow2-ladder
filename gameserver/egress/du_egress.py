@@ -35,6 +35,13 @@ def log(**k):
     print(time.strftime('%H:%M:%S') + ' ' + ' '.join('%s=%s' % kv for kv in k.items()), flush=True)
 
 
+# 05.11.2026: the resend timer never below DU_MIN_RTO (0.2 s, as TCP's minimum; was 0.06): with a 20-30 ms round trip a packet was
+# sent again after 60 ms and a whole window (up to 64, each with its copies) every 20 ms tick - the gateway logged 6x more resends
+# than packets (resent 3265, tx 535) and 4-player games choked; the copies still fill a single loss at once. RESEND_TICK: at most
+# that many packets are sent again per 20 ms tick
+MIN_RTO = float(os.environ.get('DU_MIN_RTO', '0.2'))
+RESEND_TICK = int(os.environ.get('DU_RESEND_TICK', '8'))
+
 class Udp(asyncio.DatagramProtocol):
     def __init__(self, conn): self.conn = conn
     def datagram_received(self, d, addr): self.conn.datagram(d)
@@ -113,7 +120,7 @@ class Conn:
         u = self.unacked[seq]; u[2] = now; u[3] += 1; self.stats['resent'] += 1
         self.out(self.packet(seq))
 
-    def rto(self): return min(1.0, max(0.06, self.srtt + 4 * self.rttvar))
+    def rto(self): return min(1.0, max(MIN_RTO, self.srtt + 4 * self.rttvar))
 
     def on_ack(self, ack, sack):
         now = time.time()
@@ -176,8 +183,11 @@ class Conn:
             now = time.time()
             if now - self.seen > IDLE: self.close('silent'); return
             rto = self.rto()
+            n = 0
             for s in sorted(self.unacked)[:64]:
-                if now - self.unacked[s][2] > rto * min(8, 2 ** (self.unacked[s][3] - 1)): self.resend(s, now)
+                if now - self.unacked[s][2] > rto * min(8, 2 ** (self.unacked[s][3] - 1)):
+                    self.resend(s, now); n += 1
+                    if n >= RESEND_TICK: break
             if now - self.sent > 1.0: self.send_ack()
             if now - last_log > 60: last_log = now; self.log('stats')
 
