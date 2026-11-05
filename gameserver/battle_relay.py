@@ -7,7 +7,10 @@ send every game turn across the ocean. Protocol learned from captures (capture_p
   14  ping       14 <stamp 4>                                   -> echo back
   13  to peer    13 <dst> <src> <inner>                         -> to peer #dst unchanged; inner "0f 05.." (peer announce)
                                                                    goes to everyone in the session, header stripped
-  10  to others  10 <src> ...                                   -> to every other peer unchanged (echo when alone)
+  10  proxy      10 <src> <n u16 LE> n*<dst> <u16 LE len> <data + n*15 bytes, one info per dst>
+                 (the game's RLink ProxyMessage, session message type 0x10: one message to several peers, each with its own
+                 15-byte reliable header) -> to EACH dst in the list, as a message of its own with only that dst and its
+                 info (05.11.2026; before: unchanged to every other peer, see proxy_split)
   09  turn data  09 fe <u16 LE len + data>                      -> queued for the next tick
   17  turn+sync  17 <n> n*(crc 4 + turn u32) 09 fe <...>         -> the embedded 09 is queued (crc pairs: sync check, ignored)
   0a  tick (server -> all, every 100 ms):
@@ -39,6 +42,8 @@ about a millisecond in each gateway; no second tick - only the session's node ti
 they come.
 Usage: battle_relay.py [port] [bind]   (default 47100 127.0.0.1)
 Peers silent for IDLE seconds are dropped (the game pings every ~3 s).
+Monitoring (05.11.2026): every RELAY_STATS_EVERY s (15) one ev=session_stats line per live session: members, and per player
+for that interval turns, stalls (gaps > GAP), the longest stall, messages/s and KB/s that came from him, his send buffer.
 """
 import asyncio, ipaddress, json, os, socket, struct, sys, time
 try: import du_client                                # the UDP tunnel between our nodes (same directory)
@@ -109,6 +114,7 @@ class Peer:
         # what the connection was like, for the log when the player leaves: stalls in the turns (GAP), the longest one,
         # TCP rtt (the worst seen) and retransmissions, how far the player's send buffer got behind
         self.turns, self.last_turn, self.gaps, self.max_gap, self.max_rtt, self.retrans, self.max_buf = 0, 0.0, 0, 0.0, 0, 0, 0
+        self.iv = dict(turns=0, gaps=0, max_gap=0.0, msgs=0, bytes=0)   # since the last session_stats line (STATS_EVERY)
 
     def stats(self):
         i = tcp_info(self.w)
@@ -155,9 +161,9 @@ class Session:
         now = time.monotonic()
         if p.last_turn:
             g = now - p.last_turn
-            if g > GAP: p.gaps += 1
-            p.max_gap = max(p.max_gap, g)
-        p.last_turn = now; p.turns += 1
+            if g > GAP: p.gaps += 1; p.iv['gaps'] += 1
+            p.max_gap = max(p.max_gap, g); p.iv['max_gap'] = max(p.iv['max_gap'], g)
+        p.last_turn = now; p.turns += 1; p.iv['turns'] += 1
         if not self.ticker: self.ticker = asyncio.ensure_future(self.tick_loop())
 
     async def tick_loop(self):
@@ -186,7 +192,56 @@ class Session:
                 for p in self.peers: p.stats()                # the worst rtt is sampled every 5 s
 
 
+def proxy_split(m):
+    """a 0x10 frame (RLink ProxyMessage) -> [(dst, frame for that dst only)], None when it does not parse.
+    Layout (captures of Relic's relay 27.10, every 0x10 frame of m1/m3 fits): 10 <src> <n u16 LE> n*<dst u8> <u16 LE len>
+    <payload>; the payload ends with n infos of 15 bytes, one per dst in the list order (ProxyMessage::GetProxyInfos reads
+    them from the end, FUN_006400c0). The game sends ONE such message for several peers (the host's and every peer's
+    messages to the others) and the relay hands each listed peer its own copy - 05.11.2026: we passed it unchanged to
+    EVERY other peer, which is the same with 2 players but with 3+ every peer got the messages meant for the others
+    ("dropping PROXY message from peerID 4 via peerID 4 for peer 3 (we're not host)" by the thousand), the host passed them
+    on once more, the reliable layers retried, and a 2v2 / 3v3 sent 300-2400 packets/s per player (Relic: ~10/s).
+    One dst: the frame as it came (byte for byte what Relic gave in the captures)."""
+    if len(m) < 7: return None
+    n = m[2] | m[3] << 8
+    o = 4 + n
+    if n < 1 or n > 16 or len(m) < o + 2: return None
+    size = m[o] | m[o + 1] << 8
+    if len(m) != o + 2 + size or size < 15 * n: return None
+    dsts = m[4:o]
+    if n == 1: return [(dsts[0], m)]
+    data, infos = m[o + 2:len(m) - 15 * n], m[len(m) - 15 * n:]
+    out = []
+    for i, d in enumerate(dsts):
+        body = data + infos[15 * i:15 * i + 15]
+        out.append((d, bytes([0x10, m[1], 1, 0, d]) + len(body).to_bytes(2, 'little') + body))
+    return out
+
+
+STATS_EVERY = float(os.environ.get('RELAY_STATS_EVERY', '15'))   # s: a session_stats line per live session (owner 05.11.2026)
+
+
+async def stats_loop():
+    """live monitoring: every STATS_EVERY s one line per live session - its members and, per player, what came from him in
+    that interval: turns, stalls (turns more than GAP apart), the longest stall, messages and bytes of every kind (a storm
+    shows as msgs/s far above the ~10-20 turns+messages a second of a normal game)"""
+    while True:
+        await asyncio.sleep(STATS_EVERY)
+        for s in list(sessions.values()):
+            if not s.peers: continue
+            pl = {}
+            for p in s.peers:
+                iv = p.iv
+                pl[str(p.idx)] = dict(turns=iv['turns'], gaps=iv['gaps'], max_gap_ms=round(iv['max_gap'] * 1000),
+                                      msgs_s=round(iv['msgs'] / STATS_EVERY, 1), kbps_in=round(iv['bytes'] / STATS_EVERY / 1024, 1),
+                                      buf=p.w.transport.get_write_buffer_size() if not p.w.is_closing() else None)
+                p.iv = dict(turns=0, gaps=0, max_gap=0.0, msgs=0, bytes=0)
+            log(ev='session_stats', sid=int.from_bytes(s.sid, 'little'), members=len(s.peers), secs=round(time.time() - s.started),
+                late_ticks=s.late, players=pl)
+
+
 def handle_msg(p, m, echo=True):
+    p.iv['msgs'] += 1; p.iv['bytes'] += len(m) + 2
     t = m[0]
     if t == 0x15:                                                   # hello: join the session
         sid = m[1:5]
@@ -217,8 +272,20 @@ def handle_msg(p, m, echo=True):
         for q in targets: q.send(m)
         return
     if t == 0x10:
-        others = [q for q in s.peers if q is not p]
-        for q in (others or [p]): q.send(m)
+        parts = proxy_split(m)
+        if parts is None:                                            # not the layout we know: as before (log once a minute)
+            k = (s.sid, 'proxy'); now = time.time()
+            if now - _last_warn.get(k, 0) > 60: _last_warn[k] = now; log(ev='proxy_unparsed', sid=int.from_bytes(s.sid, 'little'), len=len(m), head=m[:12].hex())
+            others = [q for q in s.peers if q is not p]
+            for q in (others or [p]): q.send(m)
+            return
+        for dst, one in parts:
+            # dst 0 (never seen in a capture): as before, everybody else
+            targets = [q for q in s.peers if q.idx == dst] if dst else ([q for q in s.peers if q is not p] or [p])
+            if not targets:
+                k = (s.sid, dst); now = time.time()
+                if now - _last_warn.get(k, 0) > 60: _last_warn[k] = now; log(ev='no_target', sid=int.from_bytes(s.sid, 'little'), dst=dst, src=p.idx, proxy=1)
+            for q in targets: q.send(one)
         return
     if t == 0x09:
         s.queue_turn(p, m[2:]); return
@@ -492,6 +559,7 @@ async def handle(r, w):
 async def main():
     srv = await asyncio.start_server(handle, BIND, PORT)
     log(ev='start', bind=BIND, port=PORT)
+    if STATS_EVERY > 0: asyncio.ensure_future(stats_loop())
     async with srv: await srv.serve_forever()
 
 if __name__ == '__main__':
