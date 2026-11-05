@@ -4,7 +4,7 @@
 игра отправляет туда сама, сервер ведёт Elo. API отдаёт ~10 последних матчей игрока, поэтому всё
 увиденное копим в sqlite — история со временем растёт.
 Слушает 127.0.0.1:8216, nginx проксирует /stats/."""
-import json, os, re, sqlite3, threading, time, urllib.parse, urllib.request
+import base64, json, os, re, sqlite3, struct, threading, time, urllib.parse, urllib.request, zlib
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from concurrent.futures import ThreadPoolExecutor
 
@@ -16,8 +16,14 @@ PAGE = open(APP + '/page.html', encoding='utf-8').read()
 STATIC = APP + '/static'
 CT = {'.png': 'image/png', '.css': 'text/css', '.js': 'application/javascript', '.svg': 'image/svg+xml', '.zip': 'application/zip'}
 
-# Номера рас у Relic = race_id из racebps Elite (проверено по реплею 03.10.2026 против API).
-# Герои: счётчики ha/hb/hc = hero_list[0..2] того же racebps.
+# Номера рас у Relic = racebps race_id ТОЙ игры, что сыграла матч, а таблиц три (racebps по алфавиту, 05.11.2026, chuzar:
+# «статистика знает секретного героя Тау» — бои Тиранид весны 2026 показывались как Тау):
+#   ваниль 3.19:          0 Хаос, 1 Эльдары, 2 ИГ, 3 Орки, 4 СМ, 5 Тираниды (нет Ордо Маллеус и Тау);
+#   Elite до Тау (2.x):   0 Хаос, 1 Эльдары, 2 ИГ, 3 ОМ, 4 Орки, 5 СМ, 6 Тираниды;
+#   Elite 3.x:            0 Хаос, 1 Эльдары, 2 ИГ, 3 ОМ, 4 Орки, 5 СМ, 6 Тау, 7 Тираниды, 8 Некроны (t_tau / z_unecron).
+# Здесь всё приводится к номерам Elite 3.x. Какая таблица у матча — по значкам армий в slotinfo (значок расовый: sm_*, ork_*,
+# tau_*...; у Тиранид и ОМ его нет), по номерам 6-8, суффиксу _elite у армий и картам только Elite (ladder/maps.txt).
+# Герои: ha/hb/hc = hero_list[0..2] того же racebps. У Тау в Elite 3.2 их два (Командир «Кризис», Эфирный).
 RACES = {
     0: ('chaos', 'Chaos Space Marines', 'Хаос', [('csm_lord', 'Chaos Lord', 'Лорд Хаоса'), ('csm_plaguemarine', 'Plague Champion', 'Чумной чемпион'), ('csm_sorceror', 'Sorcerer', 'Колдун')]),
     1: ('eldar', 'Eldar', 'Эльдары', [('eldar_warlock', 'Warlock', 'Варлок'), ('eldar_spyder', 'Warp Spider Exarch', 'Экзарх Варп-пауков'), ('eldar_farseer', 'Farseer', 'Провидец')]),
@@ -25,9 +31,98 @@ RACES = {
     3: ('gk', 'Ordo Malleus', 'Ордо Маллеус', [('gk_brother_captain', 'Brother-Captain', 'Брат-капитан'), ('gk_eversor_assassin', 'Eversor Assassin', 'Ассасин Эверсор'), ('gk_daemonhunter', 'Daemonhunter', 'Охотник на демонов')]),
     4: ('ork', 'Orks', 'Орки', [('ork_warboss', 'Warboss', 'Варбосс'), ('ork_kommando', 'Kommando Nob', 'Коммандо-ноб'), ('ork_mekboy', 'Mekboy', 'Мекбой')]),
     5: ('sm', 'Space Marines', 'Космодесант', [('sm_fcommander', 'Force Commander', 'Командор'), ('sm_apothecary', 'Apothecary', 'Апотекарий'), ('sm_techmarine', 'Techmarine', 'Техмарин')]),
-    6: ('tau', 'Tau Empire', 'Империя Тау', [('tau_commander', 'Crisis Commander', 'Командир «Кризис»'), ('tau_ethereal', 'Ethereal', 'Эфирный'), ('tau_kroot', 'Kroot Shaper', 'Шейпер круутов')]),
+    6: ('tau', 'Tau Empire', 'Империя Тау', [('tau_commander', 'Crisis Commander', 'Командир «Кризис»'), ('tau_ethereal', 'Ethereal', 'Эфирный')]),
     7: ('tyranid', 'Tyranids', 'Тираниды', [('tyranid_hive_tyrant', 'Hive Tyrant', 'Тиран улья'), ('tyranid_ravener', 'Ravener Alpha', 'Альфа-потрошитель'), ('tyranid_lictor', 'Lictor Alpha', 'Альфа-ликтор')]),
+    8: ('necron', 'Necrons', 'Некроны', []),
 }
+TABLES = {'vanilla': {0: 0, 1: 1, 2: 2, 3: 4, 4: 5, 5: 7},
+          'elite2': {0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 7},
+          'elite3': {0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8}}
+BADGE_RACE = {'chaos': 0, 'csm': 0, 'eldar': 1, 'ig': 2, 'gk': 3, 'ork': 4, 'sm': 5, 'tau': 6, 'necron': 8}
+TAU_FROM = 1781481600       # 15.06.2026: первые значки tau_* у номера 6 в архиве; раньше 6 без значка — Тираниды Elite 2.x
+def _maps():
+    van, elite = set(), set()
+    for f in (APP + '/maps.txt', ROOT + '/ladder/maps.txt'):
+        try:
+            for line in open(f):
+                p = line.split()
+                if p and p[0] == 'VAN': van = set(p[1:])
+                elif p and p[0] == 'ELITE_ONLY': elite = set(p[1:])
+            break
+        except OSError: continue
+    return van, elite
+VAN_MAPS, ELITE_MAPS = _maps()
+
+def _slot_head(raw, p):
+    # a slot: profile id, 3 ints (-1 -1 -1 empty / 0 join order 0), team, hero, race, a byte, -1 (as ladder/ladder.py _slots)
+    if p < 0 or p + 43 > len(raw) or raw[p + 29:p + 33] != b'\xff\xff\xff\xff': return False
+    pid, a, b, c, team, hero, race = struct.unpack_from('<7i', raw, p)
+    if not (0 <= team < 16 and (0 <= hero < 8 or hero == 255) and (0 <= race < 16 or race == 255)): return False
+    return (pid == -1 and a == b == c == -1) or (pid > 0 and a == 0 and 0 < b < 256 and c == 0)
+def slots(m):
+    """[{pid, army, badge}] из slotinfo: после шапки слота — u32 n + имя армии (UTF-16), 4 байта, u32 n + путь значка."""
+    try: raw = zlib.decompress(base64.b64decode(m.get('slotinfo') or ''))
+    except Exception: return []
+    if len(raw) < 6: return []
+    n = struct.unpack_from('<H', raw, 4)[0]; off = 6; out = []
+    for k in range(min(n, 16)):
+        if not _slot_head(raw, off): break
+        pid = struct.unpack_from('<i', raw, off)[0]; army = badge = ''
+        try:
+            q = off + 43; ln = struct.unpack_from('<I', raw, q)[0]
+            if 0 < ln < 64:
+                army = raw[q + 4:q + 4 + 2 * ln].decode('utf-16-le', 'replace'); q += 4 + 2 * ln + 4
+                bl = struct.unpack_from('<I', raw, q)[0]
+                if 0 < bl < 160: badge = raw[q + 4:q + 4 + bl].decode('latin-1').rstrip('\x00')
+        except Exception: pass
+        if pid > 0: out.append({'pid': pid, 'army': army, 'badge': badge})
+        off += 43
+        if k == n - 1: break
+        if not _slot_head(raw, off):
+            off = next((q for q in range(off, min(len(raw) - 42, off + 600)) if _slot_head(raw, q)), None)
+            if off is None: break
+    return out
+def _badge(b):
+    b = (b or '').replace('\\', '/').split('/')[-1].lower()
+    return b, (None if not b or b == 'nobadge' or ':' in b else BADGE_RACE.get(b.split('_')[0]))
+def match_races(m):
+    """{profile_id: номер расы Elite 3.x или None} для участников матча (номера Relic приведены по таблице этой игры)."""
+    mem = m.get('matchhistorymember', [])
+    ids = {x['race_id'] for x in mem}
+    ok = {'vanilla', 'elite2', 'elite3'}; score = dict.fromkeys(ok, 0); own = {}
+    if ids & {7, 8}: ok -= {'vanilla', 'elite2'}
+    if 6 in ids: ok -= {'vanilla'}
+    mn = (m.get('mapname') or '').lower()
+    if mn in ELITE_MAPS and mn not in VAN_MAPS: ok -= {'vanilla'}
+    race_of = {x['profile_id']: x.get('race_id') for x in mem}
+    for s in slots(m):
+        r = race_of.get(s['pid'])
+        if r is None: continue
+        name, br = _badge(s['badge'])
+        if (s['army'] or '').lower().endswith('_elite') or br in (3, 6, 8): ok -= {'vanilla'}
+        if br is not None:
+            own[s['pid']] = br                                   # the badge names the race the player had in the lobby
+            for t in score:
+                tr = TABLES[t].get(r)
+                if tr is not None: score[t] += 1 if tr == br else -3
+        elif name == 'nobadge':                                  # races that come without badges
+            if r == 5: score['vanilla'] += 1                     # vanilla Tyranids (Elite SM nearly always have one)
+            if r == 3: score['elite2'] += 1; score['elite3'] += 1   # Ordo Malleus (vanilla Orks nearly always have one)
+            if r == 6: score['elite2'] += 1                      # Tyranids before Tau (Tau get tau_default)
+    late = (m.get('startgametime') or 0) >= TAU_FROM
+    order = ('elite3', 'elite2', 'vanilla') if late else ('elite2', 'elite3', 'vanilla')
+    t = max(ok or {'elite3'}, key=lambda k: (score[k], -order.index(k)))
+    out = {}
+    for x in mem:
+        r = x.get('race_id'); br = own.get(x['profile_id'])
+        out[x['profile_id']] = br if br is not None and TABLES[t].get(r) is not None else TABLES[t].get(r)
+    return out
+# Relic ведёт рейтинг кастомок не одним числом: номера 0-6 — общий счёт, а 7, 8 и 255 («случайная») — у каждого свой
+# (проверено по архиву 05.11.2026: рейтинг и счёт побед идут подряд между боями за 0-6 и обрываются при переходе на 7).
+# Тираниды Elite с выходом Тау стали номером 7 — у тех, кто играл за них раньше (номер 6), это новый счёт с нуля, а не
+# «падение за неактивность»: Relic за перерыв рейтинг не снижает.
+def rating_pool(race_id): return 'main' if race_id is not None and 0 <= race_id <= 6 else str(race_id)
+
 COUNTERS = ['ukill', 'uprod', 'plost', 'pseized', 'hkill', 'hlost', 'mvp', 'revived', 'sbuilt', 'wg']
 
 # ---------- хранилище ----------
@@ -248,12 +343,14 @@ def player(pid):
     names = profiles_by_ids([x['profile_id'] for m in ms[:40] for x in m.get('matchhistorymember', [])])
     lb = {s['leaderboard_id']: s for s in ps.get('leaderboardStats', [])}
     cust = lb.get(0, {})
-    matches, series, races, heroes, totals, n_tot = [], [], {}, {}, {k: 0 for k in COUNTERS}, 0
+    matches, races, heroes, totals, n_tot = [], {}, {}, {k: 0 for k in COUNTERS}, 0
+    pools = {}                                       # Relic's own rating tracks (rating_pool): pool -> [(time, rating, race)]
     for m in ms:
         mem = {x['profile_id']: x for x in m.get('matchhistorymember', [])}
         res = {x['profile_id']: x for x in m.get('matchhistoryreportresults', [])}
         if pid not in mem: continue
-        x = mem[pid]; r = res.get(pid, {})
+        rid = match_races(m)
+        x = mem[pid]; r = res.get(pid, {}); my = rid.get(pid)
         try: cnt = json.loads(r.get('counters') or '{}')
         except Exception: cnt = {}
         hero = next((i for i, k in enumerate(('ha', 'hb', 'hc')) if cnt.get(k)), None)
@@ -264,23 +361,30 @@ def player(pid):
             oc = {}
             try: oc = json.loads(res.get(oid, {}).get('counters') or '{}')
             except Exception: pass
-            players.append({'profile_id': oid, 'alias': names.get(oid, {}).get('alias', ''), 'team': o.get('teamid'), 'race': o.get('race_id'),
+            players.append({'profile_id': oid, 'alias': names.get(oid, {}).get('alias', ''), 'team': o.get('teamid'), 'race': rid.get(oid),
                             'hero': next((i for i, k in enumerate(('ha', 'hb', 'hc')) if oc.get(k)), None), 'win': o.get('outcome') == 1,
                             'rating': o.get('newrating'), 'delta': (o.get('newrating') or 0) - (o.get('oldrating') or 0)})
         matches.append({'id': m['id'], 'start': m['startgametime'], 'duration': max(0, m.get('completiontime', 0) - m['startgametime']),
                         'map': m.get('mapname', ''), 'name': m.get('description', ''), 'type': m.get('matchtype_id'), 'size': len(mem),
-                        'race': x.get('race_id'), 'hero': hero, 'team': x.get('teamid'), 'win': win, 'old': x.get('oldrating'), 'new': x.get('newrating'),
+                        'race': my, 'hero': hero, 'team': x.get('teamid'), 'win': win, 'old': x.get('oldrating'), 'new': x.get('newrating'),
+                        'pool': rating_pool(x.get('race_id')),
                         'counters': {k: cnt.get(k, 0) for k in COUNTERS}, 'players': players})
         if last_stand: continue
-        if x.get('newrating'): series.append((m['startgametime'], x['newrating']))
-        rr = races.setdefault(x.get('race_id'), {'games': 0, 'wins': 0}); rr['games'] += 1; rr['wins'] += win
-        if hero is not None:
-            hh = heroes.setdefault('%s:%s' % (x.get('race_id'), hero), {'games': 0, 'wins': 0}); hh['games'] += 1; hh['wins'] += win
+        if x.get('newrating'): pools.setdefault(rating_pool(x.get('race_id')), []).append((m['startgametime'], x['newrating'], my))
+        rr = races.setdefault(my, {'games': 0, 'wins': 0}); rr['games'] += 1; rr['wins'] += win
+        if hero is not None and my is not None and hero < len(RACES.get(my, ('', '', '', []))[3]):
+            hh = heroes.setdefault('%s:%s' % (my, hero), {'games': 0, 'wins': 0}); hh['games'] += 1; hh['wins'] += win
         n_tot += 1
         for k in COUNTERS: totals[k] += cnt.get(k, 0) or 0
-    series.sort()
     pvp = [mt for mt in matches if mt['type'] != 5]
     latest = pvp[0] if pvp else None
+    # the chart: the track of the latest rated battle only (two tracks in one line looked like a fall of 1000 points);
+    # the others are listed under it, each with its last rating
+    for v in pools.values(): v.sort()
+    cur = next((mt['pool'] for mt in pvp if mt['new']), None)
+    series = [(t, v) for t, v, _ in pools.get(cur, [])]
+    tracks = sorted(({'pool': k, 'rating': v[-1][1], 'last': v[-1][0], 'games': len(v), 'current': k == cur,
+                      'races': sorted({rc for _, _, rc in v if rc is not None})} for k, v in pools.items()), key=lambda t: -t['last'])
     streak = 0
     for mt in pvp:
         if streak == 0: streak = 1 if mt['win'] else -1
@@ -290,8 +394,8 @@ def player(pid):
         'profile_id': pid, 'alias': me.get('alias', ''), 'steam': me.get('name', '').replace('/steam/', ''), 'country': me.get('country', ''),
         'xp': me.get('xp', 0), 'rating': latest['new'] if latest else None, 'peak': max((v for _, v in series), default=None),
         'wins': cust.get('wins', 0), 'losses': cust.get('losses', 0), 'drops': cust.get('drops', 0), 'disputes': cust.get('disputes', 0),
-        'last': cust.get('lastmatchdate') or (matches[0]['start'] if matches else 0), 'streak': streak,
-        'series': series[-200:], 'races': races, 'heroes': heroes, 'avg': {k: round(v / n_tot, 1) for k, v in totals.items()} if n_tot else {},
+        'last': max(cust.get('lastmatchdate') or 0, matches[0]['start'] if matches else 0), 'streak': streak,   # leaderboard 0 is the 0-6 track only
+        'series': series[-200:], 'tracks': tracks, 'races': races, 'heroes': heroes, 'avg': {k: round(v / n_tot, 1) for k, v in totals.items()} if n_tot else {},
         'sample': n_tot, 'matches': matches[:60], 'stored': len(ms),
         'steam_hours': steam_hours(me.get('name', '').replace('/steam/', '')),
         'automatch': [{'id': s['leaderboard_id'], 'wins': s['wins'], 'losses': s['losses']} for s in ps.get('leaderboardStats', []) if s['leaderboard_id'] != 0 and s['wins'] + s['losses'] > 0],

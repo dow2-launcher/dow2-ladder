@@ -183,6 +183,7 @@ footer .orn { margin-bottom: 14px; }
     <section class="frame" id="chartbox">
       <div class="ftitle" data-i="history"></div>
       <div id="chart"></div>
+      <div class="hint" id="tracks"></div>
     </section>
 
     <section class="frame">
@@ -224,8 +225,10 @@ const T = {
    victory: 'Victory', defeat: 'Defeat', team: 'Team', lst: 'Last Stand', min: 'min',
    c: { ukill: 'Units killed', uprod: 'Units produced', pseized: 'Points captured', plost: 'Points lost', hkill: 'Heroes killed', hlost: 'Hero deaths', mvp: 'MVP awards', revived: 'Allies revived', sbuilt: 'Structures built', wg: 'Wargear bought' },
    sample: n => 'Based on the ' + n + ' battles in our archive.', nochart: 'Not enough rated battles yet.',
+   pool: { main: 'races 0–6 (all but the ones below)', 7: 'race 7 (Elite Tyranids since Tau came)', 8: 'race 8', 255: 'random race' },
+   tracks: (cur, rest) => 'Relic keeps separate ratings by race number: the chart shows ' + cur + ', the one of the latest battle. Separately: ' + rest + '. A switch between them is not a drop for inactivity — Relic lowers nothing for a break.',
    automatch: 'Old ranked automatch (frozen since years)',
-   foot: 'Data: Relic community API (dow-api.reliclink.com). Relic keeps only the last 10 battles per player, so this archive stores every battle it sees — history grows from the first lookup. Race ids follow Elite Mod.',
+   foot: 'Data: Relic community API (dow-api.reliclink.com). Relic keeps only the last 10 battles per player, so this archive stores every battle it sees — history grows from the first lookup. Races are told by the game that played (vanilla, Elite before and after Tau) from the army badges.',
    err: 'Error: ' },
  ru: { eyebrow: '++ Dawn of War II · Retribution · Elite ++', title: 'Архив командиров',
    sub: 'Каждый сетевой матч до сих пор уходит на сервер Relic и учитывается в рейтинге. Найдите любого командира: рейтинг, счёт побед, любимые расы и герои, последние бои.',
@@ -238,9 +241,11 @@ const T = {
    matches: 'Последние бои', more: 'Показать ещё', games: n => n + ' ' + plural(n, 'бой', 'боя', 'боёв'), wr: p => p + '% побед',
    victory: 'Победа', defeat: 'Поражение', team: 'Команда', lst: 'Last Stand', min: 'мин',
    c: { ukill: 'Убито юнитов', uprod: 'Произведено юнитов', pseized: 'Захвачено точек', plost: 'Потеряно точек', hkill: 'Убито героев', hlost: 'Гибель героя', mvp: 'Звание MVP', revived: 'Поднято союзников', sbuilt: 'Построено зданий', wg: 'Куплено снаряжения' },
-   sample: n => 'По ' + n + ' ' + plural(n, 'бою', 'боям', 'боям') + ' из нашего архива.', nochart: 'Пока мало боёв с рейтингом.',
+   sample: n => 'По ' + n + ' ' + plural(n, 'бою', 'боям', 'боям') + ' из нашего архива.',
+   pool: { main: 'расы с номерами 0–6 (все, кроме ниже)', 7: 'раса № 7 (Тираниды Elite с выходом Тау)', 8: 'раса № 8', 255: 'случайная раса' },
+   tracks: (cur, rest) => 'Relic ведёт рейтинг отдельно по номерам рас: на графике — ' + cur + ', как в последнем бою. Отдельно: ' + rest + '. Переход между ними — не падение за неактивность: за перерыв Relic рейтинг не снижает.', nochart: 'Пока мало боёв с рейтингом.',
    automatch: 'Старый ранговый автоматч (заморожен много лет)',
-   foot: 'Данные: публичный API Relic (dow-api.reliclink.com). Relic хранит лишь 10 последних боёв игрока, поэтому архив сохраняет всё увиденное — история растёт с первого запроса. Номера рас — как в Elite Mod.',
+   foot: 'Данные: публичный API Relic (dow-api.reliclink.com). Relic хранит лишь 10 последних боёв игрока, поэтому архив сохраняет всё увиденное — история растёт с первого запроса. Раса определяется по игре матча (ваниль, Elite до и после Тау) — по значкам армий.',
    err: 'Ошибка: ' } };
 function plural(n, a, b, c) { n = Math.abs(n) % 100; const d = n % 10; return n > 10 && n < 20 ? c : d > 1 && d < 5 ? b : d === 1 ? a : c; }
 let L = (new URLSearchParams(location.search).get('lang')) || (() => { try { return localStorage.getItem('lang'); } catch (e) { return null; } })() || 'en';
@@ -322,6 +327,8 @@ function render(d) {
   ];
   $('pstats').innerHTML = st.map(([l, v]) => `<div class="stat"><div class="v">${v}</div><div class="l">${esc(l)}</div></div>`).join('');
   chart(d.series);
+  const tr = d.tracks || [], cur = tr.find(t => t.current), poolName = t => T[L].pool[t.pool] || ('№ ' + t.pool);
+  $('tracks').innerHTML = cur && tr.length > 1 ? esc(T[L].tracks(poolName(cur), tr.filter(t => !t.current).map(t => poolName(t) + ' — ' + t.rating + ' (' + fmtDate(t.last) + ')').join('; '))) : '';
   $('races').innerHTML = rc.map(([id, r]) => {
     const p = Math.round(r.wins * 100 / r.games);
     return `<div class="race"><img src="${raceIcon(id)}" alt=""><div><b>${esc(raceName(id))}</b><small>${T[L].games(r.games)} · ${T[L].wr(p)}</small><div class="bar"><i style="width:${p}%"></i></div></div></div>`;

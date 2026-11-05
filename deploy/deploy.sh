@@ -66,8 +66,9 @@ ladder/"
   fi
 fi
 # ---- player statistics (service relicstats)
-if has stats/; then
+if has stats/ || has ladder/maps.txt; then
   rsync -a --chown=root:relicstats --chmod=D750,F640 stats/ /srv/relicstats/app/
+  install -o root -g relicstats -m 640 ladder/maps.txt /srv/relicstats/app/maps.txt   # Elite-only maps: which game a match was
   systemctl restart relic-stats && done_parts="$done_parts статистика"
 fi
 # ---- replays (service replayweb) + the story worker
