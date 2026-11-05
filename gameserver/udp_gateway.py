@@ -38,7 +38,10 @@ PER_IP = 16            # connections per address
 TRUSTED = set(os.environ.get('UDPGW_TRUSTED', '83.217.192.34,91.107.122.186,15.220.68.107,116.202.106.150').split(','))
 IDLE = 30.0
 SYN, SYNACK, DATA, ACK, FIN, PING, PONG, DATA2, ACK2 = 1, 2, 3, 4, 5, 6, 7, 8, 9
-VERSION = 2            # the newest we speak: 2 = DATA2 with copies
+# the newest we speak: 2 = DATA2 with copies. UDPGW_VERSION=1 (05.11.2026, owner): no copies at all - a bare SYNACK, so every
+# Relay.dll falls back to plain DATA / ACK and resends only what is really lost (a 2v2 on Relay 22 went into a storm of copies:
+# ~650 packets/s, 1.07 M copies in 10 min, the game choking on old retries)
+VERSION = max(1, min(2, int(os.environ.get('UDPGW_VERSION', '2'))))
 COPIES = 2             # earlier unacknowledged packets copied into each DATA2
 BUDGET = 1240          # bytes per datagram with the copies (no copy that does not fit)
 
