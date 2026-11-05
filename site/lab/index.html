@@ -88,11 +88,6 @@ footer { padding: 30px 0 50px; color: var(--muted); font-size: 15px; text-align:
       <p data-i="a_automatch_p">The new Elite automatch, entirely on our servers: Multiplayer → Find a Game → Start Searching. Matched by rating in 1v1 / 2v2 / 3v3, no friends or private rooms needed, the match starts within seconds; the lobby and the game run through our servers (Moscow, Poland, Germany). Ordinary Custom Games lobbies are not affected. If it cannot run, Find a Game shows why and what to do.</p>
       <small><span data-i="cat_network">Network and automatch</span> · <span data-i="def_on">on by default</span></small>
     </div>
-    <div class="card exp">
-      <h3><span data-i="a_netprobe_h">EXPERIMENT: connection check to our servers</span> <span class="ver">netprobe-2</span> <span class="badge b-exp" data-i="b_exp">experiment</span></h3>
-      <p data-i="a_netprobe_p">Pure experiment, at your own risk. Nothing in the game changes: 15 s after the game starts it checks for 1-2 minutes in the background what gets through from your computer to our game servers (TCP and UDP on several ports, ~5 MB) and sends the result to us by itself (NetProbe.log). How to test: alone, no lobby or opponent needed - tick it, start the game and wait 2 minutes in the menu. It helps us make our servers work for players whose connection gets cut on the way (Russia, Ukraine).</p>
-      <small><span data-i="cat_network">Network and automatch</span></small>
-    </div>
     <div class="card">
       <h3><span data-i="a_lobbystats_r3_h">Lobby rating</span> <span class="ver">lobbystats-0.11.0</span> <span class="badge b-ok" data-i="b_ok">works</span></h3>
       <p data-i="a_lobbystats_r3_p">Relic rating next to each player in the lobby; on hover - win rate, games and Steam hours. Only shows, kicks nobody.</p>
@@ -270,16 +265,10 @@ footer { padding: 30px 0 50px; color: var(--muted); font-size: 15px; text-align:
       <small data-i="clv_s">For the developers: install, repeat the crash, send us <code>CrashLog.log</code> (and the <code>.dmp</code>), then remove it.</small>
       <div class="btns"><a class="btn main" href="dl/CrashLog_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
     </div>
-    <div class="card exp">
-      <h3><span data-i="npv_h">Connection check</span> <span class="ver">NetProbe 2</span> <span class="badge b-exp" data-i="b_exp">experiment</span></h3>
-      <p data-i="npv_p">The same check as in the launcher: start the game, wait 2 minutes in the menu — the result is sent to us by itself (only the check and your Steam ID).</p>
-      <small data-i="npv_s">Pure experiment, at your own risk. It runs at every game start, so remove NetProbe.dll after the test.</small>
-      <div class="btns"><a class="btn main" href="dl/NetProbe_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
-    </div>
     <div class="card">
       <h3><span data-i="allv_h">Everything at once</span> <span class="badge b-test" data-i="b_test">test</span></h3>
       <p data-i="allv_p">Automatch v2.0, ReinforceFix, JumpRetry, SteamKeep, match timer, APM, cooldowns, lobby rating, loading screen ratings, join sound, Reverse and ObsFix in one archive — still a separate DLL each in <code>dow2-patches</code>, with its <code>.ini</code>.</p>
-      <small data-i="allv_s">Not inside: RelayForward, NetProbe and CrashLog — take them separately if you need them. To turn one off, delete its DLL.</small>
+      <small data-i="allv_s">Not inside: RelayForward and CrashLog — take them separately if you need them. To turn one off, delete its DLL.</small>
       <div class="btns"><a class="btn main" href="dl/All_vanilla.zip" data-i="dl_zip">Download .zip</a></div>
     </div>
   </div>
@@ -364,7 +353,7 @@ var RU = {
   rvv_h: "Задний ход", rvv_p: "Как в Company of Heroes: зажмите Ctrl и щёлкните правой кнопкой позади техники (или по миникарте) — она отходит задом, лобовой бронёй к врагу, а не разворачивается.", rvv_s: "Работает через обычные приказы игры, для остальных игроков ничего не меняется. Клавиша и отрезки: <code>Reverse.ini</code>.",
   ofv_h: "Исправление тормозов обсервера", ofv_p: "Обсервер больше не пересобирает всю информацию о матче десятки раз за кадр — живая игра обсом идёт так же плавно, как реплей.", ofv_s: "Нужен только тому, кто смотрит; рассинхрона нет.",
   clv_h: "Запись вылетов игры", clv_p: "Если игра закрывается сама без сообщений: где в коде случилась ошибка и кто закрыл игру, плюс маленький дамп — в <code>dow2-patches\\CrashLog.log</code>. В игре ничего не меняет, никуда ничего не отправляет.", clv_s: "Для разработчиков: поставьте, повторите вылет, пришлите нам <code>CrashLog.log</code> (и <code>.dmp</code>), потом удалите.",
-  allv_h: "Всё вместе", allv_p: "Автоматч v2.0, ReinforceFix, JumpRetry, SteamKeep, таймер матча, APM, перезарядки, рейтинг в лобби, рейтинги на экране загрузки, звук входа в лобби, Reverse и ObsFix одним архивом — каждое по-прежнему своей DLL в <code>dow2-patches</code>, со своим <code>.ini</code>.", allv_s: "Не вошли: RelayForward, NetProbe и CrashLog — их берите отдельно, если нужны. Чтобы выключить одно — удалите его DLL.",
+  allv_h: "Всё вместе", allv_p: "Автоматч v2.0, ReinforceFix, JumpRetry, SteamKeep, таймер матча, APM, перезарядки, рейтинг в лобби, рейтинги на экране загрузки, звук входа в лобби, Reverse и ObsFix одним архивом — каждое по-прежнему своей DLL в <code>dow2-patches</code>, со своим <code>.ini</code>.", allv_s: "Не вошли: RelayForward и CrashLog — их берите отдельно, если нужны. Чтобы выключить одно — удалите его DLL.",
   dl_zip: "Скачать .zip",
   h_tools: "Веб-инструменты",
   st_h: "Статистика игроков", st_p: "Рейтинг Relic, винрейт по расам и последние матчи любого игрока Elite — те же данные, что показывает дополнение в лобби.",
