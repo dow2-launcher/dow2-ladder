@@ -149,7 +149,7 @@ async def handle(r, w):
     c = Conn(w, relic)
     if not await c.open():
         await straight(r, w, relic, 'no SYNACK from %s:%d' % GW); return
-    c.log('open', ver=c.ver)
+    c.log('open')                     # ver is in the stats already (05.11: a second ver= raised TypeError, every forwarded game closed)
     t = asyncio.ensure_future(c.timers())
     c.core.write(b'DWR3' + socket.inet_aton(relic[0]) + struct.pack('>H', relic[1]))
     try:
