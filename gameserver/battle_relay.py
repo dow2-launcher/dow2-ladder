@@ -280,7 +280,8 @@ def handle_msg(p, m, echo=True):
             for q in (others or [p]): q.send(m)
             return
         for dst, one in parts:
-            targets = [q for q in s.peers if q.idx == dst]
+            # dst 0 (never seen in a capture): as before, everybody else
+            targets = [q for q in s.peers if q.idx == dst] if dst else ([q for q in s.peers if q is not p] or [p])
             if not targets:
                 k = (s.sid, dst); now = time.time()
                 if now - _last_warn.get(k, 0) > 60: _last_warn[k] = now; log(ev='no_target', sid=int.from_bytes(s.sid, 'little'), dst=dst, src=p.idx, proxy=1)
