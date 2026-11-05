@@ -89,6 +89,8 @@ select { font: 600 14px Spectral, serif; color: var(--text); background: var(--p
 .room .robs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 6px; padding-top: 5px; border-top: 1px dashed #2c251b; font-size: 13px; color: var(--dim, #9a8f7a); }
 .room .robs svg { flex: none; } .room .robs .nm { color: var(--bone, #e8dcc4); } .room .rp.cpu .nm { color: #9a8f7a; font-style: italic; }
 .room .rfoot { margin-top: 6px; font-size: 12px; color: var(--dim, #9a8f7a); }
+.room .rjoin { margin-left: auto; flex: none; padding: 1px 9px; border: 1px solid #8a6d2a; border-radius: 3px; color: #e9c46a; font-size: 12px; text-decoration: none; }
+.room .rjoin:hover, .room .rjoin:focus-visible { background: #2a2113; color: var(--gold-2, #f0d48f); }
 @media (max-width: 760px) { .rooms-grid { grid-template-columns: 1fr; } .room { grid-template-columns: 64px 1fr; } .room .mmap { width: 64px; height: 64px; } }
 .dbg-tgl { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--gold-2); opacity: .7; cursor: pointer; margin: 2px 0 6px; user-select: none; }
 .dbg-tgl input { accent-color: var(--gold); margin: 0; }
@@ -245,7 +247,7 @@ const I18N = {
         desc: 'Рейтинговая таблица Dawn of War II: Retribution (Elite). Glicko-2, сезоны, 1v1/2v2/3v3.',
         hist: 'История матчей ладдера', hq: 'Ник, карта или лобби', allModes: 'Все режимы', allRaces: 'Все расы', allMaps: 'Все карты', more: 'Показать ещё', dbgLabel: 'Детали (отладка)',
         dlLauncher: 'Скачать лаунчер', chatLink: 'Чат', replay: 'Реплей', conf: { 'высокая':'высокая','средняя':'средняя','низкая':'низкая' }, mmrAfter: 'MMR после матча', estResult: 'по реплею', estHint: 'Предположительный итог по реплею (парсер, пока Relic не отдал результат); обновится точным.', noReplay: 'реплея нет', won: 'победа', hNone: 'Матчей с такими условиями нет.', hRes: { finished: '', playing: 'идёт', unknown: 'итог неизвестен' },
-        watchers: 'зрители' },
+        watchers: 'зрители', join: 'Войти', joinT: 'Открыть Elite Launcher и войти в это лобби (Windows, дополнение «Вход в лобби из лаунчера»)' },
   en: { ingame: 'in DoW II', online: 'online', queue: 'in queue', playing: 'playing', cta: 'Join the queue', searching: 'Searching now', matches: 'Matches',
         loading: 'Loading…', player: 'Player', rating: 'Rating', games: 'Games', maps: 'maps', anyMap: 'any map', anyOpp: 'any opponent',
         ratingDiff: 'rating', waits: 'waiting', nobody: 'Nobody is searching. Press “Find a Game” in the game.', rooms: 'Open lobbies', roomsSub: 'Custom games being set up in the game right now - the same list as the game browser (Custom Games). Refreshed every 15 seconds.', noRooms: 'Nobody is setting up a game right now.', pw: 'password', obs: 'observers', rnd: 'Random race', cpu: 'Computer', vanilla: 'vanilla', otherMod: 'other mod', freeSlot: 'open', noMatches: 'No matches right now.',
@@ -257,7 +259,7 @@ const I18N = {
         desc: 'Dawn of War II: Retribution (Elite) ladder. Glicko-2 rating, seasons, 1v1/2v2/3v3.',
         hist: 'Ladder match history', hq: 'Player, map or lobby', allModes: 'All modes', allRaces: 'All races', allMaps: 'All maps', more: 'Show more', dbgLabel: 'Details (debug)',
         dlLauncher: 'Download launcher', chatLink: 'Chat', replay: 'Replay', conf: { 'высокая':'high','средняя':'medium','низкая':'low' }, mmrAfter: 'MMR after the match', estResult: 'by replay', estHint: 'Estimated outcome from the replay (parser, until Relic reports); will be replaced by the exact result.', noReplay: 'no replay', won: 'won', hNone: 'No matches for these filters.', hRes: { finished: '', playing: 'in progress', unknown: 'result unknown' },
-        watchers: 'observers' } };
+        watchers: 'observers', join: 'Join', joinT: 'Open Elite Launcher and join this lobby (Windows, the add-on “Join a lobby from the launcher”)' } };
 let LANG = (() => {
   const q = new URLSearchParams(location.search).get('lang'); if (q === 'ru' || q === 'en') return q;
   try { const v = localStorage.getItem('ladderLang'); if (v === 'ru' || v === 'en') return v; } catch (e) {}
@@ -338,9 +340,13 @@ function roomCard(r) {
     return `<div class="team">${ps.map(pl).join('')}${cs.map(cpu).join('')}${Array(free).fill(`<div class="rp free">${esc(T('freeSlot'))}</div>`).join('')}</div>`;
   }).join('');
   const EYE = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 5C6.5 5 2.7 9.2 1.5 12c1.2 2.8 5 7 10.5 7s9.3-4.2 10.5-7C21.3 9.2 17.5 5 12 5zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9zm0-7a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/></svg>';
+  // 05.11.2026: Join through the launcher (elite://join/<id>?name=..., launcher 1.4.9 + RoomJoin 9) - only for a room whose game is
+  // known exactly to be Elite (Relic's scan), without a password and with a free slot
+  const canJoin = r.game === 'elite' && r.exact && !r.password && r.id && /^\d+$/.test(String(r.id)) && !(r.free != null && r.free <= 0);
+  const joinA = canJoin ? `<a class="rjoin" href="elite://join/${r.id}?name=${encodeURIComponent(String(r.name || '').slice(0, 64))}" title="${esc(T('joinT'))}">${esc(T('join'))}</a>` : '';
   const obsRow = obs.length ? `<div class="robs" title="${esc(T('obs'))}">${EYE}${obs.map(p => `<span>${roomFlag(p.country)}</span><span class="nm">${esc(p.name)}</span>`).join(' · ')}</div>` : '';
   return `<div class="room"><div class="mmap" style="${r.minimap ? `background-image:url('${R_ASSETS}${esc(r.minimap)}')` : ''}"></div><div style="min-width:0">
-    <div class="rh">${r.mode ? `<span class="tag">${esc(r.mode)}</span>` : ''}${gameTag}${r.password ? '<span class="tag">🔒</span>' : ''}<span class="rn">${esc(r.name || '—')}</span></div>
+    <div class="rh">${r.mode ? `<span class="tag">${esc(r.mode)}</span>` : ''}${gameTag}${r.password ? '<span class="tag">🔒</span>' : ''}<span class="rn">${esc(r.name || '—')}</span>${joinA}</div>
     <div class="rmap">${esc(r.map_title || '') || mapName(r.map)}${cap ? ' · ' + (play.length + (r.ai || []).length) + '/' + cap : ''}</div>
     <div class="teams">${teams}</div>${obsRow}
     <div class="rfoot">${r.observers ? T('obs') + ': ' + r.observers + ' · ' : ''}${r.password ? T('pw') : ''}</div></div></div>`;
