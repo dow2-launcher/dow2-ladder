@@ -1970,8 +1970,11 @@ class H(BaseHTTPRequestHandler):
 import community                                    # launcher community: Steam sign-in, who is online, the players' chat
 community.ADMIN_OK = _fb_token_ok
 def _c_rating(steam):
-    i = _rating_info(steam, '1v1')
-    return round(i[1]) if i[5] != 'new' else None
+    # the launcher's Online block and own card: the Relic rating, the same number LobbyStats shows in the game's lobby
+    # (owner 05.11.2026: the season ladder rating there mixed two scales - 1500-based ladder for some, Relic for the rest);
+    # the ladder rating stays on the ladder page and in the queue. None when Relic has none.
+    rr, _, _ = _relic_rating(steam)
+    return round(rr) if rr else None
 users.RATING = _c_rating
 def _c_stats(steam):
     # the launcher's profile: 1v1 of the current season - games, wins, losses (one query by the profiles_steam index).
