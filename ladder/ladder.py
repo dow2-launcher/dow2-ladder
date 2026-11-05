@@ -674,6 +674,11 @@ def _best_relay(steams, chain=False):
     # 29.10 a player from Ukraine "reached" Moscow that way and the match never connected. Someone without pings (an older
     # add-on): nothing is known about what he reaches - Relic too.
     pings = [(MM.get(s) or {}).get('ping') or {} for s in steams]
+    if chain:
+        # 05.11.2026: a party member has no pings of his own (only the one who searched sends them) - every party match came back
+        # '' and own_lobby put it on the first node (Poland), so Russian parties played through a chain Moscow -> Poland and lagged.
+        # The players with pings decide; one without plays where they play (Relay 22 chains him if he can not reach it)
+        pings = [x for x in pings if x]
     if not pings or not all(pings): return ''
     # Relay 13: a player who picked the server in the launcher pings only that one - the match goes there (the others'
     # Relay.dll connect where the matchmaker says; our servers pass a guest on to the one that has the match)
@@ -1474,7 +1479,7 @@ def _nm_view(p):  # under MM_LOCK: what own_lobby needs to answer the game
     order = m['host'] + m['guest']                       # the host first, then his team, then the other team
     if 'relay' not in m:                                 # once per match, by the players' pings (MMFind's hint); '' = own_lobby picks
         m['relay'] = _best_relay(order, chain=True)
-        print('mm: native match %s relay %r' % (m['id'], m['relay']), flush=True)
+        print('mm: native match %s relay %r (pings %s)' % (m['id'], m['relay'], [(MM.get(s_) or {}).get('ping') for s_ in order]), flush=True)
     return {'state': 'matched', 'match': m['id'], 'mode': m['mode'], 'host_steam': m['host_steam'],
             'host_pid': (MM.get(m['host_steam']) or {}).get('pid') or 0, 'team': 0 if p['steam'] in m['host'] else 1,
             'teams': 2, 'size': TEAM_N[m['mode']], 'map': m.get('map') or '', 'steams': order,
