@@ -26,8 +26,10 @@ def register(m, names=None):
     node = m.get('relay_used') or m.get('relay') or ''
     room = str(m.get('room') or '')
     if not (m.get('native') and node and room.isdigit()): return False
-    pool = (m.get('pool') or '').split('|')
-    game = 'vanilla' if len(pool) > 1 and pool[1].startswith('vanilla') else 'elite'
+    pool = m.get('pool') or ''
+    if pool.startswith('lroom:'): pool = pool.split('|', 1)[1] if '|' in pool else ''   # a launcher room: <group>|<game>|... after it
+    pool = pool.split('|')
+    game = 'vanilla' if len(pool) > 1 and pool[1].startswith('vanilla') else 'elite'      # <group>|vanilla|nm|... / elite-<ver>
     team = lambda ss: [{'steam': s, 'name': (m.get('players', {}).get(s) or {}).get('name') or 'Player',
                         'race': (m.get('players', {}).get(s) or {}).get('race')} for s in ss]
     with LOCK:
