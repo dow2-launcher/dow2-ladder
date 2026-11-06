@@ -71,6 +71,7 @@ HISTORY = int(os.environ.get('RELAY_HISTORY', '72000'))   # ticks a session keep
 GRACE = float(os.environ.get('RELAY_RECONNECT_GRACE', '45'))  # s a player whose connection broke mid-game stays in the ticks (silent)
 LONG_GRACE = float(os.environ.get('RELAY_REJOIN_GRACE', '170'))   # the same for a game whose Relay.dll (24+) keeps trying 3 min ("DWR5"): it gives up 180 s after its last data, we see the drop ~20 s after it (the UDP gateway's dead timer)
 LAG = 3.0                                           # s without turns from a connected player: the others are told he is silent
+VOTE = 0x7d                                         # Relay 25: "don't wait" from a DWR5 game: 7d <number of the player waited for>
 NOTICE = 0x7e                                       # our own frame to "DWR5" games: who is away and how long more; Relay.dll takes it out
 DECIDE = 5                                          # s: no peer announce from a new session's first peer -> it's the host
 RETRY = 8                                           # s: a guest whose session no node has yet asks our other nodes again (DWR1 / native)
@@ -159,6 +160,7 @@ class Session:
         self.gone = set()                                 # player ids whose GRACE ran out: the others have dropped them
         self.names = {}                                   # number -> the player's name (from his peer announce)
         self.lagging = set()                              # numbers told as "silent" (connected, no turns for LAG s)
+        self.votes = {}                                   # number waited for -> player ids that voted "don't wait"
         self.started = time.time(); self.ticks = 0; self.turn_msgs = 0; self.late = 0; self.max_late = 0.0
 
     def join(self, p):
@@ -176,13 +178,14 @@ class Session:
         a = self.away.pop(p.pid, None)
         if a:
             log(ev='back', sid=int.from_bytes(self.sid, 'little'), idx=p.idx, peer=p.addr, after_s=round(time.monotonic() - a[2], 1))
+            self.votes.pop(p.idx, None)
             self.notice(a[0], None)
 
     def leave(self, p):
         if p in self.peers: self.peers.remove(p)
         # 06.11.2026: a player whose connection breaks in the match stays in the ticks as silent for GRACE s - the game reconnects
         # by itself 15 s after the break; a player missing from a tick (neither sent nor silent) is dropped by the others at once
-        if self.ticks and GRACE > 0 and p.pid and not any(q.pid == p.pid for q in self.peers):
+        if self.ticks and GRACE > 0 and p.pid and p.pid not in self.gone and not any(q.pid == p.pid for q in self.peers):
             g = LONG_GRACE if p.rejoin else GRACE
             self.away[p.pid] = (p.idx, time.monotonic() + g, p.last_turn or time.monotonic())   # away since his last turn
             log(ev='away', sid=int.from_bytes(self.sid, 'little'), idx=p.idx, peer=p.addr, grace=g, name=self.names.get(p.idx, ''))
@@ -196,6 +199,27 @@ class Session:
         log(ev='session_end', sid=int.from_bytes(self.sid, 'little'), secs=round(time.time() - self.started), ticks=self.ticks, turns=self.turn_msgs,
             late_ticks=self.late, max_late_ms=round(self.max_late * 1000))
 
+    def vote(self, p, idx):
+        """Relay 25: player p votes "don't wait" for player idx; when every other connected player has voted, idx is dropped at
+        once - out of the next tick for everyone (as when GRACE runs out), his connection (if any) closed, no way back"""
+        waited = idx in self.lagging or any(a[0] == idx for a in self.away.values())
+        if not waited or p.idx == idx: return
+        v = self.votes.setdefault(idx, set()); v.add(p.pid)
+        need = {q.pid for q in self.peers if q.idx != idx}
+        log(ev='vote', sid=int.from_bytes(self.sid, 'little'), idx=idx, by=p.idx, votes=len(v & need), need=len(need))
+        if not need <= v:
+            a = next((a for a in self.away.values() if a[0] == idx), None) or (idx, None, time.monotonic())
+            self.notice(idx, a); return
+        for pid, a in list(self.away.items()):
+            if a[0] == idx: del self.away[pid]; self.gone.add(pid)
+        for q in [q for q in self.peers if q.idx == idx]:
+            self.gone.add(q.pid); self.peers.remove(q)
+            try: q.w.close()
+            except Exception: pass
+        self.lagging.discard(idx); self.votes.pop(idx, None)
+        log(ev='vote_drop', sid=int.from_bytes(self.sid, 'little'), idx=idx, name=self.names.get(idx, ''))
+        self.notice(idx, None)
+
     def notice(self, idx, a, now=None):
         """to the "DWR5" games here: player idx is away (a = (idx, until, since)) or back / dropped (a = None):
         7e <idx> <s left u16 BE> <s away u16 BE> <name len> <name utf-8>; left 0xFFFF = no longer waited for"""
@@ -204,7 +228,10 @@ class Session:
             left = 0xFFFE if a[1] is None else max(0, min(0xFFFD, int(a[1] - now)))   # 0xFFFE: connected but silent (not dropped yet)
         else: left, gone = 0xFFFF, 0
         nm = (self.names.get(idx) or '').encode()[:60]
-        m = bytes([NOTICE, idx]) + min(left, 0xFFFF).to_bytes(2, 'big') + min(gone, 0xFFFF).to_bytes(2, 'big') + bytes([len(nm)]) + nm
+        need = [q.pid for q in self.peers if q.idx != idx]
+        got = len(self.votes.get(idx, set()) & set(need))
+        m = (bytes([NOTICE, idx]) + min(left, 0xFFFF).to_bytes(2, 'big') + min(gone, 0xFFFF).to_bytes(2, 'big') + bytes([len(nm)]) + nm
+             + bytes([min(got, 255), min(len(need), 255)]))                # Relay 25: "don't wait" votes / players asked
         for q in self.peers:
             if q.rejoin: q.send(m)
 
@@ -216,7 +243,7 @@ class Session:
             if g > GAP: p.gaps += 1; p.iv['gaps'] += 1
             p.max_gap = max(p.max_gap, g); p.iv['max_gap'] = max(p.iv['max_gap'], g)
         p.last_turn = now; p.turns += 1; p.iv['turns'] += 1
-        if p.idx in self.lagging: self.lagging.discard(p.idx); self.notice(p.idx, None)
+        if p.idx in self.lagging: self.lagging.discard(p.idx); self.votes.pop(p.idx, None); self.notice(p.idx, None)
         if not self.ticker: self.ticker = asyncio.ensure_future(self.tick_loop())
 
     async def tick_loop(self):
@@ -397,6 +424,9 @@ def handle_msg(p, m, echo=True):
                 k = (s.sid, dst); now = time.time()
                 if now - _last_warn.get(k, 0) > 60: _last_warn[k] = now; log(ev='no_target', sid=int.from_bytes(s.sid, 'little'), dst=dst, src=p.idx, proxy=1)
             for q in targets: q.send(one)
+        return
+    if t == VOTE:                                                    # Relay 25: never passed on
+        if len(m) >= 2: s.vote(p, m[1])
         return
     if t in (0x09, 0x17): s.rx[p.pid] = s.rx.get(p.pid, 0) + 1   # what we tell him on a reconnect
     if t == 0x09:

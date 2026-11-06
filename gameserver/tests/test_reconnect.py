@@ -54,6 +54,61 @@ async def main(port):
     assert allb[:n] == ga[:n], 'B (before + after the reconnect) must have the same ticks as A, in order'
     print(f'reconnect ok: A {len(ga)} ticks, B {len(gb)} before the break + {len(gb2)} after (incl. the gap), identical')
 
+async def votes(port):
+    """Relay 25, three DWR5 games: C breaks; A votes "don't wait" -> the notices say 1 of 2 and C is still silent in the ticks;
+    B votes -> C is out of the next tick for both (neither sent nor silent: the games drop him), the clear notice comes, and
+    C's reconnect is refused"""
+    A, B, C = b'G' * 8, b'H' * 8, b'I' * 8
+    con = {}
+    for k, pid in (('a', A), ('b', B), ('c', C)):
+        r, w = await asyncio.open_connection('127.0.0.1', port); w.write(b'DWR5' + b'\0' * 6 + hello(pid)); con[k] = (r, w)
+        await asyncio.sleep(0.1)
+    turn = lambda w, x: w.write((5).to_bytes(2, 'big') + b'\x09\xfe\x01\x00' + x)
+    for i in range(5):
+        for k in 'abc': turn(con[k][1], k.encode())
+        await asyncio.sleep(0.1)
+    got = {'a': [], 'b': []}
+    async def rd(k):
+        r = con[k][0]
+        try:
+            while True:
+                n = int.from_bytes(await r.readexactly(2), 'big'); got[k].append(await r.readexactly(n))
+        except Exception: pass
+    ts = [asyncio.ensure_future(rd(k)) for k in 'ab']
+    con['c'][1].close()
+    for i in range(12): turn(con['a'][1], b'a'); turn(con['b'][1], b'b'); await asyncio.sleep(0.1)
+    vote = lambda w: w.write((2).to_bytes(2, 'big') + b'\x7d\x03')
+    vote(con['a'][1])
+    for i in range(12): turn(con['a'][1], b'a'); turn(con['b'][1], b'b'); await asyncio.sleep(0.1)
+    n1 = [x for x in got['b'] if x[:1] == b'\x7e' and x[1] == 3 and int.from_bytes(x[2:4], 'big') < 0xFFFE]
+    assert n1 and n1[-1][-2:] == bytes([1, 2]), ('1 of 2', [x.hex() for x in n1[-2:]])
+    ticks_before = [x for x in got['a'] if x[:1] == b'\x0a']
+    assert 3 in silent_of(ticks_before[-1]), 'C still waited for after one vote'
+    mark = len(got['a']); vote(con['b'][1])
+    for i in range(6): turn(con['a'][1], b'a'); turn(con['b'][1], b'b'); await asyncio.sleep(0.1)
+    after = [x for x in got['a'][mark:] if x[:1] == b'\x0a']
+    assert after and 3 not in silent_of(after[-1]), 'C must be out of the ticks after both votes'
+    assert any(x[:1] == b'\x7e' and x[1] == 3 and x[2:4] == b'\xff\xff' for x in got['b']), 'the clear notice'
+    r, w = await asyncio.open_connection('127.0.0.1', port); w.write(b'DWR5' + b'\0' * 6 + hello(C, 5)); back = []
+    try:
+        while True:
+            n = int.from_bytes(await asyncio.wait_for(r.readexactly(2), 2), 'big'); back.append(await r.readexactly(n))
+    except Exception: pass
+    assert not any(x[:1] == b'\x0a' for x in back), 'C dropped by vote: no way back'
+    for t in ts: t.cancel()
+    for k in 'ab': con[k][1].close()
+    print('votes ok: 1 of 2 shown, both votes -> C out of the ticks for everyone, his reconnect refused')
+
+if __name__ == '__main__':
+    s = socket.socket(); s.bind(('127.0.0.1', 0)); port = s.getsockname()[1]; s.close()
+    env = dict(os.environ, RELAY_PEERS='', RELAY_STATS_EVERY='0')
+    srv = subprocess.Popen([sys.executable, RELAY, str(port), '127.0.0.1'], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    try:
+        time.sleep(1.0); asyncio.run(votes(port))
+    finally:
+        srv.terminate(); out = srv.communicate(timeout=5)[0].decode(errors='replace')
+        print('\n'.join(l for l in out.splitlines() if 'vote' in l or 'refused' in l or 'error' in l))
+
 if __name__ == '__main__':
     s = socket.socket(); s.bind(('127.0.0.1', 0)); port = s.getsockname()[1]; s.close()
     env = dict(os.environ, RELAY_PEERS='', RELAY_STATS_EVERY='0')
