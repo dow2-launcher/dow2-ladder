@@ -556,7 +556,7 @@ def _try_match(mode):  # под MM_LOCK: нестрогий подбор с пр
         else: pool = sorted(set().union(*[set(p.get('maps') or []) for p in grp]))
         mmap = random.choice(pool) if pool else None
         native = all(p.get('native') for p in grp)              # the game's own automatch (own_lobby): a map key of the mode's size
-        if native and not mmap: mmap = random.choice(_nm_maps(grp[0].get('game'), mode) or [None])
+        if native: mmap = _nm_pick_map(grp, mode)               # nobody's banned map (06.11.2026)
         # команды: перебор всех разбиений, минимальная разница суммарного рейтинга (2v2: сильнейший + слабейший против двух средних)
         import itertools
         best_split, best_d = None, None
@@ -1487,6 +1487,7 @@ def mm_hello(steam):  # лёгкий heartbeat от открытого лаун�
 NM_TOKEN_FILE = ROOT + '/data/nm_token'
 NM_LOBBY = os.environ.get('NM_LOBBY_STATUS', 'http://127.0.0.1:47444')   # own_lobby's status port (same host)
 NM_HINTS = {}           # steam -> {'t', 'd'}: MMFind's mm/native body - map wishes, max_diff, test group, pings to our servers
+NM_PREFS = {}           # steam -> {'t', 'd'}: the last mm/native body of his MMFind, peeks too (a party member's own map bans)
 NM_HOST_TIMEOUT = int(os.environ.get('NM_HOST_TIMEOUT', '25'))    # s from the match to the host's room: else the host is out, the others search on
 NM_JOIN_TIMEOUT = int(os.environ.get('NM_JOIN_TIMEOUT', '40'))    # s from the room to every guest in it: else the missing guests are out, the others search on
 NM_START_TIMEOUT = int(os.environ.get('NM_START_TIMEOUT', '90'))   # s from the room to the start with everybody in: else all out (a clean cancel, nobody to blame)
@@ -1518,10 +1519,44 @@ def _nm_maps(game, mode, wishes=None):
     if not pool: pool = sorted(k for k, v in cat.items() if v.get('maxplayers') == n and (kind == 'elite' or k in VAN_MAPS))
     if not pool: pool = ['2p_typhonswampredux'] if n == 2 else []
     if wishes:
-        by_name = {(v.get('name') or '').lower(): k for k, v in cat.items()}
-        want = {by_name.get(str(w).lower(), str(w)) for w in wishes}
+        want = _map_keys(wishes)
         pool = [k for k in pool if k in want] or pool
     return pool
+
+def _map_keys(names):
+    """map keys for names as the game lists them ("(2p) Bay of Grots") or keys; one name may stand for several keys (a vanilla map
+    and its Elite copy share the name)"""
+    by_name = {}
+    for k, v in _catalog().items(): by_name.setdefault((v.get('name') or '').lower(), set()).add(k)
+    out = set()
+    for w in names: out |= by_name.get(str(w).lower(), {str(w)})
+    return out
+
+def _nm_wishes(game, mode, h):
+    """a player's maps for the matcher (h: his MMFind's mm/native body): the mode's maps without his bans (MMFind 0.49 "bans"), or
+    older MMFind's wishes (the maps he left checked); [] = any map"""
+    if isinstance(h.get('bans'), list):
+        bans = _map_keys([_clean(x, 64) for x in h['bans'][:50] if _clean(x, 64)])
+        full = _nm_maps(game, mode); left = [k for k in full if k not in bans]
+        return left if bans and left else []
+    wishes = [_clean(x, 64) for x in (h.get('maps') or []) if _clean(x, 64)][:200]
+    return _nm_maps(game, mode, wishes) if wishes else []
+
+def _nm_pool_names(game, mode):
+    """MMFind 0.49's Map Preferences lists only the maps a native match of this mode can get (the names as the game lists them)"""
+    cat = _catalog()
+    return sorted({(cat.get(k) or {}).get('name') or k for k in _nm_maps(game, mode)}, key=str.lower)
+
+def _nm_pick_map(grp, mode):
+    """06.11.2026 (players: "the map ban does not work"): a ban is a veto, as in Relic's own automatch - the map of a native match is
+    one nobody of the match banned (each player's 'maps' = the mode's maps without his bans; none = any map). Only when every map is
+    banned by someone: one of those the fewest players banned."""
+    full = _nm_maps(grp[0].get('game'), mode)
+    if not full: return None
+    allow = [set(p.get('maps') or full) for p in grp]
+    votes = {k: sum(k in a for a in allow) for k in full}
+    best = max(votes.values())
+    return random.choice([k for k in full if votes[k] == best])
 
 def _nm_view(p):  # under MM_LOCK: what own_lobby needs to answer the game
     if p['state'] == 'searching':
@@ -1586,7 +1621,7 @@ def nm_join(d):
     h = NM_HINTS.get(steam); h = h['d'] if h and time.time() - h['t'] < 900 else {}
     pid, rating, rd, games, name, rsrc = _rating_info(steam, mode)
     game = _clean(d.get('game'), 24) or 'elite'; group = _clean(h.get('group'), 24) or ''
-    wishes = [_clean(x, 64) for x in (h.get('maps') or []) if _clean(x, 64)][:200]
+    maps = _nm_wishes(game, mode, h)
     try: max_diff = max(0, min(3000, int(h.get('max_diff') or 0)))
     except Exception: max_diff = 0
     try: race = RACE_KEYS[int(d.get('race'))]
@@ -1611,7 +1646,7 @@ def nm_join(d):
         MM[steam] = {'jts': now, 'steam': steam, 'mode': mode, 'rating': rating, 'rd': rd, 'games': games, 'ruiner': False,
                      'pid': gpid or pid, 'name': _clean(d.get('name')) or name or _clean(h.get('name')), 'state': 'searching', 'match': None,
                      'role': None, 'rsrc': rsrc, 'race': race or _clean(h.get('race'), 32), 'hero': _clean(h.get('hero'), 32),
-                     'maps': _nm_maps(game, mode, wishes) if wishes else [], 'max_diff': max_diff, 'ts': now, 'seen': now,
+                     'maps': maps, 'max_diff': max_diff, 'ts': now, 'seen': now,
                      'pool': '%s|%s|nm|%s' % (group, game, _clean(d.get('key'), 120) or ''), 'game': game, 'room': '', 'fast': True,
                      'native': True, 'own': True, 'ping': _relay_ping(h.get('relay_ping')), 'group': group, 'compat': False,
                      'ua': 'own_lobby', 'ver': _clean(h.get('ver') or h.get('launcher'), 32) or '', 'elite': _clean(h.get('elite'), 32) or '',
@@ -1620,8 +1655,9 @@ def nm_join(d):
             ps = str(x['steam']); xpid, xr, xrd, xg, xname, xsrc = prating[ps]
             try: xrace = RACE_KEYS[int(x.get('race'))]
             except Exception: xrace = None
+            xp = NM_PREFS.get(ps); xp = xp['d'] if xp and time.time() - xp['t'] < 6 * 3600 else {}   # his own bans (his MMFind's peek)
             MM[ps] = dict(MM[steam], steam=ps, pid=int(x.get('pid') or 0) or xpid, name=_clean(x.get('name')) or xname, rating=xr, rd=xrd,
-                          games=xg, rsrc=xsrc, race=xrace, hero=None, party_of=[], ping=None)
+                          games=xg, rsrc=xsrc, race=xrace, hero=None, party_of=[], ping=None, maps=_nm_wishes(game, mode, xp))
         if lroom.on_nm_join(steam, MM[steam], h, d):                         # a launcher room that starts: its own pool
             if steam in MM: return _nm_view(MM[steam])
             c = MM_CANCELLED.get(steam) or {}                                # the launch was called off right away (another version)
@@ -1714,12 +1750,20 @@ def mm_native(steam, d):
     # one to search again after a native match the server called off). MMFind asks so on entering the screen and every 20 s there.
     peek = bool(d.get('peek'))
     if d.get('mode', '1v1') not in MODES: return {'native': False, 'why': 'mode'}
+    # 06.11.2026: his map bans are kept by steam id (a party member's own bans - only the leader's game sends mm/native for a search),
+    # and every answer names the maps a native match of this mode can get: MMFind 0.49's Map Preferences lists only those
+    if isinstance(d.get('bans'), list) or isinstance(d.get('maps'), list):
+        with MM_LOCK:
+            NM_PREFS[steam] = {'t': time.time(), 'd': {k: d.get(k) for k in ('bans', 'maps', 'mode', 'game') if k in d}}
+            if len(NM_PREFS) > 5000:
+                for s in sorted(NM_PREFS, key=lambda s: NM_PREFS[s]['t'])[:1000]: NM_PREFS.pop(s, None)
+    pool = _nm_pool_names(_clean(d.get('game'), 24) or 'elite', d.get('mode', '1v1'))
     try:
         with urllib.request.urlopen(NM_LOBBY + '/nm?steam=' + urllib.parse.quote(steam), timeout=1.5) as f: st = json.load(f)
-    except Exception: return {'native': False, 'why': 'lobby server unreachable'}
-    if not st.get('native'): return {'native': False, 'why': 'native automatch off'}
-    if not st.get('here'): return {'native': False, 'why': 'not signed in through our lobby server'}
-    if peek: return {'native': True, 'peek': True}
+    except Exception: return {'native': False, 'why': 'lobby server unreachable', 'pool': pool}
+    if not st.get('native'): return {'native': False, 'why': 'native automatch off', 'pool': pool}
+    if not st.get('here'): return {'native': False, 'why': 'not signed in through our lobby server', 'pool': pool}
+    if peek: return {'native': True, 'peek': True, 'pool': pool}
     if d.get('room'):                                    # MMFind 0.46: the search of a launcher room (lroom.py) - only while it starts
         with MM_LOCK: ok = lroom.launching_member(str(d.get('room')), steam)
         if not ok: return {'native': False, 'why': 'the launcher room is not starting a match now'}
@@ -1730,7 +1774,7 @@ def mm_native(steam, d):
             if steam in m['host'] + m['guest'] + m.get('watchers', []): _end_match(mid, m, now)
         MM_CANCELLED.pop(steam, None)
         for s in [s for s, h in NM_HINTS.items() if time.time() - h['t'] > 900]: NM_HINTS.pop(s, None)
-    return {'native': True}
+    return {'native': True, 'pool': pool}
 
 # ---------- отзывы из лаунчера: чат игрок ↔ разработчики (26.10.2026) ----------
 # Игрок: uid — случайный секрет из настроек лаунчера (знать uid = видеть свою переписку), имя по желанию.
