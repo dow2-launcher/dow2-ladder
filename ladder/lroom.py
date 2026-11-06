@@ -27,6 +27,7 @@ HERE_GONE = 45              # s without a heartbeat from his launcher: out of th
 LAUNCH_WAIT = int(__import__('os').environ.get('LROOM_LAUNCH_WAIT', '150'))   # s from the end of the countdown to every game in the search
 PLAY_KEEP = 3 * 3600        # s a room stays "playing" without a word of the match's end
 MAX_ROOMS = 300
+SPOIL_KINDS = ('late', 'version', 'race', 'left_search', 'game_failed', 'match', 'left')   # a start called off because of these players
 NAME_MAX = 48
 ELITE_ORDER = ['space_marines', 'chaos_marines', 'eldar', 'orks', 'tyranids', 'imperial_guard', 't_tau', 'ordo_malleus']
 VAN_RACES = ['chaos_marines', 'eldar', 'imperial_guard', 'orks', 'space_marines', 'tyranids']   # the vanilla drop-down order (its UI index)
@@ -159,7 +160,8 @@ def view(r):
         u = L.users.get(s['steam'])
         slots.append({'steam': s['steam'], 'name': u['name'] or 'Player', 'avatar': u['avatar'], 'rating': u.get('rating'),
                       'team': 0 if i < n else 1, 'race': s['race'], 'hero': s['hero'], 'ready': s['ready'], 'game': s.get('gst') or '',
-                      'game_t': int(s.get('gst_t') or 0), 'here': now - s['seen'] < HERE_GONE, 'owner': s['steam'] == r['owner']})
+                      'game_t': int(s.get('gst_t') or 0), 'here': now - s['seen'] < HERE_GONE, 'owner': s['steam'] == r['owner'],
+                      'spoil': (r.get('spoil') or {}).get(s['steam'], 0)})
     la = r.get('launch') or {}
     return {'id': r['id'], 'name': r['name'], 'game': r['game'], 'ver': r['ver'], 'mode': r['mode'], 'size': n,
             'map': r['map'], 'map_name': (cat.get(r['map']) or {}).get('name') or r['map'], 'owner': r['owner'],
@@ -250,6 +252,8 @@ def _cancel_launch(r, k, who=(), **kw):
     r['state'] = 'lobby'; r['launch'] = None
     for s in r['slots']:
         if s: s['ready'] = False; s['gst'] = ''
+    if k in SPOIL_KINDS:                                                    # "spoiled the start x2" next to his name; the owner may kick
+        for s in who: r.setdefault('spoil', {})[s] = r.setdefault('spoil', {}).get(s, 0) + 1
     _note(r, k, who, **kw)
     log('room %s: launch cancelled (%s%s)%s' % (r['id'], k, ' ' + ','.join(who) if who else '', ' - match %s dropped' % mid if m else ''))
 
@@ -270,7 +274,13 @@ def on_nm_join(steam, p, hint, d):
     except Exception: rid = None
     if sl and sl['race'] != 'random' and rid is not None:
         got = (VAN_RACES[rid] if r['game'] == 'vanilla' and 0 <= rid < len(VAN_RACES) else L.RACE_KEYS[rid] if 0 <= rid < len(L.RACE_KEYS) else None)
-        if got and got != sl['race']: log('room %s: %s searches as %s, the room says %s' % (r['id'], steam, got, sl['race']))
+        if got and got != sl['race']:
+            # 06.11.2026 (live, room d59lrf): the game searched with the army it had on Find a Game, not the room's - never a match with
+            # another race: the start is off for all, the room says whose game had which race (MMFind 0.48 checks before it searches)
+            log('room %s: %s searches as %s, the room says %s - the start is off' % (r['id'], steam, got, sl['race']))
+            L.MM.pop(steam, None)
+            _cancel_launch(r, 'race', [steam], why=got, want=sl['race']); _pub(r)
+            return True
         if got: p['race'] = got
     if sl: sl['gst'] = 'searching'; sl['gst_t'] = time.time()
     log('room %s: %s is in the search (%s)' % (r['id'], steam, p['pool']))
@@ -466,7 +476,8 @@ def api(verb, steam, d):
         return {'ok': True, 'ticket': {'room': r['id'], 'game': r['game'], 'ver': r['ver'], 'mode': r['mode'], 'map': la.get('map') or r['map'],
                                        'opts': _opt_values(r) if la['host'] == steam else {},
                                        'race': me['race'], 'race_ui': -1 if me['race'] == 'random' else races.get(me['race'], {}).get('ui', -1),
-                                       'hero': hero, 'host': la['host'] == steam, 'deadline': int(la['deadline']), 'relay': la.get('relay') or ''}}
+                                       'hero': hero, 'host': la['host'] == steam, 'deadline': int(la['deadline']), 'relay': la.get('relay') or '',
+                                       'ttl': max(0, int(la['deadline'] - now))}}     # 0.48: how long the game may still take to search
     if verb == 'game':                                                      # what his game does now (the launcher hears it from MMFind)
         ev = _clean(d.get('ev'), 24) or ''
         if r['state'] == 'launching':
