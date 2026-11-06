@@ -263,7 +263,8 @@ def own_call(call, p, sess, mm=None):
                           'kind': mm.get('kind', 'mm'), 'match': mm['match'], 'steams': mm['steams'], 'pids': mm.get('pids') or set(),
                           'params': {k: v for k, v in p.items() if k.lower() not in SECRET_PARAMS},
                           'members': {sess['pid']: {'sg': sess['sg'], 'steam': sess['steam'], 'alias': sess['alias'], 'race': -1, 'team': 0}},
-                          'created': now, 'seen': now, 'reports': {}, 'started': None, 'lobby_id': None}
+                          'created': now, 'seen': now, 'reports': {}, 'started': None, 'lobby_id': None,
+                          'unrated': bool(mm.get('unrated')), 'lroom': mm.get('lroom') or ''}
         log('room %d (%s, ladder %s) hosted by pid=%d (%s), relay %s:%d' % (mid, p.get('description'), mm['match'], sess['pid'], sess['alias'], ip, port))
         if mm.get('nm'): nm_hosted(mm['nm'], mid, ip)
         return [0, mid, 'authtoken', ip, port, [member_row(r, sess['pid'])]]
@@ -369,6 +370,7 @@ def to_ladder(r):
     mode = {(1, 1): '1v1', (2, 2): '2v2', (3, 3): '3v3'}.get(tuple(sizes), '') if len(teams) == 2 else ''
     elite = 1 if 'elite' in (p.get('modname') or '').lower() else 0
     if flag('unrated.on'): mode = ''                                     # tests: stored and shown, not rated
+    if r.get('unrated'): mode = ''                                       # a launcher room's match (agreed): stored and shown, never rated
     t = time.gmtime(start); season = '%d-Q%d' % (t.tm_year, (t.tm_mon - 1) // 3 + 1)
     try:
         c = sqlite3.connect(LADDER_DB, timeout=30)
@@ -475,13 +477,34 @@ def nm_push(x, pid):
     log('native automatch %s: push to pid=%d (%s, mid %s) - %d session(s)' % (x['view'].get('match'), pid, 'host' if a[3] == pid else 'guest', a[4], n))
 
 
+LROOM_PUSHED = {}                 # (match, steam) -> when that launcher-room guest got the room's id
+LROOM_GAP = 4.0                   # s: a launcher room's guests go in one after another (their seats), the next one at the latest this long after
+
+
+def lroom_turn(x, v, steam):
+    """a launcher room's match (06.11.2026): a guest takes the first free slot of his team in the host's room (RequestCorrectSlot), so
+    the seats of the room come out right only when the guests join in the room's order (v['steams']: the host, his team, the other
+    team, each in seat order) - a guest gets the room's id once every guest before him is in, or LROOM_GAP s after the one before"""
+    order = [s_ for s_ in v.get('steams') or [] if s_ != v.get('host_steam')]
+    if steam not in order: return True
+    k = order.index(steam); joined = set(v.get('joined') or [])
+    if all(s_ in joined for s_ in order[:k]): return True
+    now = time.time()
+    t0 = LROOM_PUSHED.get((v.get('match'), order[k - 1]))
+    return bool(t0 and now - t0 >= LROOM_GAP)
+
+
 def nm_push_news(x):
-    """AutomatchGameMessage to every player of this search who has news: the host at once, a guest once the room id is known"""
+    """AutomatchGameMessage to every player of this search who has news: the host at once, a guest once the room id is known
+    (a launcher room's guests in its seat order, lroom_turn)"""
     v = x['view']; mid = int(v['room']) if str(v.get('room') or '').isdigit() else 0
     if not isinstance(x.get('pushed'), dict): x['pushed'] = {}
     for m in nm_members(x):
         me_host = v['host_pid'] == m['pid']
-        if (me_host or mid) and x['pushed'].get(str(m['pid'])) != [v['match'], 'host' if me_host else mid]: nm_push(x, m['pid'])
+        if (me_host or mid) and x['pushed'].get(str(m['pid'])) != [v['match'], 'host' if me_host else mid]:
+            if not me_host and v.get('lroom') and not lroom_turn(x, v, str(m['steam'])): continue
+            nm_push(x, m['pid'])
+            if not me_host and v.get('lroom'): LROOM_PUSHED[(v['match'], str(m['steam']))] = time.time()
 
 
 def nm_apply(x, v):
@@ -627,7 +650,8 @@ def nm_room(p, sess):
     except ValueError: return None
     if not x or x['state'] != 'matched' or x['view'].get('host_pid') != sess['pid'] or sess['pid'] not in [m['pid'] for m in nm_members(x)]: return None
     v = x['view']
-    return {'match': v['match'], 'steams': set(v['steams']), 'pids': set(v['pids']), 'relay': v.get('relay') or '', 'kind': 'nm', 'nm': x}
+    return {'match': v['match'], 'steams': set(v['steams']), 'pids': set(v['pids']), 'relay': v.get('relay') or '', 'kind': 'nm', 'nm': x,
+            'unrated': bool(v.get('unrated')), 'lroom': v.get('lroom') or ''}   # 05.11.2026: a launcher room's match - agreed, never rated
 
 
 def nm_hosted(x, mid, relay_ip):

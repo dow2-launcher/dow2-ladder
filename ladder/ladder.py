@@ -455,6 +455,7 @@ def _reap():  # вызывать под MM_LOCK: выкинуть тех, кто
 
 def _drop(steam):  # под MM_LOCK: убрать игрока; если был в матче, матч распускается (_cancel_match)
     p = MM.pop(steam, None)
+    if p and p.get('lroom') and not p.get('match'): return lroom.on_search_left(steam, 'went silent')
     if p and p.get('role') == 'watcher':
         m = MM_MATCHES.get(p.get('match'))
         if m and steam in m['watchers']: m['watchers'].remove(steam); m['players'].pop(steam, None)
@@ -519,7 +520,8 @@ def _try_match(mode):  # под MM_LOCK: нестрогий подбор с пр
         # (relay_compat) shares the pool with Relic players: the host is then a Relic player, our server passes the others on
         pools = {}
         for p in allw: pools.setdefault(p.get('pool', ''), []).append(p)
-        waiting = next((w for w in sorted(pools.values(), key=lambda w: w[0]['ts']) if len(w) >= need), None)
+        # launcher rooms (lroom.py): their pool is the room's own - the match is made by lroom._assemble from the room, never here
+        waiting = next((w for w in sorted(pools.values(), key=lambda w: w[0]['ts']) if len(w) >= need and not w[0].get('lroom')), None)
         if not waiting: break
         # own servers without compatibility (Relay.ini Fallback=0): such a player plays only where everybody has our servers on;
         # everyone else (compatible, or without the add-on) plays with anybody. Whoever waits longest anchors a match he fits in.
@@ -873,6 +875,7 @@ def mm_started(steam):  # хост нажал Start: матч переходит
 
 def _end_match(mid, m, now):  # под MM_LOCK: матч закончился (вернулись в меню / все вышли из игры / есть итог Relic)
     MM_PLAYING.pop(mid, None)
+    if m.get('lroom'): lroom.on_match_over(m)
     users.refresh_rating(m['host'] + m['guest'])
     if m.get('lobby'):
         try:
@@ -902,7 +905,9 @@ def mm_ended(steam):  # игрок вернулся в меню после ма�
                         with _db_lock, db() as c: c.execute('UPDATE mm_history SET ended = ? WHERE lobby = ? AND ended IS NULL', (int(time.time()), m['lobby']))
                     except Exception: pass
                 m.setdefault('back', set()).add(steam)
-                if len(m['back']) >= 1: MM_PLAYING.pop(mid, None); users.refresh_rating(m['host'] + m['guest'])
+                if len(m['back']) >= 1:
+                    MM_PLAYING.pop(mid, None); users.refresh_rating(m['host'] + m['guest'])
+                    if m.get('lroom'): lroom.on_match_over(m)
         return {'ok': True}
 
 # ---------- сорванные загрузки: у кого игра упала, пока матч грузился (остальные остались без игры) ----------
@@ -941,6 +946,8 @@ with db() as c:
         players TEXT, watchers TEXT, result TEXT, replay TEXT, checked INTEGER DEFAULT 0, tries INTEGER DEFAULT 0, rtries INTEGER DEFAULT 0);
     CREATE INDEX IF NOT EXISTS mm_history_started ON mm_history (started DESC);
     ''')
+    try: c.execute('ALTER TABLE mm_history ADD COLUMN kind TEXT')   # 05.11.2026: 'room' = a match from a launcher room (agreed, never rated)
+    except sqlite3.OperationalError: pass
 
 def _history_add(m):  # под MM_LOCK, в момент старта: кто, за какую сторону, рейтинг на входе
     if not m.get('lobby') or m.get('bots'):                # тесты против компьютера (TestBots) — не матчи ладдера
@@ -954,8 +961,9 @@ def _history_add(m):  # под MM_LOCK, в момент старта: кто, з
                        'rsrc': p.get('rsrc'), 'race': p.get('race'), 'hero': p.get('hero')})
     w = [{'steam': s, 'name': (m['players'].get(s) or {}).get('name') or 'Player'} for s in m.get('watchers', [])]
     with _db_lock, db() as c:
-        c.execute('INSERT OR IGNORE INTO mm_history (lobby, mid, mode, map, started, players, watchers) VALUES (?,?,?,?,?,?,?)',
-                  (m['lobby'], m['id'], m['mode'], m.get('map'), int(m['started']), json.dumps(pl, ensure_ascii=False), json.dumps(w, ensure_ascii=False)))
+        c.execute('INSERT OR IGNORE INTO mm_history (lobby, mid, mode, map, started, players, watchers, kind) VALUES (?,?,?,?,?,?,?,?)',
+                  (m['lobby'], m['id'], m['mode'], m.get('map'), int(m['started']), json.dumps(pl, ensure_ascii=False), json.dumps(w, ensure_ascii=False),
+                   'room' if m.get('lroom') else None))
 
 def _local_json(url, timeout=30):
     try:
@@ -1484,13 +1492,14 @@ def _nm_view(p):  # under MM_LOCK: what own_lobby needs to answer the game
             'host_pid': (MM.get(m['host_steam']) or {}).get('pid') or 0, 'team': 0 if p['steam'] in m['host'] else 1,
             'teams': 2, 'size': TEAM_N[m['mode']], 'map': m.get('map') or '', 'steams': order,
             'pids': [(MM.get(s) or {}).get('pid') or 0 for s in order], 'relay': m.get('relay') or '', 'room': m.get('room'),
-            'joined': sorted(m.get('joined') or [])}
+            'joined': sorted(m.get('joined') or []), 'unrated': bool(m.get('unrated')), 'lroom': m.get('lroom') or ''}
 
 def _nm_fail(m, culprits, why):  # under MM_LOCK: a native match that did not come together - the culprits out, the others search on
     # Stands 03.11.2026: a game already IN the room (the host once it is up, a guest that joined) ends its search when it leaves
     # that room, whatever we tell it (the client calls StopPolling on leaving an automatch session) - such players get a clean
     # cancel ('again': the Find a Game screen, Start Searching works at once); only those not in the room yet search on, keeping
     # their place (a waiting game takes the next match as it comes).
+    if m.get('lroom'): return lroom.on_match_failed(m, culprits, why)      # a launcher room's match: nobody searches on, the room is told
     now = time.time()
     MM_MATCHES.pop(m['id'], None)
     inroom = set(m.get('joined') or ()) | ({m['host_steam']} if m.get('room') else set())
@@ -1566,6 +1575,10 @@ def nm_join(d):
             except Exception: xrace = None
             MM[ps] = dict(MM[steam], steam=ps, pid=int(x.get('pid') or 0) or xpid, name=_clean(x.get('name')) or xname, rating=xr, rd=xrd,
                           games=xg, rsrc=xsrc, race=xrace, hero=None, party_of=[], ping=None)
+        if lroom.on_nm_join(steam, MM[steam], h, d):                         # a launcher room that starts: its own pool
+            if steam in MM: return _nm_view(MM[steam])
+            c = MM_CANCELLED.get(steam) or {}                                # the launch was called off right away (another version)
+            return {'state': 'cancelled', 'match': c.get('match'), 'by': c.get('by'), 'again': False}
         _try_match(mode); _assign_watchers()
         return _nm_view(MM[steam])
 
@@ -1597,6 +1610,7 @@ def nm_room(d):  # the host's AUTOMATCH room is up on our lobby server: its id g
         if not m or not m.get('native') or m['host_steam'] != steam: return {'ok': False}
         m['room'] = str(d.get('room')); m['room_t'] = time.time(); m['lobby'] = 'NM-%s' % m['room']; m.setdefault('joined', set())
         if _clean(d.get('relay'), 64): m['relay_used'] = _clean(d.get('relay'), 64)
+        if m.get('lroom'): lroom.on_match_room(m, m['room'])
         return {'ok': True, 'match': m['id']}
 
 def nm_joined(d):
@@ -1615,6 +1629,7 @@ def nm_started(d):
         except Exception as e: print('mm: history of %s: %r' % (m['id'], e), flush=True)
         for s in m['host'] + m['guest']: MM.pop(s, None)
         MM_MATCHES.pop(m['id'], None)
+        if m.get('lroom'): lroom.on_match_started(m)
         print('mm: native match %s started (room %s)' % (m['id'], m['room']), flush=True)
         return {'ok': True, 'match': m['id']}
 
@@ -1625,6 +1640,7 @@ def nm_leave(d):  # Stop Searching (or the game is gone): out of the queue; in a
         if not p: return {'ok': True}
         m = MM_MATCHES.get(p.get('match') or '')
         if m and m.get('native'): _nm_fail(m, [steam], _clean(d.get('why'), 60) or 'left')
+        elif p.get('lroom'): MM.pop(steam, None); lroom.on_search_left(steam, _clean(d.get('why'), 60) or 'left')
         else:
             for q in p.get('party_of') or []: MM.pop(q, None)
             _drop(steam)
@@ -1655,6 +1671,9 @@ def mm_native(steam, d):
     if not st.get('native'): return {'native': False, 'why': 'native automatch off'}
     if not st.get('here'): return {'native': False, 'why': 'not signed in through our lobby server'}
     if peek: return {'native': True, 'peek': True}
+    if d.get('room'):                                    # MMFind 0.46: the search of a launcher room (lroom.py) - only while it starts
+        with MM_LOCK: ok = lroom.launching_member(str(d.get('room')), steam)
+        if not ok: return {'native': False, 'why': 'the launcher room is not starting a match now'}
     with MM_LOCK:
         NM_HINTS[steam] = {'t': time.time(), 'd': d}
         now = time.time()                                # he is about to search: his previous match is over (MMFind's poll must not
@@ -1871,6 +1890,9 @@ class H(BaseHTTPRequestHandler):
             if u.path == '/ladder/api/stats': return self.send(200, stats())
             if u.path == '/ladder/api/seasons': return self.send(200, {'seasons': seasons(), 'current': current_season()})
             if u.path == '/ladder/api/mm/status': return self.send(200, mm_status(), cache=0)
+            if u.path == '/ladder/api/lroom/list':                # launcher rooms (lroom.py): public
+                with MM_LOCK: return self.send(200, lroom.listing(), cache=0)
+            if u.path == '/ladder/api/lroom/catalog': return self.send(200, lroom.catalog(qs.get('game', ['elite'])[0], '1v1'), cache=300)
             if u.path == '/ladder/api/rooms': return self.send(200, ROOMS, cache=0)
             if u.path == '/ladder/api/relays':
                 d = _relays().get('doc') or {'v': 1, 'relays': [{'ip': ip} for ip in relay_order()], 'ts': 0}
@@ -1944,6 +1966,11 @@ class H(BaseHTTPRequestHandler):
                     uu = _fb_uid(d.get('uid'))
                     if uu: m['muted'] = [x for x in m['muted'] if x != uu] + ([uu] if on else [])
                 fb_mod_save(m); return self.send(200, {'ok': True, 'mod': m}, cache=0)
+            if u.path.startswith('/ladder/api/lroom/'):  # launcher rooms: a signed-in launcher (the community session token)
+                d = self._body(); d = d if isinstance(d, dict) else {}
+                steam = community._session(d.get('token') or self.headers.get('X-Token'))
+                if not steam: return self.send(200, {'ok': False, 'error': 'auth'}, cache=0)
+                with MM_LOCK: return self.send(200, lroom.api(u.path[len('/ladder/api/lroom/'):][:16], str(steam), d), cache=0)
             if u.path.startswith('/ladder/api/nm/'):     # own_lobby only: its token, and never through nginx (which adds X-Real-IP)
                 if self.headers.get('X-Real-IP') or self.headers.get('X-Forwarded-For') or not _nm_token_ok(self.headers.get('X-NM-Token')):
                     return self.send(403, {'error': 'token'}, cache=0)
@@ -1973,6 +2000,8 @@ class H(BaseHTTPRequestHandler):
             return self.send(500, {'error': type(e).__name__}, cache=0)
 
 import community                                    # launcher community: Steam sign-in, who is online, the players' chat
+import sys, lroom                                   # launcher match rooms (05.11.2026)
+lroom.L = sys.modules[__name__]
 community.ADMIN_OK = _fb_token_ok
 def _c_rating(steam):
     # the launcher's Online block and own card: the Relic rating, the same number LobbyStats shows in the game's lobby
@@ -2016,4 +2045,5 @@ if __name__ == '__main__':
         threading.Thread(target=_history_resolver, daemon=True).start()
     threading.Thread(target=_seasons_refresher, daemon=True).start()
     threading.Thread(target=stream.publisher, daemon=True).start()
+    threading.Thread(target=lroom.ticker, daemon=True).start()
     Server(('127.0.0.1', PORT), H).serve_forever()

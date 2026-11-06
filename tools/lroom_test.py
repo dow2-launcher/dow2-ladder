@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+# Integration test of the launcher rooms (lroom.py) on a local ladder copy: two launchers (room API), then own_lobby's side
+# (nm/*) as the two games would make it. Prints each step; exits 1 on the first wrong answer.
+import json, sys, time, urllib.request, os, threading
+URL = os.environ.get('URL', 'http://127.0.0.1:18227')
+TOK = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data/nm_token')).read().strip()
+A, B = '76561198000000001', '76561198000000002'
+KEY = 'Elite|3.2|-696231043|19|-1151285252'
+
+def post(path, body, hdr=None):
+    r = urllib.request.Request(URL + path, data=json.dumps(body).encode(), method='POST', headers=dict({'Content-Type': 'application/json'}, **(hdr or {})))
+    return json.load(urllib.request.urlopen(r, timeout=15))
+def get(path): return json.load(urllib.request.urlopen(URL + path, timeout=15))
+def login(steam):
+    return post('/ladder/api/c/local', {'steam': steam, 'name': 'P' + steam[-1], 'device': ('%032x' % int(steam))})['token']
+def lr(tok, verb, **b): return post('/ladder/api/lroom/' + verb, dict(b, token=tok))
+def nm(fn, **b): return post('/ladder/api/nm/' + fn, b, {'X-NM-Token': TOK})
+def mmnat(steam, **b): return post('/ladder/api/mm/native', dict(b, steam=steam))
+def ok(cond, what):
+    print(('  ok  ' if cond else '  FAIL ') + what, flush=True)
+    if not cond: sys.exit(1)
+
+ta, tb = login(A), login(B)
+print('== create / join / army / pings')
+v = lr(ta, 'create', game='elite', ver='3.2', mode='1v1', map='2p_calderisdunes', name='test room'); ok(v['ok'], 'create'); rid = v['room']['id']
+ok(v['room']['slots'][0]['steam'] == A and v['room']['slots'][1] is None, 'owner in slot 0')
+v = lr(tb, 'join', id=rid); ok(v['ok'] and v['room']['slots'][1]['steam'] == B, 'B joins into the other team')
+ok(any(r['id'] == rid for r in get('/ladder/api/lroom/list')['rooms']), 'listed')
+ok(lr(tb, 'conf', map='2p_bay_of_grots')['error'] == 'owner', 'only the owner sets the map')
+ok(lr(ta, 'army', race='orks', hero=1)['ok'], 'A orks hero 1')
+ok(lr(tb, 'army', race='eldar', hero=-1)['ok'], 'B eldar random hero')
+ok(not lr(tb, 'army', race='z_unecron', hero=0)['ok'], 'necrons refused (not playable)')
+ok(lr(ta, 'pings', pings={'15.220.68.107': 40, '116.202.106.150': 35, '83.217.192.34': -1}, chain=True)['ok'], 'A pings')
+v = lr(tb, 'pings', pings={'15.220.68.107': 60, '116.202.106.150': -1, '83.217.192.34': 30}, chain=False); ok(v['ok'], 'B pings')
+net = lr(ta, 'get')['room']['net']; print('   net:', net['pick'], net['worst'], net['why'])
+ok(net['pick'] == '15.220.68.107', 'common server = the one both reach (Poland)')
+print('== ready, unready during countdown')
+ok(lr(ta, 'ready', on=True)['room']['state'] == 'lobby', 'one ready: lobby')
+v = lr(tb, 'ready', on=True)['room']; ok(v['state'] == 'countdown' and v['cd_end'] > v['now'] + 9000, 'both ready: countdown 10 s')
+v = lr(tb, 'ready', on=False)['room']; ok(v['state'] == 'lobby' and v['note']['k'] == 'unready', 'B not ready: countdown stops')
+lr(tb, 'ready', on=True); v = lr(ta, 'conf', map='2p_bay_of_grots')['room']
+ok(v['state'] == 'lobby' and not any(s['ready'] for s in v['slots']), 'owner changes the map: everybody not ready')
+lr(ta, 'ready', on=True); lr(tb, 'ready', on=True)
+print('== countdown -> launching (11 s)')
+time.sleep(11); v = lr(ta, 'get')['room']; ok(v['state'] == 'launching', 'launching after 10 s'); print('   launch:', v['launch'])
+ok(v['launch']['host'] == A, 'host = A (lower cost to Poland)')
+t = lr(tb, 'ticket')['ticket']; print('   ticket B:', t); ok(t['race'] == 'eldar' and 0 <= t['hero'] <= 2 and t['race_ui'] == 1, 'B ticket: eldar, a rolled hero, ui 1')
+ok(lr(ta, 'ticket')['ticket']['hero'] == 1, 'A ticket hero 1')
+print('== MMFind asks (mm/native) for the room; a wrong room is refused')
+ok(not mmnat(A, room='zzzzzz', mode='1v1')['native'], 'other room: no')
+print('   ', mmnat(A, room=rid, mode='1v1'))
+print('== own_lobby: both searches -> the match from the room')
+ja = nm('join', steam=A, pid=1001, name='PA', mode='1v1', race=4, key=KEY, game='elite-3.2'); print('   A:', ja); ok(ja['state'] == 'searching', 'A waits in the room pool')
+jb = nm('join', steam=B, pid=1002, name='PB', mode='1v1', race=1, key=KEY, game='elite-3.2'); print('   B:', jb)
+ok(jb['state'] == 'matched' and jb['map'] == '2p_bay_of_grots' and jb['host_steam'] == A and jb['unrated'] and jb['lroom'] == rid, 'matched: room map, host A, unrated')
+ok(jb['relay'] == '15.220.68.107', 'the room relay')
+sa = nm('sync', steams=[A, B]); ok(sa[A]['team'] == 0 and sa[B]['team'] == 1, 'teams as the room')
+nm('room', steam=A, room=2000000123, relay='15.220.68.107'); nm('joined', steam=B, room=2000000123)
+ok(str(lr(ta, 'get')['room']['launch']['room']) == '2000000123', 'room id in the launch')
+nm('started', room=2000000123); v = lr(ta, 'get')['room']; ok(v['state'] == 'playing', 'playing')
+post('/ladder/api/mm/ended', {'steam': A}); v = lr(ta, 'get')['room']; ok(v['state'] == 'lobby' and v['note']['k'] == 'played', 'back in the room after the match')
+print('== launch that one game never reaches (late)')
+lr(ta, 'ready', on=True); lr(tb, 'ready', on=True); time.sleep(11)
+ok(lr(ta, 'get')['room']['state'] == 'launching', 'launching again')
+nm('join', steam=A, pid=1001, name='PA', mode='1v1', race=4, key=KEY, game='elite-3.2')
+print('   waiting for the 20 s launch window (test setting)...'); time.sleep(22)
+v = lr(ta, 'get')['room']; ok(v['state'] == 'lobby' and v['note']['k'] == 'late' and len(v['note']['who']) == 1, 'late: back to the lobby, B named')
+ok(nm('sync', steams=[A])[A]['state'] == 'cancelled', "A's search is cancelled (own_lobby stops it)")
+print('== another version')
+lr(ta, 'ready', on=True); lr(tb, 'ready', on=True); time.sleep(11)
+nm('join', steam=A, pid=1001, name='PA', mode='1v1', race=4, key=KEY, game='elite-3.2')
+nm('join', steam=B, pid=1002, name='PB', mode='1v1', race=1, key='Elite|3.1|1|2|3', game='elite-3.1')
+v = lr(ta, 'get')['room']; ok(v['state'] == 'lobby' and v['note']['k'] == 'version' and len(v['note']['who']) == 1, 'version: B named')
+print('== the host never opens the room -> match failed -> lobby (NM_HOST_TIMEOUT 25 s)')
+lr(ta, 'ready', on=True); lr(tb, 'ready', on=True); time.sleep(11)
+nm('join', steam=A, pid=1001, name='PA', mode='1v1', race=4, key=KEY, game='elite-3.2')
+nm('join', steam=B, pid=1002, name='PB', mode='1v1', race=1, key=KEY, game='elite-3.2')
+ok(lr(ta, 'get')['room']['launch']['match'], 'matched')
+for i in range(30):
+    time.sleep(1); s = nm('sync', steams=[A, B])
+    if s[A]['state'] == 'cancelled': break
+v = lr(ta, 'get')['room']; ok(v['state'] == 'lobby' and v['note']['k'] == 'match' and s[B]['state'] == 'cancelled', 'host timeout: both cancelled, room in lobby (%s)' % v['note'])
+print('== cancel by a player during the launch; game failure report')
+lr(ta, 'ready', on=True); lr(tb, 'ready', on=True); time.sleep(11)
+ok(lr(tb, 'cancel')['room']['state'] == 'lobby', 'cancel -> lobby')
+lr(ta, 'ready', on=True); lr(tb, 'ready', on=True); time.sleep(11)
+lr(tb, 'game', ev='failed', reason='busy_match'); v = lr(ta, 'get')['room']; ok(v['state'] == 'lobby' and v['note']['k'] == 'game_failed', 'game failed -> lobby')
+print('== mode 2v2 resize, kick, leave, close')
+v = lr(ta, 'conf', mode='2v2')['room']; ok(len(v['slots']) == 4 and v['slots'][0]['steam'] == A and v['slots'][2]['steam'] == B, '2v2: 4 slots, teams kept')
+ok(lr(tb, 'seat', slot=1)['ok'], 'B moves to team 1 slot 2');
+ok(lr(ta, 'kick', steam=B)['ok'] and lr(tb, 'join', id=rid)['error'] == 'kicked', 'kicked can not come back at once')
+ok(lr(ta, 'leave')['ok'] and not any(r['id'] == rid for r in get('/ladder/api/lroom/list')['rooms']), 'empty room closed')
+print('ALL OK')
