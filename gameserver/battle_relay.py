@@ -56,12 +56,21 @@ hello then says how far it got: 15 <sid 4> 00000000 <id 8> 02 <game frames recei
 flag 0 and no count = a first connection). Relic's relay sends the frames it missed; this one did not - the player came back
 into the session (the same number, by player id) but without the ticks of the gap. Now every session keeps its ticks
 (HISTORY at most) and a reconnecting player gets the ticks from his count on, before the live ones.
+Live replay (DWRL, 06.11.2026): a spectator watches a running match as a replay that keeps growing, LIVE_DELAY s behind (the
+floor here, whatever is asked: no peeking at a running match). Every session keeps the host's lobby state and the start message
+(the 0x10 messages before the start, unpacked only until the start) and the time of each tick; live_rec.py makes the .rec of
+it. "DWRL" + sid (4) + from record (u32 LE) + delay s (u32 LE) + game (1: 0 Elite, 1 vanilla) -> one envelope, then the
+connection closes: "DWLR" ver flags available ticks header_len header body_len records[from:available] json_len json (all u32
+LE; flags 1 = over and all given, 2 = not started / no lobby state, 4 = no such session). The ladder asks (its /live/ API).
+A session that ended stays LIVE_KEEP s for the spectators who are behind.
 Monitoring (05.11.2026): every RELAY_STATS_EVERY s (15) one ev=session_stats line per live session: members, and per player
 for that interval turns, stalls (gaps > GAP), the longest stall, messages/s and KB/s that came from him, his send buffer.
 """
 import asyncio, ipaddress, json, os, socket, struct, sys, time
 try: import du_client                                # the UDP tunnel between our nodes (same directory)
 except Exception: du_client = None
+try: import live_rec                                  # the live replay: a running match as a replay (same directory)
+except Exception: live_rec = None
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 47100
 BIND = sys.argv[2] if len(sys.argv) > 2 else '127.0.0.1'
@@ -94,6 +103,10 @@ SELF = set(x for x in os.environ.get('RELAY_SELF', '').split(',') if x) | {h for
 _last_warn = {}
 LOG = os.environ.get('RELAY_LOG', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'battle_relay.jsonl'))
 sessions = {}                                       # sid bytes -> Session
+finished = {}                                       # sid bytes -> (Session, when it ended): for the live replay's spectators
+LIVE_DELAY = float(os.environ.get('LIVE_DELAY', '120'))   # s: the least delay of the live replay (the server's setting)
+LIVE_KEEP = float(os.environ.get('LIVE_KEEP', '1200'))    # s an ended session stays for spectators
+LIVE_MAX = 6 * 1024 * 1024                          # bytes of records in one answer at most (the ladder asks again for the rest)
 GAP = 0.25                                          # s: a player's turns this far apart count as a stall (a lost packet, a hiccup)
 TCP_QUICKACK, TCP_THIN_LINEAR_TIMEOUTS = 12, 16     # Linux socket options (not in the socket module everywhere)
 
@@ -155,6 +168,9 @@ class Session:
         self.sid, self.peers, self.next_idx, self.queue, self.ticker = sid, [], 1, [], None
         self.by_pid = {}                                  # player id -> its number in this session
         self.history = []                                 # every tick sent (0x0a frames), for players who reconnect
+        self.tick_t = []                                  # the time each of them went out (the live replay's delay)
+        self.lobby = self.start_msg = None                # the host's lobby state and the match start (the live replay's header)
+        self.live = {}                                    # game ('elite' / 'vanilla') -> live_rec.LiveRec, built on the first request
         self.rx = {}                                      # player id -> game messages (0x09 / 0x17) received from him
         self.away = {}                                    # player id -> (his number, until): connection broke mid-game
         self.gone = set()                                 # player ids whose GRACE ran out: the others have dropped them
@@ -196,6 +212,7 @@ class Session:
         if sessions.get(self.sid) is not self: return
         if self.ticker and self.ticker is not asyncio.current_task(): self.ticker.cancel()
         sessions.pop(self.sid, None)
+        if self.ticks and self.lobby and self.start_msg: finished[self.sid] = (self, time.time())   # spectators are minutes behind
         log(ev='session_end', sid=int.from_bytes(self.sid, 'little'), secs=round(time.time() - self.started), ticks=self.ticks, turns=self.turn_msgs,
             late_ticks=self.late, max_late_ms=round(self.max_late * 1000))
 
@@ -276,7 +293,7 @@ class Session:
             m += bytes([len(silent)]) + bytes(silent)
             m = bytes(m)
             for p in list(self.peers): p.send(m)
-            if len(self.history) < HISTORY: self.history.append(m)
+            if len(self.history) < HISTORY: self.history.append(m); self.tick_t.append(time.time())
             self.ticks += 1
             # no waiting here for the players' connections to take the data (that held the tick for everyone when one
             # player's connection stalled): the data sits in that player's buffer, which is watched instead
@@ -286,6 +303,44 @@ class Session:
             if self.ticks % 50 == 0:
                 for p in self.peers: p.stats()                # the worst rtt is sampled every 5 s
         if not self.peers: self.end()                         # the last away player's GRACE ran out
+
+
+def live_lobby(s, m):
+    """before the start: the host's lobby state (the last one) and the start message out of the 0x10 messages (live replay)"""
+    try:
+        p = live_rec.lobby_payload(m)
+        if not p: return
+        if live_rec.is_room_state(p[1], s.sid): s.lobby = p[1]
+        elif p[0] == 0x55 and live_rec.is_start(p[1]) and s.lobby:
+            s.start_msg = p[1]; log(ev='live_start', sid=int.from_bytes(s.sid, 'little'), lobby=len(s.lobby))
+    except Exception as e: log(ev='live_error', where='lobby', err=repr(e))
+
+
+def live_answer(sid, frm, delay, game):
+    """the DWRL envelope (see the docstring)"""
+    s = sessions.get(sid); over = False
+    if s is None and sid in finished: s, over = finished[sid][0], True
+    if s is None: return b'DWLR' + struct.pack('<IIIIII', 1, 4, 0, 0, 0, 0) + struct.pack('<I', 0)
+    if not (s.lobby and s.start_msg and live_rec):
+        return b'DWLR' + struct.pack('<IIIIII', 1, 2, 0, 0, 0, 0) + struct.pack('<I', 0)
+    lr = s.live.get(game)
+    if lr is None:
+        lr = s.live[game] = live_rec.LiveRec(game, s.lobby, s.start_msg, s.sid); lr.fed = 0
+    while lr.fed < len(s.history):
+        lr.feed(s.history[lr.fed], s.tick_t[lr.fed]); lr.fed += 1
+    cut = time.time() - max(LIVE_DELAY, delay)
+    avail = len(lr.records)
+    while avail > 0 and lr.times[avail - 1] > cut: avail -= 1
+    frm = min(max(0, frm), avail); end = frm; size = 0
+    while end < avail and size + len(lr.records[end]) <= LIVE_MAX: size += len(lr.records[end]); end += 1
+    body = b''.join(lr.records[frm:end])
+    nticks = sum(1 for r in lr.records[:end] if r[:4] == b'\0\0\0\0')
+    head = lr.header(nticks) if frm == 0 else b''
+    flags = 1 if over and end == len(lr.records) else 0
+    meta = json.dumps({'map': lr.room.map, 'players': [lr.room.names.get(x['profile']) or '' for x in lr.room.slots],
+                       'delay': max(LIVE_DELAY, delay), 'records': len(lr.records), 'over': over}).encode()
+    return (b'DWLR' + struct.pack('<IIII', 1, flags, end, nticks) + struct.pack('<I', len(head)) + head + struct.pack('<I', len(body))
+            + body + struct.pack('<I', len(meta)) + meta)
 
 
 def proxy_split(m):
@@ -323,6 +378,8 @@ async def stats_loop():
     shows as msgs/s far above the ~10-20 turns+messages a second of a normal game)"""
     while True:
         await asyncio.sleep(STATS_EVERY)
+        now = time.time()
+        for k in [k for k, v in finished.items() if now - v[1] > LIVE_KEEP]: finished.pop(k, None)
         for s in list(sessions.values()):
             if not s.peers: continue
             pl = {}
@@ -410,6 +467,7 @@ def handle_msg(p, m, echo=True):
         for q in targets: q.send(m)
         return
     if t == 0x10:
+        if s.start_msg is None and live_rec: live_lobby(s, m)
         parts = proxy_split(m)
         if parts is None:                                            # not the layout we know: as before (log once a minute)
             k = (s.sid, 'proxy'); now = time.time()
@@ -617,6 +675,14 @@ async def handle(r, w):
                 if ipaddress.ip_address(a[0]).is_loopback: ip = socket.inet_ntoa(tag)
             prm = await asyncio.wait_for(r.readexactly(6), 15)
             await test_run(r, w, ip, prm); return
+        if pre == b'DWRL':                              # the live replay: a spectator (through the ladder) asks for records
+            q = await asyncio.wait_for(r.readexactly(13), 5)
+            sid, frm, delay = q[:4], int.from_bytes(q[4:8], 'little'), int.from_bytes(q[8:12], 'little')
+            try: ans = live_answer(sid, frm, delay, 'vanilla' if q[12] == 1 else 'elite')
+            except Exception as e:
+                log(ev='live_error', where='answer', sid=int.from_bytes(sid, 'little'), err=repr(e))
+                ans = b'DWLR' + struct.pack('<IIIIII', 1, 2, 0, 0, 0, 0) + struct.pack('<I', 0)
+            w.write(ans); await w.drain(); w.close(); return
         if pre == b'DWRQ':                              # another server of ours asks: is this session here?
             sid = await asyncio.wait_for(r.readexactly(4), 5)
             w.write(b'Y' if sid in sessions else b'N'); await w.drain(); w.close(); return

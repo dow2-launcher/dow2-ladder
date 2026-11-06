@@ -1309,7 +1309,8 @@ def live_view():
         side = lambda m, ss: [{'steam': s, 'race': (m['players'].get(s) or {}).get('race')} for s in ss]
         ingame = [{'id': m['id'], 'state': 'playing' if m.get('state') == 'playing' else 'setup', 'mode': m['mode'], 'map': m.get('map'),
                    'started': int(m['started']) if m.get('state') == 'playing' and m.get('started') else None,
-                   'team1': side(m, m['host']), 'team2': side(m, m['guest']), 'watchers': list(m.get('watchers', []))}
+                   'team1': side(m, m['host']), 'team2': side(m, m['guest']), 'watchers': list(m.get('watchers', [])),
+                   **({'live': (live.info(m['id']) or {}).get('game')} if m.get('state') == 'playing' and live.watchable(m['id']) else {})}
                   for m in sorted(list(MM_MATCHES.values()) + list(MM_PLAYING.values()), key=lambda m: m['created'])]
         busy = {x['steam'] for m in ingame for x in m['team1'] + m['team2']} | {w for m in ingame for w in m['watchers']}
         searching = [{'steam': p['steam'], 'mode': p['mode'], 'race': p.get('race'), 'since': int(p['ts'])}
@@ -1632,6 +1633,8 @@ def nm_started(d):
         for s in m['host'] + m['guest']: MM.pop(s, None)
         MM_MATCHES.pop(m['id'], None)
         if m.get('lroom'): lroom.on_match_started(m)
+        try: live.register(m)
+        except Exception as e: print('live: register %s: %r' % (m['id'], e), flush=True)
         print('mm: native match %s started (room %s)' % (m['id'], m['room']), flush=True)
         return {'ok': True, 'match': m['id']}
 
@@ -1896,6 +1899,22 @@ class H(BaseHTTPRequestHandler):
                 with MM_LOCK: return self.send(200, lroom.listing(), cache=0)
             if u.path == '/ladder/api/lroom/catalog': return self.send(200, lroom.catalog(qs.get('game', ['elite'])[0], '1v1'), cache=300)
             if u.path == '/ladder/api/rooms': return self.send(200, ROOMS, cache=0)
+            if u.path.startswith('/ladder/api/live/'):           # the live replay (live.py): a match's info, its records
+                parts = u.path[len('/ladder/api/live/'):].split('/')
+                mid = parts[0][:24]
+                if len(parts) == 1:
+                    i = live.info(mid); return self.send(200 if i else 404, i or {'ok': False, 'error': 'not watchable'}, cache=0)
+                if len(parts) == 2 and parts[1] == 'rec':
+                    try: frm = int(qs.get('from', ['0'])[0])
+                    except ValueError: frm = 0
+                    try: b = live.fetch(mid, frm)
+                    except Exception as e:
+                        print('live: %s from %d: %r' % (mid, frm, e), flush=True); return self.send(502, {'ok': False, 'error': 'node'}, cache=0)
+                    if b is None: return self.send(404, {'ok': False, 'error': 'not watchable'}, cache=0)
+                    self.send_response(200); self.send_header('Content-Type', 'application/octet-stream')
+                    self.send_header('Content-Length', str(len(b))); self.send_header('Cache-Control', 'no-store'); self.end_headers()
+                    self.wfile.write(b); return
+                return self.send(404, {'error': 'not found'})
             if u.path == '/ladder/api/relays':
                 d = _relays().get('doc') or {'v': 1, 'relays': [{'ip': ip} for ip in relay_order()], 'ts': 0}
                 return self.send(200, d, cache=30)
@@ -2003,6 +2022,7 @@ class H(BaseHTTPRequestHandler):
 
 import community                                    # launcher community: Steam sign-in, who is online, the players' chat
 import sys, lroom                                   # launcher match rooms (05.11.2026)
+import live                                         # the live replay: watch a running match of our servers (06.11.2026)
 lroom.L = sys.modules[__name__]
 community.ADMIN_OK = _fb_token_ok
 def _c_rating(steam):
