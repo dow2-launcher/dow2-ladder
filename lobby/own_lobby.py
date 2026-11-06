@@ -477,13 +477,34 @@ def nm_push(x, pid):
     log('native automatch %s: push to pid=%d (%s, mid %s) - %d session(s)' % (x['view'].get('match'), pid, 'host' if a[3] == pid else 'guest', a[4], n))
 
 
+LROOM_PUSHED = {}                 # (match, steam) -> when that launcher-room guest got the room's id
+LROOM_GAP = 4.0                   # s: a launcher room's guests go in one after another (their seats), the next one at the latest this long after
+
+
+def lroom_turn(x, v, steam):
+    """a launcher room's match (06.11.2026): a guest takes the first free slot of his team in the host's room (RequestCorrectSlot), so
+    the seats of the room come out right only when the guests join in the room's order (v['steams']: the host, his team, the other
+    team, each in seat order) - a guest gets the room's id once every guest before him is in, or LROOM_GAP s after the one before"""
+    order = [s_ for s_ in v.get('steams') or [] if s_ != v.get('host_steam')]
+    if steam not in order: return True
+    k = order.index(steam); joined = set(v.get('joined') or [])
+    if all(s_ in joined for s_ in order[:k]): return True
+    now = time.time()
+    t0 = LROOM_PUSHED.get((v.get('match'), order[k - 1]))
+    return bool(t0 and now - t0 >= LROOM_GAP)
+
+
 def nm_push_news(x):
-    """AutomatchGameMessage to every player of this search who has news: the host at once, a guest once the room id is known"""
+    """AutomatchGameMessage to every player of this search who has news: the host at once, a guest once the room id is known
+    (a launcher room's guests in its seat order, lroom_turn)"""
     v = x['view']; mid = int(v['room']) if str(v.get('room') or '').isdigit() else 0
     if not isinstance(x.get('pushed'), dict): x['pushed'] = {}
     for m in nm_members(x):
         me_host = v['host_pid'] == m['pid']
-        if (me_host or mid) and x['pushed'].get(str(m['pid'])) != [v['match'], 'host' if me_host else mid]: nm_push(x, m['pid'])
+        if (me_host or mid) and x['pushed'].get(str(m['pid'])) != [v['match'], 'host' if me_host else mid]:
+            if not me_host and v.get('lroom') and not lroom_turn(x, v, str(m['steam'])): continue
+            nm_push(x, m['pid'])
+            if not me_host and v.get('lroom'): LROOM_PUSHED[(v['match'], str(m['steam']))] = time.time()
 
 
 def nm_apply(x, v):

@@ -37,13 +37,15 @@ def log(*a): print('lroom:', *a, flush=True)
 
 def _races(game):
     """{race key: {'ui': index in the game's race drop-down, 'heroes': how many}} of the game's playable races"""
-    if game == 'vanilla': return {k: {'ui': i, 'heroes': 3} for i, k in enumerate(VAN_RACES)}
+    elite = None if game == 'vanilla' else 1
     try:
         with open(__import__('os').path.dirname(__import__('os').path.abspath(__file__)) + '/assets_index.json', encoding='utf-8') as f:
             rs = json.load(f).get('races') or {}
     except Exception: rs = {}
     out = {k: {'ui': v.get('ui_index'), 'heroes': len(v.get('heroes') or []), 'names': [h.get('name') or '' for h in v.get('heroes') or []]}
            for k, v in rs.items() if v.get('playable') and v.get('heroes')}
+    if not elite:   # vanilla: its six races, their drop-down order; the heroes as Elite's (the same hero_list in both, 06.11.2026)
+        return {k: {'ui': i, 'heroes': (out.get(k) or {}).get('heroes', 3), 'names': (out.get(k) or {}).get('names') or []} for i, k in enumerate(VAN_RACES)}
     return out or {k: {'ui': i, 'heroes': 3} for i, k in enumerate(L.RACE_KEYS[:8])}
 
 
@@ -54,6 +56,30 @@ def _maps(game, mode):
 
 
 def _clean(v, n): return L._clean(v, n)
+
+
+# ---------- the match options (the host's game writes them: MMFind 0.47 rewrites the options string of the room's match) ----------
+# Stand 1, 06.11.2026 (lroom/runs/op1, the Private Match lobby's drop-downs against the string the game wrote): the victory condition
+# is the item number of its drop-down (Elite 3.2: 0 Annihilate, 1 Free For All, 2 Team FFA, 3 Victory Point Control, 4 Annihilate -
+# Hero Assault, 5 Massive Battles - Annihilate, 6 VPC - Hero Assault (500), ...); with VPC the tickets 250 / 500 / 1000 = VPTK 0 / 1 / 2;
+# Starting Location Random / Fixed = SLOC 0 / 1; Starting resources Standard / High Resources = RSST 0 / 1. The native automatch's
+# defaults: VPC, 500, Fixed, Standard.
+OPT_WIN = {'vpc': 3, 'annihilate': 0, 'annihilate_hero': 4, 'vpc_hero': 6}
+OPT_VP = {250: 0, 500: 1, 1000: 2}
+OPT_DEFAULT = {'win': 'vpc', 'vp': 500, 'start': 'fixed', 'res': 'standard'}
+def _opts_clean(o, game='elite'):
+    out = dict(OPT_DEFAULT)
+    if o.get('win') in OPT_WIN and (game != 'vanilla' or o['win'] in ('vpc', 'annihilate')): out['win'] = o['win']
+    try:
+        if int(o.get('vp')) in OPT_VP: out['vp'] = int(o['vp'])
+    except Exception: pass
+    if o.get('start') in ('fixed', 'random'): out['start'] = o['start']
+    if o.get('res') in ('standard', 'high'): out['res'] = o['res']
+    return out
+def _opt_values(r):
+    """for MMFind (the host): the numbers of the options string; the defaults are sent too (the game's own may differ by version)"""
+    o = r['opts']
+    return {'win': OPT_WIN[o['win']], 'vptk': OPT_VP[o['vp']], 'sloc': 1 if o['start'] == 'fixed' else 0, 'rsst': 1 if o['res'] == 'high' else 0}
 
 
 def _new_id():
@@ -137,10 +163,12 @@ def view(r):
     la = r.get('launch') or {}
     return {'id': r['id'], 'name': r['name'], 'game': r['game'], 'ver': r['ver'], 'mode': r['mode'], 'size': n,
             'map': r['map'], 'map_name': (cat.get(r['map']) or {}).get('name') or r['map'], 'owner': r['owner'],
+            'maps': [{'key': k, 'name': (cat.get(k) or {}).get('name') or k} for k in r['maps']], 'opts': dict(r['opts']),
             'state': r['state'], 'cd_end': int(r['cd'] * 1000) if r['state'] == 'countdown' else 0, 'now': int(now * 1000),
             'slots': slots, 'net': _net(r), 'note': r.get('note'), 'seq': r['seq'],
             'launch': {'t': int(la.get('t', 0)), 'deadline': int(la.get('deadline', 0)), 'host': la.get('host'), 'relay': la.get('relay'),
-                       'match': la.get('match'), 'room': la.get('room')} if la else None}
+                       'match': la.get('match'), 'room': la.get('room'), 'map': la.get('map'),
+                       'map_name': (cat.get(la.get('map')) or {}).get('name') or la.get('map')} if la else None}
 
 
 def summary(r):
@@ -200,11 +228,12 @@ def _launch(r, now):
         if s['race'] == 'random': heroes[s['steam']] = -1                      # the game rolls race and hero (Random on Find a Game)
         elif s['hero'] is None or s['hero'] < 0: heroes[s['steam']] = random.randrange(max(1, races.get(s['race'], {}).get('heroes', 3)))
         else: heroes[s['steam']] = s['hero']
-    r['launch'] = {'t': now, 'deadline': now + LAUNCH_WAIT, 'relay': pick, 'host': host, 'heroes': heroes,
+    mp = random.choice(r['maps']) if r['maps'] else r['map']                  # one of the room's maps, at random
+    r['launch'] = {'t': now, 'deadline': now + LAUNCH_WAIT, 'relay': pick, 'host': host, 'heroes': heroes, 'map': mp,
                    'teams': [[s['steam'] for s in r['slots'][:n]], [s['steam'] for s in r['slots'][n:]]], 'match': None, 'room': None}
     r['state'] = 'launching'; r['note'] = None
     for s in r['slots']: s['gst'] = 'starting'; s['gst_t'] = now
-    log('room %s: launch - %s %s, host %s, relay %r (worst %s ms), teams %s' % (r['id'], r['mode'], r['map'], host, pick, net['worst'], r['launch']['teams']))
+    log('room %s: launch - %s %s (of %s), host %s, relay %r (worst %s ms), teams %s' % (r['id'], r['mode'], mp, r['maps'], host, pick, net['worst'], r['launch']['teams']))
 
 
 def _cancel_launch(r, k, who=(), **kw):
@@ -268,13 +297,13 @@ def _assemble(r):
     for p in ps: p.update(state='matched', match=mid, role='host' if p['steam'] == host else 'guest')
     slots = {s: i for i, s in enumerate(host_team)}; slots.update({s: 4 + i for i, s in enumerate(guest_team)})
     L.MM_MATCHES[mid] = {'id': mid, 'mode': r['mode'], 'host': host_team, 'guest': guest_team, 'slots': slots, 'watchers': [],
-                         'pool': ps[0]['pool'], 'host_steam': host, 'lobby': None, 'created': time.time(), 'map': r['map'], 'room': None,
+                         'pool': ps[0]['pool'], 'host_steam': host, 'lobby': None, 'created': time.time(), 'map': la.get('map') or r['map'], 'room': None,
                          'native': True, 'state': 'creating', 'started': None, 'relay': la.get('relay') or '', 'lroom': r['id'], 'unrated': True,
                          'players': {p['steam']: {'name': p.get('name') or 'Player', 'rating': round(p['rating']), 'rsrc': p.get('rsrc', 'ladder'),
                                                   'race': p.get('race'), 'hero': p.get('hero')} for p in ps}}
     la['match'] = mid
     for s in r['slots']: s['gst'] = 'matched'; s['gst_t'] = time.time()
-    log('room %s: match %s made - host %s, %s vs %s, map %s, relay %r' % (r['id'], mid, host, host_team, guest_team, r['map'], la.get('relay')))
+    log('room %s: match %s made - host %s, %s vs %s, map %s, relay %r' % (r['id'], mid, host, host_team, guest_team, la.get('map'), la.get('relay')))
 
 
 def on_match_failed(m, culprits, why):
@@ -407,7 +436,8 @@ def api(verb, steam, d):
         maps = _maps(game, mode); mp = d.get('map') if d.get('map') in maps else (maps[0] if maps else '')
         name = _clean(d.get('name'), NAME_MAX) or ('%s: %s' % (_name(steam), mode))
         r = {'id': _new_id(), 'name': name, 'game': game, 'ver': _clean(d.get('ver'), 24) or '', 'mode': mode, 'map': mp, 'owner': steam,
-             'state': 'lobby', 'slots': [None] * (2 * L.TEAM_N[mode]), 'cd': 0, 'launch': None, 'note': None, 'pings': {}, 'seq': 0, 'created': now}
+             'state': 'lobby', 'slots': [None] * (2 * L.TEAM_N[mode]), 'cd': 0, 'launch': None, 'note': None, 'pings': {}, 'seq': 0, 'created': now,
+             'maps': [mp] if mp else [], 'opts': _opts_clean(d.get('opts') or {}, game)}
         ROOMS[r['id']] = r; _seat(r, steam, 0)
         log('room %s made by %s (%s %s %s, %s)' % (r['id'], steam, game, r['ver'], mode, mp))
         _pub(r); return {'ok': True, 'room': view(r)}
@@ -431,7 +461,8 @@ def api(verb, steam, d):
         la = r.get('launch')
         if r['state'] != 'launching' or not la: return {'ok': False, 'error': 'state'}
         races = _races(r['game']); hero = la['heroes'].get(steam, -1)
-        return {'ok': True, 'ticket': {'room': r['id'], 'game': r['game'], 'ver': r['ver'], 'mode': r['mode'], 'map': r['map'],
+        return {'ok': True, 'ticket': {'room': r['id'], 'game': r['game'], 'ver': r['ver'], 'mode': r['mode'], 'map': la.get('map') or r['map'],
+                                       'opts': _opt_values(r) if la['host'] == steam else {},
                                        'race': me['race'], 'race_ui': -1 if me['race'] == 'random' else races.get(me['race'], {}).get('ui', -1),
                                        'hero': hero, 'host': la['host'] == steam, 'deadline': int(la['deadline']), 'relay': la.get('relay') or ''}}
     if verb == 'game':                                                      # what his game does now (the launcher hears it from MMFind)
@@ -504,11 +535,22 @@ def api(verb, steam, d):
         if d.get('mode') in L.MODES and d['mode'] != r['mode']:
             if not _resize(r, d['mode']): return {'ok': False, 'error': 'too_many_players'}
             maps = _maps(r['game'], r['mode'])
-            if r['map'] not in maps: r['map'] = maps[0] if maps else ''
+            r['maps'] = [k for k in r['maps'] if k in maps]
+            if not r['maps']: r['maps'] = [random.choice(maps)] if maps else []
+            r['map'] = r['maps'][0] if r['maps'] else ''
             changed = True
-        if d.get('map') and d['map'] != r['map']:
+        if d.get('map') and d['map'] != r['map'] and not d.get('maps'):        # one map
             if d['map'] not in _maps(r['game'], r['mode']): return {'ok': False, 'error': 'bad_map'}
-            r['map'] = d['map']; changed = True
+            r['map'] = d['map']; r['maps'] = [d['map']]; changed = True
+        if isinstance(d.get('maps'), list):                                    # one or more: the match takes one at random
+            ok = set(_maps(r['game'], r['mode'])); ms = []
+            for k in d['maps'][:200]:
+                if k in ok and k not in ms: ms.append(k)
+            if not ms: return {'ok': False, 'error': 'bad_map'}
+            if ms != r['maps']: r['maps'] = ms; r['map'] = d['map'] if d.get('map') in ms else ms[0]; changed = True
+        if isinstance(d.get('opts'), dict):
+            o = _opts_clean(dict(r['opts'], **d['opts']), r['game'])
+            if o != r['opts']: r['opts'] = o; changed = True
         nm = _clean(d.get('name'), NAME_MAX)
         if nm and nm != r['name']: r['name'] = nm; changed = True
         if changed: _unready(r, 'conf'); _note(r, 'conf', [steam]); _pub(r)
@@ -528,7 +570,9 @@ def catalog(game, mode):
         out[md] = [{'key': k, 'name': (cat.get(k) or {}).get('name') or k} for k in _maps(game, md)]
     return {'game': game, 'maps': out, 'races': {k: v['heroes'] for k, v in _races(game).items()},
             'heroes': {k: v.get('names') or [] for k, v in _races(game).items()},
-            'race_order': [k for k in (VAN_RACES if game == 'vanilla' else ELITE_ORDER) if k in _races(game)]}
+            'race_order': [k for k in (VAN_RACES if game == 'vanilla' else ELITE_ORDER) if k in _races(game)],
+            'opts': {'win': [k for k in OPT_WIN if game != 'vanilla' or k in ('vpc', 'annihilate')], 'vp': sorted(OPT_VP), 'start': ['fixed', 'random'],
+                     'res': ['standard', 'high'], 'default': OPT_DEFAULT}}
 
 
 def launching_member(room, steam):
