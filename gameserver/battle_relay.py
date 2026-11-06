@@ -65,6 +65,10 @@ LE; flags 1 = over and all given, 2 = not started / no lobby state, 4 = no such 
 A session that ended stays LIVE_KEEP s for the spectators who are behind.
 Monitoring (05.11.2026): every RELAY_STATS_EVERY s (15) one ev=session_stats line per live session: members, and per player
 for that interval turns, stalls (gaps > GAP), the longest stall, messages/s and KB/s that came from him, his send buffer.
+Node quality per player (06.11.2026): the "leave" line of a player carries his Steam id (from his peer announce) and "solo" /
+max_solo_ms - his stalls >= SOLO_GAP while the others' turns kept coming (his way here stuck, not the match); the ladder's
+nodeq_collect.py joins it with the UDP gateway's "close" line of his connection (by the local port, "lport" there) for the
+losses, and stops using a node that is bad for a player (ladder/nodeq.py).
 """
 import asyncio, ipaddress, json, os, socket, struct, sys, time
 try: import du_client                                # the UDP tunnel between our nodes (same directory)
@@ -108,6 +112,7 @@ LIVE_DELAY = float(os.environ.get('LIVE_DELAY', '120'))   # s: the least delay o
 LIVE_KEEP = float(os.environ.get('LIVE_KEEP', '1200'))    # s an ended session stays for spectators
 LIVE_MAX = 6 * 1024 * 1024                          # bytes of records in one answer at most (the ladder asks again for the rest)
 GAP = 0.25                                          # s: a player's turns this far apart count as a stall (a lost packet, a hiccup)
+SOLO_GAP = 1.0                                      # s: a stall of one player alone this long counts against his way to this node
 TCP_QUICKACK, TCP_THIN_LINEAR_TIMEOUTS = 12, 16     # Linux socket options (not in the socket module everywhere)
 
 
@@ -149,12 +154,16 @@ class Peer:
         self.turns, self.last_turn, self.gaps, self.max_gap, self.max_rtt, self.retrans, self.max_buf = 0, 0.0, 0, 0.0, 0, 0, 0
         self.iv = dict(turns=0, gaps=0, max_gap=0.0, msgs=0, bytes=0)   # since the last session_stats line (STATS_EVERY)
         self.rejoin = False                               # "DWR5": its Relay.dll keeps reconnecting for 3 min and reads our notices
+        self.solo, self.max_solo = 0, 0.0                 # stalls >= SOLO_GAP of his alone (the others' turns kept coming)
+        self.turn_mark = 0                                # the session's turn count at his last turn
 
     def stats(self):
         i = tcp_info(self.w)
         if i:
             self.max_rtt = max(self.max_rtt, i[0]); self.retrans = i[2]
-        return dict(peer=self.addr, idx=self.idx, turns=self.turns, gaps=self.gaps, max_gap_ms=round(self.max_gap * 1000),
+        st = self.sess.steams.get(self.idx, '') if self.sess else ''
+        return dict(peer=self.addr, idx=self.idx, **({'steam': st} if st else {}), solo=self.solo, max_solo_ms=round(self.max_solo * 1000),
+                    turns=self.turns, gaps=self.gaps, max_gap_ms=round(self.max_gap * 1000),
                     rtt_ms=i[0] if i else None, rttvar_ms=i[1] if i else None, max_rtt_ms=self.max_rtt, retrans=self.retrans,
                     max_buf=self.max_buf)
 
@@ -175,6 +184,7 @@ class Session:
         self.away = {}                                    # player id -> (his number, until): connection broke mid-game
         self.gone = set()                                 # player ids whose GRACE ran out: the others have dropped them
         self.names = {}                                   # number -> the player's name (from his peer announce)
+        self.steams = {}                                  # number -> his Steam id (the same announce; node quality per player)
         self.lagging = set()                              # numbers told as "silent" (connected, no turns for LAG s)
         self.votes = {}                                   # number waited for -> player ids that voted "don't wait"
         self.started = time.time(); self.ticks = 0; self.turn_msgs = 0; self.late = 0; self.max_late = 0.0
@@ -259,7 +269,13 @@ class Session:
             g = now - p.last_turn
             if g > GAP: p.gaps += 1; p.iv['gaps'] += 1
             p.max_gap = max(p.max_gap, g); p.iv['max_gap'] = max(p.iv['max_gap'], g)
-        p.last_turn = now; p.turns += 1; p.iv['turns'] += 1
+            # a stall of his alone (node quality per player, 06.11.2026): the others' turns kept coming meanwhile (at least
+            # half their 10 a second over the gap) - his way here stuck, not the match; in a lockstep a stall of one often
+            # stops the others' turns too, and all restarting together is no "kept coming": then it counts for nobody
+            others = sum(1 for q in self.peers if q is not p and q.last_turn)
+            if g >= SOLO_GAP and others and self.turn_msgs - 1 - p.turn_mark >= max(3, 5 * (g - 0.3) * others):
+                p.solo += 1; p.max_solo = max(p.max_solo, g)
+        p.last_turn = now; p.turn_mark = self.turn_msgs; p.turns += 1; p.iv['turns'] += 1
         if p.idx in self.lagging: self.lagging.discard(p.idx); self.votes.pop(p.idx, None); self.notice(p.idx, None)
         if not self.ticker: self.ticker = asyncio.ensure_future(self.tick_loop())
 
@@ -394,19 +410,26 @@ async def stats_loop():
                 late_ticks=s.late, players=pl)
 
 
-def announce_name(inner):
-    """the player's name from his peer announce (0f 05 ... zlib): "/steam/<id>" (u32 len + UTF-16), then u32 len + the name"""
+def announce_who(inner):
+    """the player's name and Steam id from his peer announce (0f 05 ... zlib): "/steam/<id>" (u32 len + UTF-16), then u32 len +
+    the name; ('', '') when it can't be read"""
     try:
         import zlib
         i = inner.find(b'\x78\x01')
         d = zlib.decompressobj().decompress(inner[i:]) if i >= 0 else b''
         k = d.find('/steam/'.encode('utf-16-le'))
-        if k < 4: return ''
-        o = k + 2 * int.from_bytes(d[k - 4:k], 'little') + 4            # past the steam path and its trailing u32
+        if k < 4: return '', ''
+        plen = int.from_bytes(d[k - 4:k], 'little')
+        path = d[k:k + 2 * plen].decode('utf-16-le', 'replace') if 0 < plen < 64 else ''
+        steam = path[len('/steam/'):] if path[len('/steam/'):].isdigit() else ''
+        o = k + 2 * plen + 4                                             # past the steam path and its trailing u32
         while o + 4 <= len(d) and int.from_bytes(d[o:o + 4], 'little') == 0: o += 4
         n = int.from_bytes(d[o:o + 4], 'little')
-        return d[o + 4:o + 4 + 2 * n].decode('utf-16-le', 'replace') if 0 < n < 64 else ''
-    except Exception: return ''
+        return (d[o + 4:o + 4 + 2 * n].decode('utf-16-le', 'replace') if 0 < n < 64 else ''), steam
+    except Exception: return '', ''
+
+
+def announce_name(inner): return announce_who(inner)[0]
 
 
 def hello_reply(m):
@@ -456,8 +479,9 @@ def handle_msg(p, m, echo=True):
             p.w.write(b'DWRERR:mixed\n'); p.w.close(); return              # Relay.dll 7 shows why and closes the game
         if inner[:2] == b'\x0f\x05':                                 # peer announce: everyone, header stripped
             if p.idx not in s.names:
-                nm = announce_name(inner)
+                nm, st = announce_who(inner)
                 if nm: s.names[p.idx] = nm
+                if st: s.steams[p.idx] = st
             for q in s.peers: q.send(inner)
             return
         dst = m[1]
