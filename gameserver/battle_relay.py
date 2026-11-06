@@ -42,6 +42,12 @@ about a millisecond in each gateway; no second tick - only the session's node ti
 they come.
 Usage: battle_relay.py [port] [bind]   (default 47100 127.0.0.1)
 Peers silent for IDLE seconds are dropped (the game pings every ~3 s).
+Reconnect (06.11.2026, feature/relay-reconnect, NOT deployed): the game's relay client reconnects on its own when its
+connection breaks (RLink BattleServerRelay, RL_EnableReconnections default 1, RL_ClientReconnectMS default 15000) and its
+hello then says how far it got: 15 <sid 4> 00000000 <id 8> 02 <game frames received, u32 LE> (DOW2.exe 0x63FB10 / 0x63FBD0;
+flag 0 and no count = a first connection). Relic's relay sends the frames it missed; this one did not - the player came back
+into the session (the same number, by player id) but without the ticks of the gap. Now every session keeps its ticks
+(HISTORY at most) and a reconnecting player gets the ticks from his count on, before the live ones.
 Monitoring (05.11.2026): every RELAY_STATS_EVERY s (15) one ev=session_stats line per live session: members, and per player
 for that interval turns, stalls (gaps > GAP), the longest stall, messages/s and KB/s that came from him, his send buffer.
 """
@@ -53,6 +59,7 @@ PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 47100
 BIND = sys.argv[2] if len(sys.argv) > 2 else '127.0.0.1'
 TICK = 0.1
 IDLE = 60
+HISTORY = int(os.environ.get('RELAY_HISTORY', '72000'))   # ticks a session keeps for reconnects (2 h of 0.1 s)
 DECIDE = 5                                          # s: no peer announce from a new session's first peer -> it's the host
 RETRY = 8                                           # s: a guest whose session no node has yet asks our other nodes again (DWR1 / native)
 PEERS = [h for h in os.environ.get('RELAY_PEERS', '83.217.192.34,116.202.106.150,15.220.68.107,91.107.122.186').split(',') if h]
@@ -133,6 +140,7 @@ class Session:
     def __init__(self, sid):
         self.sid, self.peers, self.next_idx, self.queue, self.ticker = sid, [], 1, [], None
         self.by_pid = {}                                  # player id -> its number in this session
+        self.history = []                                 # every tick sent (0x0a frames), for players who reconnect
         self.started = time.time(); self.ticks = 0; self.turn_msgs = 0; self.late = 0; self.max_late = 0.0
 
     def join(self, p):
@@ -181,7 +189,9 @@ class Session:
             m = bytearray(b'\x0a\xfe') + bytes([len(q)])
             for i, d in q: m += bytes([i]) + d
             m += bytes([len(silent)]) + bytes(silent)
-            for p in list(self.peers): p.send(bytes(m))
+            m = bytes(m)
+            for p in list(self.peers): p.send(m)
+            if len(self.history) < HISTORY: self.history.append(m)
             self.ticks += 1
             # no waiting here for the players' connections to take the data (that held the tick for everyone when one
             # player's connection stalled): the data sits in that player's buffer, which is watched instead
@@ -245,11 +255,18 @@ def handle_msg(p, m, echo=True):
     t = m[0]
     if t == 0x15:                                                   # hello: join the session
         sid = m[1:5]
+        again = len(m) >= 22 and m[17] == 2                         # a reconnect: the game frames it has got follow
         if p.sess is None:
             s = sessions.get(sid) or sessions.setdefault(sid, Session(sid))
             p.pid = m[9:17]; s.join(p)
-            log(ev='join', sid=int.from_bytes(sid, 'little'), idx=p.idx, peer=p.addr, pid=p.pid.hex(), members=len(s.peers))
+            log(ev='join', sid=int.from_bytes(sid, 'little'), idx=p.idx, peer=p.addr, pid=p.pid.hex(), members=len(s.peers),
+                **({'reconnect_frames': int.from_bytes(m[18:22], 'little')} if again else {}))
         if echo: p.send(m)
+        if again and p.sess is not None:                            # the ticks of the gap first, then the live ones
+            have = int.from_bytes(m[18:22], 'little'); h = p.sess.history
+            missed = h[have:] if 0 <= have <= len(h) else []
+            for f in missed: p.send(f)
+            log(ev='rejoin', sid=int.from_bytes(sid, 'little'), idx=p.idx, peer=p.addr, had=have, ticks=len(h), resent=len(missed))
         return
     if t == 0x14:                                                    # ping
         if echo: p.send(m)
