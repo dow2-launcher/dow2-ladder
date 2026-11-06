@@ -7,7 +7,7 @@
 # presence of the signed-in player) alive. A subscriber that falls 1000 events behind is dropped: it reconnects and gets
 # a new snapshot. At most 1000 connections in all, else 503 with "retry: 30000" (no per-IP limit: owner 01.11.2026 - LAN
 # parties, carrier NAT and everyone behind the Moscow mirror dow2ru share one address).
-import json, queue, threading, time
+import json, queue, threading, time, traceback
 
 PING = 20
 MAX_ALL = 1000
@@ -21,6 +21,19 @@ class Sub:
 
 def frame(event, data):
     return ('event: %s\ndata: %s\n\n' % (event, json.dumps(data, ensure_ascii=False, separators=(',', ':')))).encode('utf-8')
+
+def _bad(what):  # one line in the service output: what could not be built, and why
+    print('stream: skipped %s %s' % (what, traceback.format_exc().strip().replace('\n', ' | ')), flush=True)
+
+def _frame(event, data):
+    # an event that cannot be built (data not JSON, a broken message) is skipped: the connection stays, the next one goes
+    try: return frame(event, data)
+    except Exception:
+        _bad('event %s id=%s' % (event, data.get('id') if isinstance(data, dict) else '-')); return b''
+
+def _call(what, fn, default):
+    try: return fn()
+    except Exception: _bad(what); return default
 
 def publish(event, data, to=None):
     # to: a Steam id - only the connections of that player
@@ -51,11 +64,12 @@ def serve(h, ip, steam, seen, missed, me):
         h.send_header('X-Accel-Buffering', 'no'); h.end_headers()
         w = h.wfile
         w.write(b'retry: 5000\n\n')
-        for ev, d in missed(): w.write(frame(ev, d))
-        w.write(frame('online', LIVE()))
+        for ev, d in _call('missed', missed, []): w.write(_frame(ev, d))
+        v = _call('online', LIVE, None)
+        if v is not None: w.write(_frame('online', v))
         if steam:
-            seen(); m = me()
-            if m: w.write(frame('me', m))
+            seen(); m = _call('me', me, None)
+            if m: w.write(_frame('me', m))
         w.flush()
         while not s.dead:
             try: ev, d = s.q.get(timeout=PING)
@@ -63,14 +77,16 @@ def serve(h, ip, steam, seen, missed, me):
                 w.write(b': ping\n\n'); w.flush()
                 if steam: seen()
                 continue
-            w.write(frame(ev, d))
+            w.write(_frame(ev, d))
             if steam: seen()                                     # 03.11: освежаем присутствие и при доставке событий, а не только на idle-пинге (фикс скачков онлайна)
             if ev == 'user' and steam and d.get('steam') == steam:   # own rating changed: the own card follows
-                m = me()
-                if m: w.write(frame('me', m))
+                m = _call('me', me, None)
+                if m: w.write(_frame('me', m))
             w.flush()
     except OSError:                                 # BrokenPipe, ConnectionReset/Aborted: the launcher is gone
         pass
+    except Exception:                               # anything else: written down, the connection closed here (the request
+        _bad('connection')                          # handler would answer a 500 into a stream already sent as 200)
     finally:
         with LOCK: SUBS.discard(s)
 

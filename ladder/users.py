@@ -34,9 +34,18 @@ def load():
         rows = c.execute('SELECT steam, name, avatar, avatar_ts, alias, banned, first_seen, last_seen FROM users').fetchall()
     with LOCK:
         for r in rows:
-            USERS[r[0]] = {'name': r[1] or '', 'avatar': r[2] or '', 'avatar_ts': r[3] or 0, 'alias': r[4] or '', 'banned': r[5] or 0,
-                           'first_seen': r[6] or 0, 'last_seen': r[7] or 0, 'rating': None, 'rating_ts': 0}
+            USERS[str(r[0])] = {'name': _text(r[1]), 'avatar': _text(r[2]), 'avatar_ts': _num(r[3]), 'alias': _text(r[4]), 'banned': _num(r[5]),
+                                'first_seen': _num(r[6]), 'last_seen': _num(r[7]), 'rating': None, 'rating_ts': 0}
     for f in (_profiles, _ratings, _flusher): threading.Thread(target=f, daemon=True).start()
+
+def _text(v):  # a column as text ('' for NULL): a row written past this module (BLOB, a number) must not reach JSON as is
+    if v is None: return ''
+    if isinstance(v, (bytes, bytearray, memoryview)): return bytes(v).decode('utf-8', 'replace')
+    return v if isinstance(v, str) else str(v)
+
+def _num(v):
+    try: return int(v or 0)
+    except Exception: return 0
 
 def display_name(u):
     return u['name'] or u['alias'] or 'Player'

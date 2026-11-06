@@ -4,7 +4,7 @@
 # и сезонам (квартал). Отдаёт JSON для страницы /ladder/. Данные только из Relic; реплеев Relic не хранит.
 import random
 import hmac
-import json, os, re, sqlite3, struct, threading, time, math, base64, zlib, urllib.request, urllib.parse
+import json, os, re, sqlite3, struct, threading, time, math, base64, zlib, traceback, urllib.request, urllib.parse
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from concurrent.futures import ThreadPoolExecutor
 import stream, users                                # launcher users / presence, the live stream (SSE)
@@ -1705,8 +1705,11 @@ def _fb_uid(u):
 def _fb_token_ok(t):
     try: return bool(t) and t == open(FB_TOKEN_FILE).read().strip()
     except Exception: return False
+def _fb_s(v):  # a column as text: a row written past fb_send (the sqlite3 shell's readfile() gives BLOB) is not JSON as bytes
+    if isinstance(v, (bytes, bytearray, memoryview)): return bytes(v).decode('utf-8', 'replace')
+    return v
 def _fb_msg(r):
-    return {'id': r[0], 'author': r[3], 'name': r[2], 'text': r[4], 'images': json.loads(r[5] or '[]'), 'ts': r[6]}
+    return {'id': r[0], 'author': _fb_s(r[3]), 'name': _fb_s(r[2]), 'text': _fb_s(r[4]), 'images': json.loads(_fb_s(r[5]) or '[]'), 'ts': r[6]}
 FB_RULES_MSG = 'Сообщение не отправлено: не прошло модерацию чата (бессвязный текст или политика). Переформулируйте по делу — мы на связи. Мат и эмоции в адрес мода при этом ок.'
 def fb_block_notice(uid):
     # вставить разовое пояснение от Elite dev в тред (не дублировать, если последнее сообщение уже оно)
@@ -1964,6 +1967,7 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, {'season': season, 'mode': mode, 'board': board(season, mode)})
             return self.send(404, {'error': 'not found'})
         except Exception as e:
+            print('ladder: 500 GET %s %s' % (u.path, traceback.format_exc().strip()), flush=True)
             return self.send(500, {'error': type(e).__name__})
     def do_POST(self):
         u = urllib.parse.urlparse(self.path)
@@ -2018,6 +2022,7 @@ class H(BaseHTTPRequestHandler):
             if u.path == '/ladder/api/mm/rematch': return self.send(200, mm_rematch(steam, d if isinstance(d, dict) else {}), cache=0)
             return self.send(404, {'error': 'not found'}, cache=0)
         except Exception as e:
+            print('ladder: 500 POST %s %s' % (u.path, traceback.format_exc().strip()), flush=True)
             return self.send(500, {'error': type(e).__name__}, cache=0)
 
 import community                                    # launcher community: Steam sign-in, who is online, the players' chat

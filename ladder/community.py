@@ -25,7 +25,7 @@
 # POST say     {token, room, text, cid?} -> {ok, id, msg} | {ok: false, error[, retry_after ms][, retry]}
 # POST logout  {token}
 # POST mod     {admin, op: del|ban|unban, id|steam}   (admin = the fb-admin token)
-import collections, html, json, os, re, secrets, sqlite3, threading, time, urllib.parse, urllib.request
+import collections, html, json, os, re, secrets, sqlite3, threading, time, traceback, urllib.parse, urllib.request
 import stream, users
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -234,18 +234,40 @@ def _int(v):
     try: return max(0, int(v))
     except Exception: return 0
 
+def _s(v):
+    # a column as text. A row written past say() (06.11.2026: the sqlite3 shell's readfile() stored text / t_ru / t_en of #799
+    # as BLOB) comes back as bytes, and bytes are not JSON: c/msgs answered 500, the stream broke off before its snapshot
+    if v is None or isinstance(v, str): return v
+    if isinstance(v, (bytes, bytearray, memoryview)): return bytes(v).decode('utf-8', 'replace')
+    return str(v)
+
 def _msg(r, room=None):
     # room: the asked tab (it picks text; old launchers show text as is); None = a stream event (the launcher picks by orig/ru/en)
-    u = users.get(r[2]); orig = r[3]; ru = r[6] or None; en = r[7] or None
+    u = users.get(r[2]); orig = _s(r[3]) or ''; ru = _s(r[6]) or None; en = _s(r[7]) or None
     text = (ru or orig) if room == 'ru' else (en or orig) if room == 'en' else orig
-    return {'id': r[0], 'room': room or r[1], 'steam': r[2], 'name': u['name'], 'avatar': u['avatar'], 'text': text, 'ts': r[4],
-            'cid': r[8], 'lang': r[5] or '', 'orig': orig, 'ru': ru, 'en': en}
+    return {'id': r[0], 'room': room or _s(r[1]), 'steam': _s(r[2]), 'name': u['name'], 'avatar': u['avatar'], 'text': text,
+            'ts': r[4] if isinstance(r[4], int) else _int(r[4]), 'cid': _s(r[8]), 'lang': _s(r[5]) or '', 'orig': orig, 'ru': ru, 'en': en}
+
+BAD_LOGGED = {}                                     # message id -> when its failure was last written (once in 10 min, not per request)
+def _built(rows, room=None):
+    # the messages of rows; one that cannot be built (or put into JSON) is left out and written to the service output once,
+    # the others go as usual
+    out = []
+    for r in rows:
+        try:
+            m = _msg(r, room); json.dumps(m, ensure_ascii=False); out.append(m)
+        except Exception:
+            mid = r[0] if r else None; now = time.time()
+            if now - BAD_LOGGED.get(mid, 0) > 600:
+                BAD_LOGGED[mid] = now
+                print('community: msg-skipped id=%s %s' % (mid, traceback.format_exc().strip().replace('\n', ' | ')), flush=True)
+    return out
 
 def _cut(rows, room):   # a translated tab: up to the first message still being translated (so "after" never skips it)
     if room == 'all': return rows
     now = time.time()
     for i, r in enumerate(rows):
-        if r[6] is None and now - r[4] < TR_WAIT: return rows[:i]
+        if r[6] is None and now - _int(r[4]) < TR_WAIT: return rows[:i]
     return rows
 
 def msgs(room, after, limit=None, before=None):
@@ -257,7 +279,7 @@ def msgs(room, after, limit=None, before=None):
         elif before > 0: rows = c.execute(q + ' AND id<? ORDER BY id DESC LIMIT ?', (before, limit)).fetchall()[::-1]
         else: rows = c.execute(q + ' ORDER BY id DESC LIMIT ?', (limit,)).fetchall()[::-1]   # the whole history at once (owner, 29.10)
         dead = [r[0] for r in c.execute('SELECT id FROM msg WHERE deleted=1 AND id>? ORDER BY id DESC LIMIT 50', (max(0, after - 500),))]
-    return {'room': room, 'msgs': [_msg(r, room) for r in _cut(rows, room)], 'deleted': dead}
+    return {'room': room, 'msgs': _built(_cut(rows, room), room), 'deleted': dead}
 
 def missed(after):
     # for the stream: after = "all:123,ru:45,en:67" (the last ids the launcher has). One common stream: from the smallest of
@@ -267,7 +289,7 @@ def missed(after):
     with db() as c:
         rows = c.execute('SELECT %s FROM msg WHERE deleted=0 AND id>? ORDER BY id LIMIT 201' % COLS, (min(ids),)).fetchall()
     if len(rows) > 200: return [('reset', {'room': r}) for r in ROOMS]
-    return [('msg', _msg(r)) for r in rows]
+    return [('msg', m) for m in _built(rows)]
 
 def _by_cid(steam, cid):
     with db() as c:
