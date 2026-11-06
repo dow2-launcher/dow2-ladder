@@ -36,7 +36,7 @@ START_EMPTY = 4                                  # the game's first steps of a m
 # DATABASE carries the victory condition as the game's id of its script (the lobby has the drop-down's number): the ids from the
 # players' own replays of stand matches, 06.11.2026 (lroom: 0 annihilate, 3 VPC, 4 annihilate - hero assault, 6 VPC - hero assault)
 WIN_ID = {'elite': {0: 'a98ab169', 3: '52e203fc', 4: '738f43c8', 6: 'c8d5af1a'},
-          'vanilla': {3: '00eb7615'}}
+          'vanilla': {0: '03c98652', 3: '00eb7615'}}
 MOD_TAG = {'elite': 0xD6805B7D, 'vanilla': 0x161D19DD}          # the file header's second word: the mod (Elite 3.2 / Retribution)
 EMPTY_SLOT = bytes.fromhex('00000000070000000000000000000000ffffffffffffffffffffffff0000000000000000ffffffff00ffffffff'
                            '0000000000000000000000000000000000ffffffff')
