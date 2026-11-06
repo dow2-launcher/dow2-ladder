@@ -70,6 +70,41 @@ def explain(sig):
     return None
 
 
+NT_NODE = {'15.220.68.107': 'Польша', '116.202.106.150': 'Германия', '83.217.192.34': 'Москва', '91.107.122.186': 'Москва 2'}
+NT_V = {'excellent': 'отлично', 'playable': 'играбельно', 'laggy': 'будут лаги', 'down': 'не работает'}
+NT_WHY = {'no_answer': 'не отвечает', 'cut': 'обрыв', 'no_flow': 'почти ничего не вернулось', 'tcp_only': 'UDP нет, только TCP', 'high_ping': 'высокий пинг',
+          'ping': 'пинг >80', 'spikes': 'скачки', 'pauses': 'паузы', 'loss': 'потери', 'jitter': 'джиттер', 'lost_msgs': 'терялись сообщения', 'cancelled': 'остановлено'}
+NT_HINT = {'zero_ping': 'ответ за 0 мс (VPN/обход/антивирус отвечает за сервер)', 'udp_blocked': 'UDP нет, TCP есть', 'reorder': 'сильные перестановки (VPN?)',
+           'stream_cut': 'поток обрывается (DPI)', 'all_down': 'ни один узел не отвечает'}
+
+
+def nettest_lines(text):
+    """the launcher's connection test (1.4.15, nettest.json = its last runs, the newest first): one line per run, the newest two"""
+    try: runs = json.loads(text.strip() or '[]')
+    except Exception: return ['проверка связи: nettest.json не читается']
+    out = []
+    for i, r in enumerate(runs[:2]):
+        nodes = []
+        for n in r.get('nodes') or []:
+            name = NT_NODE.get(n.get('ip'), n.get('name') or n.get('ip'))
+            rt = (n.get('rtt') or {}).get('avg'); tk = n.get('ticks') or {}; du = n.get('du') or {}
+            pz = (tk.get('pauses') or 0) + ((n.get('server') or {}).get('gaps') or 0)
+            loss = max(du.get('up_loss_pct') or 0, du.get('down_loss_pct') or 0)
+            bits = ['%d мс' % rt] if rt else []
+            if pz: bits.append('пауз %d (макс %d мс)' % (pz, tk.get('max_gap_ms') or 0))
+            if loss >= 1: bits.append('потери %g%%' % loss)
+            if n.get('transport') == 'tcp': bits.append('по TCP')
+            why = [NT_WHY.get(w, w) for w in n.get('why') or [] if n.get('verdict') != 'excellent']
+            nodes.append('%s %s%s%s%s' % (name, NT_V.get(n.get('verdict'), n.get('verdict')), ' ' + ', '.join(bits) if bits else '',
+                                          ' (' + ', '.join(why) + ')' if why and n.get('verdict') != 'excellent' else '', ' ★' if n.get('pick') else ''))
+        when = time.strftime('%d.%m %H:%M', time.gmtime(r.get('ts') or 0))
+        hints = '; '.join('%s: %s' % (NT_HINT.get(h.get('code'), h.get('code')), ', '.join(NT_NODE.get(x, x) for x in h.get('nodes') or [])) for h in r.get('hints') or [])
+        mode = {'1v1': '1×1', '2v2': '2×2', '3v3': '3×3'}.get(r.get('mode'), r.get('mode'))
+        out.append('%s %s %s (%s UTC, лаунчер %s): %s%s' % ('проверка связи' if i == 0 else '  прошлая', mode, 'с VPN' if r.get('vpn') else 'без VPN', when,
+                   r.get('launcher', '?'), '; '.join(nodes) or 'нет узлов', ' · ' + hints if hints else ''))
+    return out
+
+
 def summarize(path):
     name = os.path.basename(path); rid = name.split('_')[0]; who = name[len(rid) + 1:-7]
     t = gzip.open(path).read().decode('utf-8', 'replace').replace('\x00', '')
@@ -136,6 +171,8 @@ def summarize(path):
                 res.setdefault(srv, []).append('%s%s/%s %s' % (proto, '(split)' if kind == 'split' else '', port, short))
             if res: L.append('проверка связи: ' + ' | '.join('%s: %s' % (srv, ', '.join(x)) for srv, x in res.items()))
             continue
+        if b == 'nettest.json': L.extend(nettest_lines(v)); continue
+        if b == 'nettest.log': continue                  # the same runs as nettest.json, one line per node: for reading by hand
         if b not in starts: continue
         sess = last_session(v, starts[b])
         if b == 'MMFind.log':
