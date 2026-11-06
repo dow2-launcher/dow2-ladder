@@ -952,7 +952,9 @@ with db() as c:
 def _history_add(m):  # под MM_LOCK, в момент старта: кто, за какую сторону, рейтинг на входе
     if not m.get('lobby') or m.get('bots'):                # тесты против компьютера (TestBots) — не матчи ладдера
         print('mm: %s started without a lobby name / with bots - no history row' % m.get('id'), flush=True); return
-    if (m.get('pool') or '').split('|')[0]: return         # тестовая группа (MMFind TestGroup) — не матчи ладдера
+    pool = m.get('pool') or ''
+    if pool.startswith('lroom:'): pool = pool.split('|', 1)[1] if '|' in pool else ''   # a launcher room's own pool: its group after it
+    if pool.split('|')[0]: return                         # тестовая группа (MMFind TestGroup) — не матчи ладдера
     pl = []
     for team, side in ((1, m['host']), (2, m['guest'])):
         for s in side:

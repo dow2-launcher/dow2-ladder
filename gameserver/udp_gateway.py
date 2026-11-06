@@ -29,19 +29,25 @@ packet, 64 packets / 64 KB in flight with back pressure, duplicate acks at most 
 wire format did not change: old Relay.dll 15-22 work with this gateway and Relay.dll 23 with an old one.
 Per player address at most ADDR_RATE packets/s come in (burst ADDR_BURST), our own nodes (TRUSTED) excepted - a client
 in a storm can't flood the node (05.11.2026: one 2v2 host sent 2380 packets/s for 10 minutes).
+The launcher's connection test (06.11.2026): a stream that starts with "DWRT" goes to battle_relay as "DWRU" + the player's
+IPv4 + the rest (battle_relay's limits per address); every other stream is passed on byte for byte as before. And "DU" 10 STATQ
+(cid, padded to 64+ bytes) -> 11 STATA + JSON of that connection's counters here (rx, holes lost_in, copies that filled one,
+duplicates, resends): how the player's packets arrived - its losses on the way up, which its own end can't see when a copy
+fills the hole. Only for a live connection from its own address, never bigger than the request.
 Keepalive: an ACK each second; 30 s without a packet = gone.
 Monitoring: every UDPGW_STATS_EVERY s (15) one ev=conn_stats line per live connection - packets/s in / out in that interval,
 data packets, resends, holes (lost_in), copies, filled, srtt, unacked, storm (the fuse) - and ev=storm / ev=dead / addr_limit
 as they happen. `journalctl -u dow2-udpgw | grep conn_stats`.
 Usage: udp_gateway.py [port] [battle_relay host:port]   (default 47100 127.0.0.1:47100)
 """
-import asyncio, os, struct, sys, time
+import asyncio, json, os, socket, struct, sys, time
 import du_proto
 from du_proto import SYN, SYNACK, DATA, ACK, FIN, PING, PONG, DATA2, ACK2, MAXP
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 47100
 BR = (sys.argv[2].rsplit(':', 1) if len(sys.argv) > 2 else ['127.0.0.1', '47100'])
 BR = (BR[0], int(BR[1]))
+STATQ, STATA = 10, 11   # the launcher's connection test: what this end saw of a connection (below)
 PER_IP = 16            # connections per address
 # our nodes: no per-address limit - all bridges of a Moscow node (du_egress, 03.11.2026) and all players another node passes on
 # here (battle_relay over du_client, the relay chain 04.11.2026) come from that node's one address
@@ -62,7 +68,7 @@ def log(**k):
 class Conn:
     def __init__(self, gw, cid, addr, ver=1):
         self.gw, self.cid, self.addr, self.ver = gw, cid, addr, ver
-        self.w = None; self.ready = False; self.prev_stats = None
+        self.w = None; self.ready = False; self.prev_stats = None; self.head = b''; self.tst = {}
         self.room = asyncio.Event(); self.room.set()
         self.core = du_proto.DuCore(cid, ver, out=lambda pkt: gw.tr.sendto(pkt, self.addr), deliver=self.deliver,
                                     log=lambda ev, **k: log(ev=ev, peer=self.addr[0], **k),
@@ -73,7 +79,39 @@ class Conn:
     def closed(self): return self.core.closed
 
     def deliver(self, d):
+        if self.head is not None:                       # the stream's first 4 bytes: the launcher's connection test (DWRT,
+            self.head += d                              # 06.11.2026) gets the player's address put in - battle_relay limits
+            if len(self.head) < 4: return               # tests per address and sees only us (127.0.0.1)
+            d, self.head = self.head, None
+            if d[:4] == b'DWRT': d = b'DWRU' + socket.inet_aton(self.addr[0]) + d[4:]; self.track()
         if self.w: self.w.write(d)
+
+    def track(self):
+        """the launcher's connection test only: how many of the player's packets were lost on the way up. A packet that came only
+        as a copy (its own never followed within a second) or that filled a hole late (a resend) is lost; one that came a little
+        after a later one, or after its copy, was only reordered. Its own end can't see this: the copies hide its losses. STATA."""
+        core = self.core; orig = core.on_data; byc = {}; holes = {}; hi = [None]; self.tst = dict(up_lost=0, up_reord=0)
+        late = lambda: max(core.srtt / 2, 0.03)
+
+        def on_data(seq, payload, copy=False):
+            rn = core.rcv_next
+            new = orig(seq, payload, copy); now = time.monotonic(); st = self.tst
+            if not new:
+                if not copy and seq in byc and now - byc.pop(seq) < 1.0: st['up_lost'] -= 1; st['up_reord'] += 1
+                return new
+            if seq in holes:
+                if not copy and now - holes.pop(seq) < late(): st['up_reord'] += 1
+                else: st['up_lost'] += 1
+            elif copy:
+                st['up_lost'] += 1; byc[seq] = now
+            if hi[0] is None or seq > hi[0]:
+                for x in range(max(rn, hi[0] + 1 if hi[0] is not None else rn), min(seq, rn + 64)): holes.setdefault(x, now)
+                hi[0] = seq
+            if len(byc) > 512 or len(holes) > 512:
+                for d in (byc, holes):
+                    for k in [k for k, t in d.items() if now - t > 2]: del d[k]
+            return new
+        core.on_data = on_data
 
     def on_room(self):
         if self.core.room(): self.room.set()
@@ -133,6 +171,14 @@ class Gateway(asyncio.DatagramProtocol):
             return
         c = self.conns.get(cid)
         if c and c.addr[0] != addr[0]: return                   # an id is bound to its address (the port may change: NAT)
+        if t == STATQ:                                          # the launcher's connection test asks how its packets arrived here:
+            if c and c.ready and len(body) >= 64:               # the copies that filled a hole and the holes = its losses on the way up.
+                st = c.core.stats                               # Never more bytes than came in (no amplification); old ends ignore it.
+                j = json.dumps(dict(rx=st['rx'], pkts_in=st['pkts_in'], lost_in=st['lost_in'], filled=st['filled'], dup_in=st['dup_in'],
+                                    tx=st['tx'], resent=st['resent'], copies=st['copies'], srtt_ms=round(c.core.srtt * 1000), storm=int(c.core.fuse_tripped), **c.tst),
+                               separators=(',', ':')).encode()
+                if 7 + len(j) <= len(d): self.tr.sendto(du_proto.hdr(STATA, cid) + j, addr)
+            return
         if t == SYN:
             if not c:
                 if addr[0] not in TRUSTED and sum(1 for x in self.conns.values() if x.addr[0] == addr[0]) >= PER_IP: return

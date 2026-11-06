@@ -40,6 +40,14 @@ other node's udp_gateway does not answer (RELAY_PEER_DU=0: TCP only). The same w
 The hop adds the round trip between the two nodes (Poland - Germany ~19 ms, Germany - Moscow ~47, Poland - Moscow ~54) and
 about a millisecond in each gateway; no second tick - only the session's node ticks, the passing node carries frames as
 they come.
+Connection test (DWRT, launcher 1.4.15, 06.11.2026): "DWRT" + version (1) + players (2 / 4 / 6) + seconds (<= 90) + flags +
+2 reserved, then the game's own stream - hello, turns 0x17 ten a second, pings 0x14, proxy messages 0x10 to the other players.
+Nothing of it touches the real sessions (never in `sessions`, DWRQ says N): the player is number 1 of a session of its own and
+the others are virtual players here - each puts a turn into every 100 ms tick, sends the player proxy messages and now and
+then a big 0x13 at the rates of a real 1v1 / 2v2 / 3v3, and answers every proxy message part it gets at once (so the launcher
+sees the way there and back, and that each part reached the right player only). At the end one "7e" + JSON frame with what
+came up here (turns, their stalls, proxy parts). udp_gateway puts the player's address in ("DWRU" + IPv4, only from loopback):
+at most TEST_ADDR_LIVE tests at once and TEST_ADDR_RUNS in TEST_ADDR_WINDOW s from one address, TEST_LIVE_MAX on the node.
 Usage: battle_relay.py [port] [bind]   (default 47100 127.0.0.1)
 Peers silent for IDLE seconds are dropped (the game pings every ~3 s).
 Reconnect (06.11.2026, feature/relay-reconnect, NOT deployed): the game's relay client reconnects on its own when its
@@ -523,6 +531,13 @@ async def handle(r, w):
         await q.put(None)
     try:
         pre = await asyncio.wait_for(r.readexactly(4), 15)
+        if pre in (b'DWRT', b'DWRU'):                   # the launcher's connection test: a session of its own, never a real one
+            ip = a[0]
+            if pre == b'DWRU':                          # through our udp_gateway: it put the player's address in
+                tag = await asyncio.wait_for(r.readexactly(4), 15)
+                if ipaddress.ip_address(a[0]).is_loopback: ip = socket.inet_ntoa(tag)
+            prm = await asyncio.wait_for(r.readexactly(6), 15)
+            await test_run(r, w, ip, prm); return
         if pre == b'DWRQ':                              # another server of ours asks: is this session here?
             sid = await asyncio.wait_for(r.readexactly(4), 5)
             w.write(b'Y' if sid in sessions else b'N'); await w.drain(); w.close(); return
@@ -609,6 +624,165 @@ async def handle(r, w):
             p.sess.leave(p)
         try: w.close()
         except Exception: pass
+
+
+# ---------------------------------------------------------------- the launcher's connection test (DWRT, 06.11.2026)
+TEST_SECS_MAX = 90                                   # s: a test never runs longer
+TEST_IDLE = 10                                       # s without a frame from the player: over
+TEST_LIVE_MAX = int(os.environ.get('RELAY_TEST_MAX', '32'))   # tests at once on this node
+TEST_ADDR_LIVE, TEST_ADDR_RUNS, TEST_ADDR_WINDOW = 2, 12, 600  # per player address: at once; per window (s)
+# what a virtual player sends the real one, per second: proxy messages (RLink ProxyMessage 0x10) and big 0x13 messages. From the
+# Relic captures of 27.10 (1v1: ~0.2 proxy messages/s from the other player, sizes p50 44 B, p95 ~540 B; 0x13 up to 1138 B) and
+# the warnings.txt counters of a 3v3 through Relic (03.11: 566 proxy messages/min received from 5 players = ~1.9/s each)
+TEST_RATES = {2: (0.2, 0.02), 4: (1.2, 0.04), 6: (1.9, 0.05)}
+_tests = dict(live=0, addr_live={}, addr_runs={})
+
+
+def _test_admit(ip):
+    """None = the test may run, else why not; the caller releases with _test_done(ip)"""
+    now = time.time(); local = ipaddress.ip_address(ip).is_loopback
+    runs = [t for t in _tests['addr_runs'].get(ip, []) if now - t < TEST_ADDR_WINDOW]
+    if _tests['live'] >= TEST_LIVE_MAX: return 'busy'
+    if not local and _tests['addr_live'].get(ip, 0) >= TEST_ADDR_LIVE: return 'running'
+    if not local and len(runs) >= TEST_ADDR_RUNS: return 'too_often'
+    _tests['addr_runs'][ip] = runs + [now]
+    if len(_tests['addr_runs']) > 4096: _tests['addr_runs'] = {k: v for k, v in _tests['addr_runs'].items() if now - v[-1] < TEST_ADDR_WINDOW}
+    _tests['live'] += 1; _tests['addr_live'][ip] = _tests['addr_live'].get(ip, 0) + 1
+    return None
+
+
+def _test_done(ip):
+    _tests['live'] -= 1
+    n = _tests['addr_live'].get(ip, 1) - 1
+    if n > 0: _tests['addr_live'][ip] = n
+    else: _tests['addr_live'].pop(ip, None)
+
+
+def _frame(m): return len(m).to_bytes(2, 'big') + m
+
+
+def _vproxy(src, seq, size):
+    """a virtual player's proxy message to the player (number 1): one dst, its 15-byte info as the game's"""
+    data = b'NV' + struct.pack('<IQ', seq, int(time.monotonic() * 1e6)) + b'\x5a' * max(0, size - 14)
+    body = data + struct.pack('<BBIIB4x', src, 1, seq, 0, 0)
+    return bytes([0x10, src, 1, 0, 1]) + len(body).to_bytes(2, 'little') + body
+
+
+async def test_run(r, w, ip, prm):
+    """the player's side is the real game stream; the n - 1 others are here. See the docstring (DWRT)."""
+    import random
+    n = prm[1] if prm[1] in (2, 4, 6) else 2
+    secs = max(5, min(TEST_SECS_MAX, prm[2] or 60))
+    why = _test_admit(ip)
+    if why:
+        log(ev='test_refused', ip=ip, why=why, live=_tests['live'])
+        try: w.write(_frame(b'\x7e' + json.dumps({'v': 1, 'refused': why}).encode())); await w.drain()
+        except Exception: pass
+        await _test_close(r, w)
+        return
+    t0 = time.monotonic(); end = t0 + secs
+    st = dict(turns=0, gaps=0, max_gap_ms=0, proxy_in=0, parts_in=0, parts_wrong=0, pings=0, msgs=0, bytes_in=0, bytes_out=0,
+              ticks=0, late_ticks=0, max_late_ms=0, vproxy=0, vbig=0, reflected=0, hello=0)
+    queue = []; last_turn = [0.0]; done = asyncio.Event()
+
+    def send(m):
+        if w.is_closing(): return
+        b = _frame(m); w.write(b); st['bytes_out'] += len(b)
+
+    async def ticker():                                   # as Session.tick_loop: every 100 ms one 0x0a to the player
+        nxt = time.monotonic(); vseq = 0
+        while not done.is_set():
+            nxt += TICK
+            await asyncio.sleep(max(0, nxt - time.monotonic()))
+            late = time.monotonic() - nxt
+            if late > 0.03: st['late_ticks'] += 1
+            st['max_late_ms'] = max(st['max_late_ms'], round(late * 1000))
+            if late > 0.5: nxt = time.monotonic()
+            q = queue[:]; del queue[:]
+            for i in range(2, n + 1):                    # every virtual player's turn: 16 bytes, as the game's
+                q.append((i, (16).to_bytes(2, 'little') + b'VT' + struct.pack('<IQ', vseq, int(time.monotonic() * 1e6)) + b'\0\0'))
+            vseq += 1
+            silent = [] if any(i == 1 for i, _ in q) else [1]
+            m = bytearray(b'\x0a\xfe') + bytes([len(q)])
+            for i, d in q: m += bytes([i]) + d
+            m += bytes([len(silent)]) + bytes(silent)
+            send(bytes(m)); st['ticks'] += 1
+
+    async def virtual(src):                               # one virtual player's own messages to the player
+        rate, big = TEST_RATES[n]; seq = 0
+        while not done.is_set():
+            await asyncio.sleep(random.expovariate(rate + big))
+            if done.is_set(): break
+            if random.random() < big / (rate + big):
+                send(bytes([0x13, 1, src]) + b'\x0f\x07' + b'\x5a' * 1100); st['vbig'] += 1
+            else:
+                x = random.random(); size = 44 if x < 0.8 else (120 if x < 0.95 else 540)
+                send(_vproxy(src, seq, size)); seq += 1; st['vproxy'] += 1
+
+    def on_msg(m):
+        st['msgs'] += 1; st['bytes_in'] += len(m) + 2
+        if not m: return
+        t = m[0]
+        if t == 0x15: st['hello'] += 1; send(m); return
+        if t == 0x14: st['pings'] += 1; send(m); return
+        if t in (0x09, 0x17):
+            d = m[2:] if t == 0x09 else m[2 + 8 * m[1]:][2:] if m[2 + 8 * m[1]:][:1] == b'\x09' else None
+            if d is None: return
+            queue.append((1, d)); st['turns'] += 1
+            now = time.monotonic()
+            if last_turn[0]:
+                g = now - last_turn[0]
+                if g > GAP: st['gaps'] += 1
+                st['max_gap_ms'] = max(st['max_gap_ms'], round(g * 1000))
+            last_turn[0] = now
+            return
+        if t == 0x10:
+            parts = proxy_split(m); st['proxy_in'] += 1
+            for dst, one in parts or []:
+                st['parts_in'] += 1
+                if not 2 <= dst <= n: st['parts_wrong'] += 1; continue
+                body = one[7:]                                      # a one-dst frame: 10 src 01 00 dst len(2) body
+                if body[:2] != b'NP' or len(body) < 14 + 15: st['parts_wrong'] += 1; continue
+                rb = b'NR' + body[2:14] + struct.pack('<BBIIB4x', dst, 1, 0, 0, 0)
+                send(bytes([0x10, dst, 1, 0, 1]) + len(rb).to_bytes(2, 'little') + rb); st['reflected'] += 1
+            return
+
+    tasks = [asyncio.ensure_future(ticker())] + [asyncio.ensure_future(virtual(i)) for i in range(2, n + 1)]
+    log(ev='test_start', ip=ip, players=n, secs=secs, live=_tests['live'])
+    why = 'time'
+    try:
+        while True:
+            left = end - time.monotonic()
+            if left <= 0: break
+            try:
+                k = int.from_bytes(await asyncio.wait_for(r.readexactly(2), min(left, TEST_IDLE)), 'big')
+                on_msg(await asyncio.wait_for(r.readexactly(k), TEST_IDLE) if k else b'')
+            except asyncio.TimeoutError:
+                if time.monotonic() < end: why = 'idle'; break
+            await w.drain()
+    except (asyncio.IncompleteReadError, ConnectionError): why = 'player'
+    except Exception as e: why = 'error'; log(ev='error', peer=ip, err=repr(e), test=1)
+    finally:
+        done.set()
+        for t in tasks: t.cancel()
+        _test_done(ip)
+    st.update(v=1, players=n, secs=round(time.monotonic() - t0, 1), end=why)
+    log(ev='test_end', ip=ip, **st)
+    if why == 'time':
+        try: send(b'\x7e' + json.dumps(st).encode()); await w.drain()
+        except Exception: pass
+    await _test_close(r, w)
+
+
+async def _test_close(r, w):
+    """after the last frame the player closes (up to 5 s): our close right behind it would race it - udp_gateway sends its FIN at
+    once and a FIN that passes the last data packet on the way loses it; and a close with unread bytes in the socket sends RST"""
+    try:
+        end = time.monotonic() + 5
+        while time.monotonic() < end and await asyncio.wait_for(r.read(65536), end - time.monotonic()): pass
+    except Exception: pass
+    try: w.close()
+    except Exception: pass
 
 
 async def main():
