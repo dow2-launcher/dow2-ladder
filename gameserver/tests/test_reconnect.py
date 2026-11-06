@@ -108,7 +108,7 @@ async def notices(port):
     rb, wb = await asyncio.open_connection('127.0.0.1', port); wb.write(b'DWR5' + b'\0' * 6 + hello(B, 10))
     await asyncio.sleep(0.5); wa.close(); wb.close(); t.cancel()
     away = [x for x in got if int.from_bytes(x[2:4], 'big') != 0xFFFF]
-    assert away and away[0][1] == 2 and 190 <= int.from_bytes(away[0][2:4], 'big') <= 200, [x.hex() for x in got]
+    assert away and away[0][1] == 2 and 160 <= int.from_bytes(away[0][2:4], "big") <= 170, [x.hex() for x in got]
     assert away[0][7:7 + away[0][6]].decode() == 'stand two', away[0]
     assert got[-1][1] == 2 and int.from_bytes(got[-1][2:4], 'big') == 0xFFFF, 'the clear notice when B is back'
     print('notices ok: %d away notices, name %r, then the clear one' % (len(away), away[0][7:7 + away[0][6]].decode()))
