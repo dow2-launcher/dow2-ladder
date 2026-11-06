@@ -73,9 +73,12 @@ def explain(sig):
 NT_NODE = {'15.220.68.107': 'Польша', '116.202.106.150': 'Германия', '83.217.192.34': 'Москва', '91.107.122.186': 'Москва 2'}
 NT_V = {'excellent': 'отлично', 'playable': 'играбельно', 'laggy': 'будут лаги', 'down': 'не работает'}
 NT_WHY = {'no_answer': 'не отвечает', 'cut': 'обрыв', 'no_flow': 'почти ничего не вернулось', 'tcp_only': 'UDP нет, только TCP', 'high_ping': 'высокий пинг',
-          'ping': 'пинг >80', 'spikes': 'скачки', 'pauses': 'паузы', 'loss': 'потери', 'jitter': 'джиттер', 'lost_msgs': 'терялись сообщения', 'cancelled': 'остановлено'}
+          'ping': 'пинг >80', 'spikes': 'скачки', 'pauses': 'паузы', 'loss': 'потери', 'jitter': 'джиттер', 'lost_msgs': 'терялись сообщения', 'cancelled': 'остановлено',
+          'stall': 'застревала', 'loss_up': 'теряются пакеты вверх', 'stream_blocked': 'поток режется (DPI)', 'relic_closed': 'часть серверов Relic молчит',
+          'relic_api_none': 'API Relic не отвечает', 'relic_api_cut': 'поток API Relic обрывается'}
 NT_HINT = {'zero_ping': 'ответ за 0 мс (VPN/обход/антивирус отвечает за сервер)', 'udp_blocked': 'UDP нет, TCP есть', 'reorder': 'сильные перестановки (VPN?)',
-           'stream_cut': 'поток обрывается (DPI)', 'all_down': 'ни один узел не отвечает'}
+           'stream_cut': 'поток обрывается (DPI)', 'all_down': 'ни один узел не отвечает',
+           'tcp_local': 'TCP отвечают мгновенно (VPN/прокси перехватывает)'}
 
 
 def nettest_lines(text):
@@ -87,20 +90,25 @@ def nettest_lines(text):
         nodes = []
         for n in r.get('nodes') or []:
             name = NT_NODE.get(n.get('ip'), n.get('name') or n.get('ip'))
-            rt = (n.get('rtt') or {}).get('avg'); tk = n.get('ticks') or {}; du = n.get('du') or {}
+            rt = (n.get('rtt') or {}).get('p50') or (n.get('rtt') or {}).get('avg'); tk = n.get('ticks') or {}; du = n.get('du') or {}
             pz = (tk.get('pauses') or 0) + ((n.get('server') or {}).get('gaps') or 0)
             loss = max(du.get('up_loss_pct') or 0, du.get('down_loss_pct') or 0)
             bits = ['%d мс' % rt] if rt else []
             if pz: bits.append('пауз %d (макс %d мс)' % (pz, tk.get('max_gap_ms') or 0))
             if loss >= 1: bits.append('потери %g%%' % loss)
             if n.get('transport') == 'tcp': bits.append('по TCP')
+            if n.get('stall_ms') or ((n.get('rtt') or {}).get('max') or 0) > 1000:
+                bits.append('застревала до %d с' % round(max(n.get('stall_ms') or 0, (n.get('rtt') or {}).get('max') or 0) / 1000))
             why = [NT_WHY.get(w, w) for w in n.get('why') or [] if n.get('verdict') != 'excellent']
             nodes.append('%s %s%s%s%s' % (name, NT_V.get(n.get('verdict'), n.get('verdict')), ' ' + ', '.join(bits) if bits else '',
                                           ' (' + ', '.join(why) + ')' if why and n.get('verdict') != 'excellent' else '', ' ★' if n.get('pick') else ''))
         when = time.strftime('%d.%m %H:%M', time.gmtime(r.get('ts') or 0))
         hints = '; '.join('%s: %s' % (NT_HINT.get(h.get('code'), h.get('code')), ', '.join(NT_NODE.get(x, x) for x in h.get('nodes') or [])) for h in r.get('hints') or [])
         mode = {'1v1': '1×1', '2v2': '2×2', '3v3': '3×3'}.get(r.get('mode'), r.get('mode'))
-        out.append('%s %s %s (%s UTC, лаунчер %s): %s%s' % ('проверка связи' if i == 0 else '  прошлая', mode, 'с VPN' if r.get('vpn') else 'без VPN', when,
+        rl = r.get('relic')
+        if rl: nodes.append('Relic напрямую %s%s, серверов %s/%s, API %s/5' % (NT_V.get(rl.get('verdict'), rl.get('verdict')), ' %d мс' % rl['ms'] if rl.get('ms') else '',
+                                                                       rl.get('open'), len(rl.get('relays') or []), (rl.get('api') or {}).get('got')))
+        out.append('%s %s %s (%s UTC, лаунчер %s): %s%s' % ('проверка связи' if i == 0 else '  прошлая', mode, 'свой VPN вкл.' if r.get('vpn') else 'свой VPN выкл.', when,
                    r.get('launcher', '?'), '; '.join(nodes) or 'нет узлов', ' · ' + hints if hints else ''))
     return out
 
