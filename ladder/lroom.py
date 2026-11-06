@@ -190,7 +190,7 @@ def summary(r):
     cat = L._catalog()
     return {'id': r['id'], 'name': r['name'], 'game': r['game'], 'ver': r['ver'], 'mode': r['mode'], 'map': r['map'],
             'map_name': (cat.get(r['map']) or {}).get('name') or r['map'], 'state': r['state'],
-            'players': len(_members(r)), 'cap': 2 * _size(r), 'owner_name': _name(r['owner']),
+            'players': len(_members(r)), 'cap': 2 * _size(r), 'owner_name': _name(r['owner']), 'owner': r['owner'],
             'names': [_name(s) for s in _members(r)]}
 
 

@@ -1359,11 +1359,14 @@ def live_view():
         busy = {x['steam'] for m in ingame for x in m['team1'] + m['team2']} | {w for m in ingame for w in m['watchers']}
         searching = [{'steam': p['steam'], 'mode': p['mode'], 'race': p.get('race'), 'since': int(p['ts'])}
                      for p in sorted(MM.values(), key=lambda p: p['ts']) if p['state'] == 'searching' and p['steam'] not in busy]
+        # 06.11.2026 (owner: "a room made in the launcher is not seen in the Online block"): the launcher rooms, as /lroom/list has
+        # them; their changes go on the stream as before (lroom / lroom_gone), this is for the snapshot. Older launchers ignore it.
+        lrooms = lroom.listing()['rooms']
     busy |= {p['steam'] for p in searching}
     launcher = [{'steam': s, 'state': st} for s, st in users.in_launcher(now) if s not in busy]
     # now: the server's clock, so a launcher whose PC clock is off still counts the minutes right
-    return {'now': int(now), 'searching': searching, 'ingame': ingame, 'launcher': launcher,
-            'users': {s: users.card(s) for s in sorted(busy | {p['steam'] for p in launcher})}}
+    return {'now': int(now), 'searching': searching, 'ingame': ingame, 'launcher': launcher, 'lrooms': lrooms,
+            'users': {s: users.card(s) for s in sorted(busy | {p['steam'] for p in launcher} | {r['owner'] for r in lrooms})}}
 
 # ---------- rematch on Continue (MMFind 0.43, owner 03.11.2026): after a match from an ORDINARY Custom Games lobby ----------
 # The game's own post-game Continue only throws everyone to the main menu (broken by Relic ~2016). MMFind takes the click and
