@@ -128,27 +128,40 @@ def _net(r):
     one, the node the match would use now (the same rule as the native automatch: of the nodes every player reaches - straight
     or through his nearest node - the one with the lowest worst delay; a tie goes by relays.json) and why"""
     ro = L.relay_order(); links = L._relay_links(); steams = _members(r)
+    av = L._avoid_of(steams)                     # 06.11.2026 node quality: the nodes bad for a player (nodeq.py) - not for him
+    nq = {}
+    for s in steams:
+        try: nq[s] = L.nodeq.public(s)
+        except Exception: nq[s] = {}
     rows, all_have = [], True
     for s in steams:
         p = _pings_of(r, s)
         if not p: all_have = False
         cost = {h: L._relay_cost(p, h, ro, links) if p else (None, None) for h in ro}
+        qcost = {h: L._relay_cost(p, h, ro, links, av.get(s) or frozenset()) if p else (None, None) for h in ro}
         rows.append({'steam': s, 'ping': {h: (r['pings'].get(s) or {}).get('p', {}).get(h) for h in ro},
                      'raw': (r['pings'].get(s) or {}).get('raw') or {},
                      'chain': bool((r['pings'].get(s) or {}).get('chain')), 'age': int(time.time() - (r['pings'].get(s) or {}).get('t', 0)) if r['pings'].get(s) else None,
                      'cost': {h: (round(c) if c is not None else None) for h, (c, v) in cost.items()},
-                     'via': {h: v for h, (c, v) in cost.items() if v}})
-    pick, worst = '', None
+                     'qcost': {h: (round(c) if c is not None else None) for h, (c, v) in qcost.items()},
+                     'via': {h: v for h, (c, v) in cost.items() if v},
+                     'nq': {h: m for h, m in (nq.get(s) or {}).items() if h in ro}})
+    pick, worst, ignored = '', None, False
     if steams and all_have:
-        best = None
-        for h in ro:
-            cs = [row['cost'][h] for row in rows]
-            if any(c is None for c in cs): continue
-            k = (max(cs), ro.index(h))
-            if best is None or k < best[0]: best = (k, h)
+        def best_of(key):
+            best = None
+            for h in ro:
+                cs = [row[key][h] for row in rows]
+                if any(c is None for c in cs): continue
+                k = (max(cs), ro.index(h))
+                if best is None or k < best[0]: best = (k, h)
+            return best
+        best = best_of('qcost')
+        if not best and any(av.values()):        # nothing fits without the bad nodes: the marks are ignored for this match
+            best = best_of('cost'); ignored = bool(best)
         if best: pick, worst = best[1], best[0][0]
     why = 'measuring' if steams and not all_have else 'ok' if pick else 'none' if steams else ''
-    return {'nodes': _nodes(), 'rows': rows, 'pick': pick, 'worst': worst, 'why': why}
+    return {'nodes': _nodes(), 'rows': rows, 'pick': pick, 'worst': worst, 'why': why, 'nq_ignored': ignored}
 
 
 # ---------- the view everybody gets (stream event "lroom") ----------
@@ -219,9 +232,10 @@ def _launch(r, now):
     """the countdown is over: the server the match takes, its host, the teams, a ticket per player"""
     net = _net(r); n = _size(r); ro = L.relay_order(); links = L._relay_links()
     pick = net['pick']
+    av = {} if net.get('nq_ignored') else L._avoid_of(_members(r))
     def cost(s):
         if not pick: return 0
-        c, _ = L._relay_cost(_pings_of(r, s), pick, ro, links)
+        c, _ = L._relay_cost(_pings_of(r, s), pick, ro, links, av.get(s) or frozenset())
         return c if c is not None else 99999
     order = _members(r)
     host = min(order, key=lambda s: (cost(s), s != r['owner'], order.index(s)))

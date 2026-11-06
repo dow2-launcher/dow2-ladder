@@ -125,7 +125,9 @@ class Conn:
         except Exception as e:
             log(ev='br_fail', cid=self.cid, peer=self.addr[0], err=repr(e)); self.core.close('br_fail'); return
         self.ready = True; self.gw.tr.sendto(self.synack(), self.addr)
-        log(ev='open', cid=self.cid, peer='%s:%d' % self.addr, ver=self.ver)
+        try: self.lport = self.w.get_extra_info('sockname')[1]     # battle_relay sees this connection as 127.0.0.1:<lport>
+        except Exception: self.lport = 0
+        log(ev='open', cid=self.cid, peer='%s:%d' % self.addr, ver=self.ver, lport=self.lport)
         try:
             while not self.closed:
                 if not self.core.room():                    # window full: battle_relay waits in its TCP socket (back pressure)
@@ -142,7 +144,7 @@ class Conn:
         except Exception: pass
         self.gw.conns.pop(self.cid, None)
         st = self.core.stats
-        log(ev='close', cid=self.cid, peer=self.addr[0], secs=round(time.time() - self.started, 1), srtt_ms=round(self.core.srtt * 1000),
+        log(ev='close', cid=self.cid, peer=self.addr[0], lport=getattr(self, 'lport', 0), secs=round(time.time() - self.started, 1), srtt_ms=round(self.core.srtt * 1000),
             by=by, storm=int(self.core.fuse_tripped), **st)
 
 

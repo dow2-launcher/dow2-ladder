@@ -1,0 +1,9 @@
+[Unit]
+Description=nodeq_collect.py every 5 minutes (node quality per player from real matches)
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

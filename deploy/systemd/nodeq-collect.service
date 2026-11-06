@@ -1,0 +1,8 @@
+[Unit]
+Description=Real matches into the node quality per player (ladder/nodeq_collect.py: the nodes leave + gateway close lines -> ladder nq/match)
+After=network-online.target dow2-ladder.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /srv/ladder/app/nodeq_collect.py
+TimeoutStartSec=600

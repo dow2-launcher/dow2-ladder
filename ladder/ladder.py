@@ -8,6 +8,7 @@ import json, os, re, sqlite3, struct, threading, time, math, base64, zlib, trace
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from concurrent.futures import ThreadPoolExecutor
 import stream, users                                # launcher users / presence, the live stream (SSE)
+import nodeq                                        # node quality per player: the nodes not used for him (06.11.2026)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB = ROOT + '/data/ladder.sqlite'
@@ -659,28 +660,57 @@ def _relay_links():   # {from ip: {to ip: rtt ms}}, measured from the node that 
         pass
     return _LINKS['links']
 
-def _relay_cost(x, h, ro, links):
+def _relay_cost(x, h, ro, links, avoid=frozenset()):
     """a player's delay to the session on node h: its ping when it reaches h; a Relay 22 player that doesn't goes through its
-    nearest node that does answer (as Relay.dll picks it) + that node's round trip to h; None = it can't play there"""
-    if x.get(h, -1) > 0: return x[h], None
+    nearest node that does answer (as Relay.dll picks it) + that node's round trip to h; None = it can't play there.
+    06.11.2026 node quality (nodeq.py): avoid = the nodes bad for this player (losses, stalls, a cut / DPI by his recent
+    measurements). Such a node is no node for him: if he reaches it, his Relay.dll would connect there straight (it does not know
+    the marks) - so None; if he does not, the chain stays, but only when the nearest node his Relay.dll takes is not a bad one"""
+    if x.get(h, -1) > 0: return (None, None) if h in avoid else (x[h], None)
     if CHAIN_V not in x: return None, None
     near = sorted((x[y], ro.index(y), y) for y in ro if y != h and x.get(y, -1) > 0)
     if not near: return None, None
     via = near[0][2]; l = links.get(via, {}).get(h)
+    if via in avoid: return None, None
     return (x[via] + l + CHAIN_EXTRA, via) if l else (None, None)
 
+def _avoid_of(steams):   # {steam: nodes bad for him} (nodeq.py); a failure there must never stop matchmaking
+    out = {}
+    for s in steams:
+        try: out[s] = nodeq.avoid(s)
+        except Exception as e: print('mm: nodeq %s: %r' % (s, e), flush=True); out[s] = frozenset()
+    return out
+
 def _best_relay(steams, chain=False):
+    # 06.11.2026 node quality (owner: "keep it and openly offer not to use that server for that player"): first without the nodes
+    # that are bad for one of the players (nodeq.py), as if he could not reach them; when that leaves nothing, the match is
+    # placed as before (a match on a poor node beats none)
+    av = _avoid_of(steams)
+    if not any(av.values()): return _best_relay_q(steams, chain, {})
+    r = _best_relay_q(steams, chain, av)
+    if r:
+        r0 = _best_relay_q(steams, chain, {})
+        if r0 != r: print('mm: node quality - %r instead of %r (avoid %s)' % (r, r0, {s: sorted(a) for s, a in av.items() if a}), flush=True)
+        return r
+    r = _best_relay_q(steams, chain, {})
+    print('mm: node quality - nothing fits without %s, the marks ignored: %r' % ({s: sorted(a) for s, a in av.items() if a}, r), flush=True)
+    return r
+
+def _best_relay_q(steams, chain, av):
     # Relay 9: every player pinged our game servers (relay_ping {ip: ms}, -1 = no answer). The match goes to the first server
     # of relays.json that every player reaches; none =  (play on Relic). 0 ms counts as no answer: no server is that close
     # over the internet, it is something on the player own PC (VPN, a blocking bypass, an antivirus) answering for it -
     # 29.10 a player from Ukraine "reached" Moscow that way and the match never connected. Someone without pings (an older
     # add-on): nothing is known about what he reaches - Relic too.
     pings = [(MM.get(s) or {}).get('ping') or {} for s in steams]
+    avs = [av.get(s) or frozenset() for s in steams]
+    nop = frozenset()                                   # nodes bad for a player who has no pings (a party member): not for the match
     if chain:
         # 05.11.2026: a party member has no pings of his own (only the one who searched sends them) - every party match came back
         # '' and own_lobby put it on the first node (Poland), so Russian parties played through a chain Moscow -> Poland and lagged.
         # The players with pings decide; one without plays where they play (Relay 22 chains him if he can not reach it)
-        pings = [x for x in pings if x]
+        nop = frozenset().union(*[a for x, a in zip(pings, avs) if not x])
+        avs = [a for x, a in zip(pings, avs) if x]; pings = [x for x in pings if x]
     if not pings or not all(pings): return ''
     # Relay 13: a player who picked the server in the launcher pings only that one - the match goes there (the others'
     # Relay.dll connect where the matchmaker says; our servers pass a guest on to the one that has the match)
@@ -695,17 +725,31 @@ def _best_relay(steams, chain=False):
         # (Relay.dll 22 "DWR4", the nodes pass it on over our UDP tunnel), so a node fits when every player reaches it directly
         # or through a chain; the one with the lowest worst delay wins, a chain counting ping to his node + node -> node + 10 ms
         links = _relay_links(); best = None
+        who = [s_ for s_ in steams if (MM.get(s_) or {}).get('ping')]
         for h in ro:
-            cost = [_relay_cost(x, h, ro, links) for x in pings]
+            if h in nop: continue
+            cost = [_relay_cost(x, h, ro, links, a) for x, a in zip(pings, avs)]
             if any(c is None for c, _ in cost): continue
             k = (max(c for c, _ in cost), ro.index(h))
-            if best is None or k < best[0]: best = (k, h, [(s_, v, round(c)) for s_, (c, v) in zip(steams, cost) if v])
+            if best is None or k < best[0]: best = (k, h, [(s_, v, round(c)) for s_, (c, v) in zip(who, cost) if v])
         if not best: return ''
         if best[2]: print('mm: relay %s worst %d ms, chains %s' % (best[1], best[0][0], best[2]), flush=True)
         return best[1]
-    ok = [h for h in ro if all(x.get(h, -1) > 0 for x in pings)]
+    ok = [h for h in ro if all(x.get(h, -1) > 0 and h not in a for x, a in zip(pings, avs))]
     if not ok: return ''
     return min(ok, key=lambda h: (max(x[h] for x in pings), ro.index(h)))
+
+def nq_api(verb, steam, d):
+    """the launcher (its community session token): 'test' - a finished connection test, kept silently (launcher 1.4.23+);
+    'marks' - the nodes not used for this player and why; 'force' {ip, on} - "use it anyway" for 24 h (on=false: undo)"""
+    known = set(relay_order())
+    if verb == 'test': nodeq.add_test(steam, d, known)
+    elif verb == 'force':
+        if str(d.get('ip') or '') not in known: return {'ok': False, 'error': 'node'}
+        nodeq.force(steam, d.get('ip'), bool(d.get('on', True)))
+        print('nq: %s %s %s' % (steam, 'forces' if d.get('on', True) else 'unforces', d.get('ip')), flush=True)
+    elif verb != 'marks': return {'ok': False, 'error': 'verb'}
+    return {'ok': True, 'marks': nodeq.public(steam), 'force_hours': nodeq.FORCE_SECS // 3600}
 
 def _player_view(p):  # под MM_LOCK: что вернуть игроку в poll
     if p.get('native'):                                  # MMFind 0.38 watches a native search (the game searches by itself)
@@ -1996,6 +2040,16 @@ class H(BaseHTTPRequestHandler):
                 steam = community._session(d.get('token') or self.headers.get('X-Token'))
                 if not steam: return self.send(200, {'ok': False, 'error': 'auth'}, cache=0)
                 with MM_LOCK: return self.send(200, lroom.api(u.path[len('/ladder/api/lroom/'):][:16], str(steam), d), cache=0)
+            if u.path.startswith('/ladder/api/nq/'):     # node quality per player (nodeq.py, 06.11.2026)
+                d = self._body(); d = d if isinstance(d, dict) else {}
+                verb = u.path[len('/ladder/api/nq/'):][:16]
+                if verb == 'match':                      # deploy/nodeq_collect.py on this server: its token, never through nginx
+                    if self.headers.get('X-Real-IP') or self.headers.get('X-Forwarded-For') or not _nm_token_ok(self.headers.get('X-NM-Token')):
+                        return self.send(403, {'error': 'token'}, cache=0)
+                    return self.send(200, {'ok': True, 'added': nodeq.add_matches(d.get('samples'), set(relay_order()))}, cache=0)
+                steam = community._session(d.get('token') or self.headers.get('X-Token'))
+                if not steam: return self.send(200, {'ok': False, 'error': 'auth'}, cache=0)
+                return self.send(200, nq_api(verb, str(steam), d), cache=0)
             if u.path.startswith('/ladder/api/nm/'):     # own_lobby only: its token, and never through nginx (which adds X-Real-IP)
                 if self.headers.get('X-Real-IP') or self.headers.get('X-Forwarded-For') or not _nm_token_ok(self.headers.get('X-NM-Token')):
                     return self.send(403, {'error': 'token'}, cache=0)
