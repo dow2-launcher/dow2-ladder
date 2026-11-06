@@ -144,6 +144,7 @@ class Session:
         self.history = []                                 # every tick sent (0x0a frames), for players who reconnect
         self.rx = {}                                      # player id -> game messages (0x09 / 0x17) received from him
         self.away = {}                                    # player id -> (his number, until): connection broke mid-game
+        self.gone = set()                                 # player ids whose GRACE ran out: the others have dropped them
         self.started = time.time(); self.ticks = 0; self.turn_msgs = 0; self.late = 0; self.max_late = 0.0
 
     def join(self, p):
@@ -167,11 +168,14 @@ class Session:
         if self.ticks and GRACE > 0 and p.pid and not any(q.pid == p.pid for q in self.peers):
             self.away[p.pid] = (p.idx, time.monotonic() + GRACE)
             log(ev='away', sid=int.from_bytes(self.sid, 'little'), idx=p.idx, peer=p.addr, grace=GRACE)
-        if not self.peers:
-            if self.ticker: self.ticker.cancel()
-            sessions.pop(self.sid, None)
-            log(ev='session_end', sid=int.from_bytes(self.sid, 'little'), secs=round(time.time() - self.started), ticks=self.ticks, turns=self.turn_msgs,
-                late_ticks=self.late, max_late_ms=round(self.max_late * 1000))
+        if not self.peers and not self.away: self.end()   # everyone away (the node's own network?): the ticks go on until GRACE
+
+    def end(self):
+        if sessions.get(self.sid) is not self: return
+        if self.ticker and self.ticker is not asyncio.current_task(): self.ticker.cancel()
+        sessions.pop(self.sid, None)
+        log(ev='session_end', sid=int.from_bytes(self.sid, 'little'), secs=round(time.time() - self.started), ticks=self.ticks, turns=self.turn_msgs,
+            late_ticks=self.late, max_late_ms=round(self.max_late * 1000))
 
     def queue_turn(self, p, data):
         self.queue.append((p.idx, data)); self.turn_msgs += 1
@@ -185,7 +189,7 @@ class Session:
 
     async def tick_loop(self):
         nxt = time.monotonic()
-        while self.peers:
+        while self.peers or self.away:
             nxt += TICK
             await asyncio.sleep(max(0, nxt - time.monotonic()))
             late = time.monotonic() - nxt                    # the tick went out this much after its time
@@ -200,7 +204,7 @@ class Session:
                 if until > now:
                     if i not in sent and i not in silent: silent.append(i)
                 else:
-                    del self.away[pid]; log(ev='away_expired', sid=int.from_bytes(self.sid, 'little'), idx=i)
+                    del self.away[pid]; self.gone.add(pid); log(ev='away_expired', sid=int.from_bytes(self.sid, 'little'), idx=i)
             m = bytearray(b'\x0a\xfe') + bytes([len(q)])
             for i, d in q: m += bytes([i]) + d
             m += bytes([len(silent)]) + bytes(silent)
@@ -215,6 +219,7 @@ class Session:
                 except Exception: pass
             if self.ticks % 50 == 0:
                 for p in self.peers: p.stats()                # the worst rtt is sampled every 5 s
+        if not self.peers: self.end()                         # the last away player's GRACE ran out
 
 
 def proxy_split(m):
@@ -281,6 +286,12 @@ def handle_msg(p, m, echo=True):
     if t == 0x15:                                                   # hello: join the session
         sid = m[1:5]
         again = len(m) >= 22 and m[17] == 2                         # a reconnect: the game frames it has got follow
+        old = sessions.get(sid)
+        if again and p.sess is None and (old is None or m[9:17] in old.gone):
+            # too late: the session is over or the others have dropped him (a game that replays ticks without itself crashes,
+            # stand test 06.11.2026) - the connection is closed, the game reports the lost connection itself
+            log(ev='rejoin_refused', sid=int.from_bytes(sid, 'little'), peer=p.addr, why='no session' if old is None else 'grace over')
+            p.w.close(); return
         if p.sess is None:
             s = sessions.get(sid) or sessions.setdefault(sid, Session(sid))
             p.pid = m[9:17]; s.join(p)

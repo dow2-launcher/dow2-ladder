@@ -63,3 +63,30 @@ if __name__ == '__main__':
     finally:
         srv.terminate(); out = srv.communicate(timeout=5)[0].decode(errors='replace')
         print('\n'.join(l for l in out.splitlines() if 'rejoin' in l or 'error' in l or 'away' in l or 'back' in l))
+
+
+async def too_late(port):
+    """GRACE 1 s: B breaks, comes back after 2 s -> the others have dropped him: the reconnect is refused (closed, no ticks)"""
+    A, B = b'C' * 8, b'D' * 8
+    ra, wa = await asyncio.open_connection('127.0.0.1', port); wa.write(b'DWR1' + b'\0' * 6 + hello(A))
+    rb, wb = await asyncio.open_connection('127.0.0.1', port); wb.write(b'DWR1' + b'\0' * 6 + hello(B))
+    turn = lambda w, x: w.write((5).to_bytes(2, 'big') + b'\x09\xfe\x01\x00' + x)
+    for i in range(5): turn(wa, b'a'); turn(wb, b'b'); await asyncio.sleep(0.1)
+    wb.close(); await asyncio.sleep(2.5)
+    rb, wb = await asyncio.open_connection('127.0.0.1', port); wb.write(b'DWR1' + b'\0' * 6 + hello(B, 5)); got = []
+    try:
+        while True:
+            n = int.from_bytes(await asyncio.wait_for(rb.readexactly(2), 3), 'big'); got.append(await rb.readexactly(n))
+    except Exception: pass
+    assert not any(m[:1] == b'\x0a' for m in got), 'a reconnect after GRACE must get no ticks'
+    wa.close(); print('too late ok: the reconnect after GRACE was refused')
+
+if __name__ == '__main__':
+    s = socket.socket(); s.bind(('127.0.0.1', 0)); port = s.getsockname()[1]; s.close()
+    env = dict(os.environ, RELAY_PEERS='', RELAY_STATS_EVERY='0', RELAY_RECONNECT_GRACE='1')
+    srv = subprocess.Popen([sys.executable, RELAY, str(port), '127.0.0.1'], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    try:
+        time.sleep(1.0); asyncio.run(too_late(port))
+    finally:
+        srv.terminate(); out = srv.communicate(timeout=5)[0].decode(errors='replace')
+        print('\n'.join(l for l in out.splitlines() if 'refused' in l or 'expired' in l or 'error' in l))
