@@ -69,6 +69,8 @@ TICK = 0.1
 IDLE = 60
 HISTORY = int(os.environ.get('RELAY_HISTORY', '72000'))   # ticks a session keeps for reconnects (2 h of 0.1 s)
 GRACE = float(os.environ.get('RELAY_RECONNECT_GRACE', '45'))  # s a player whose connection broke mid-game stays in the ticks (silent)
+LONG_GRACE = float(os.environ.get('RELAY_REJOIN_GRACE', '200'))   # the same for a game whose Relay.dll (24+) keeps trying 3 min ("DWR5")
+NOTICE = 0x7e                                       # our own frame to "DWR5" games: who is away and how long more; Relay.dll takes it out
 DECIDE = 5                                          # s: no peer announce from a new session's first peer -> it's the host
 RETRY = 8                                           # s: a guest whose session no node has yet asks our other nodes again (DWR1 / native)
 PEERS = [h for h in os.environ.get('RELAY_PEERS', '83.217.192.34,116.202.106.150,15.220.68.107,91.107.122.186').split(',') if h]
@@ -131,6 +133,7 @@ class Peer:
         # TCP rtt (the worst seen) and retransmissions, how far the player's send buffer got behind
         self.turns, self.last_turn, self.gaps, self.max_gap, self.max_rtt, self.retrans, self.max_buf = 0, 0.0, 0, 0.0, 0, 0, 0
         self.iv = dict(turns=0, gaps=0, max_gap=0.0, msgs=0, bytes=0)   # since the last session_stats line (STATS_EVERY)
+        self.rejoin = False                               # "DWR5": its Relay.dll keeps reconnecting for 3 min and reads our notices
 
     def stats(self):
         i = tcp_info(self.w)
@@ -153,6 +156,7 @@ class Session:
         self.rx = {}                                      # player id -> game messages (0x09 / 0x17) received from him
         self.away = {}                                    # player id -> (his number, until): connection broke mid-game
         self.gone = set()                                 # player ids whose GRACE ran out: the others have dropped them
+        self.names = {}                                   # number -> the player's name (from his peer announce)
         self.started = time.time(); self.ticks = 0; self.turn_msgs = 0; self.late = 0; self.max_late = 0.0
 
     def join(self, p):
@@ -167,15 +171,19 @@ class Session:
         if p.pid in self.by_pid: p.idx = self.by_pid[p.pid]
         else: p.idx = self.by_pid[p.pid] = self.next_idx; self.next_idx += 1
         p.sess = self; self.peers.append(p)
-        if self.away.pop(p.pid, None): log(ev='back', sid=int.from_bytes(self.sid, 'little'), idx=p.idx, peer=p.addr)
+        a = self.away.pop(p.pid, None)
+        if a:
+            log(ev='back', sid=int.from_bytes(self.sid, 'little'), idx=p.idx, peer=p.addr, after_s=round(time.monotonic() - a[2], 1))
+            self.notice(a[0], None)
 
     def leave(self, p):
         if p in self.peers: self.peers.remove(p)
         # 06.11.2026: a player whose connection breaks in the match stays in the ticks as silent for GRACE s - the game reconnects
         # by itself 15 s after the break; a player missing from a tick (neither sent nor silent) is dropped by the others at once
         if self.ticks and GRACE > 0 and p.pid and not any(q.pid == p.pid for q in self.peers):
-            self.away[p.pid] = (p.idx, time.monotonic() + GRACE)
-            log(ev='away', sid=int.from_bytes(self.sid, 'little'), idx=p.idx, peer=p.addr, grace=GRACE)
+            g = LONG_GRACE if p.rejoin else GRACE
+            self.away[p.pid] = (p.idx, time.monotonic() + g, time.monotonic())
+            log(ev='away', sid=int.from_bytes(self.sid, 'little'), idx=p.idx, peer=p.addr, grace=g, name=self.names.get(p.idx, ''))
         if not self.peers and not self.away: self.end()   # everyone away (the node's own network?): the ticks go on until GRACE
 
     def end(self):
@@ -184,6 +192,16 @@ class Session:
         sessions.pop(self.sid, None)
         log(ev='session_end', sid=int.from_bytes(self.sid, 'little'), secs=round(time.time() - self.started), ticks=self.ticks, turns=self.turn_msgs,
             late_ticks=self.late, max_late_ms=round(self.max_late * 1000))
+
+    def notice(self, idx, a, now=None):
+        """to the "DWR5" games here: player idx is away (a = (idx, until, since)) or back / dropped (a = None):
+        7e <idx> <s left u16 BE> <s away u16 BE> <name len> <name utf-8>; left 0xFFFF = no longer waited for"""
+        if a: now = now or time.monotonic(); left, gone = max(0, int(a[1] - now)), int(now - a[2])
+        else: left, gone = 0xFFFF, 0
+        nm = (self.names.get(idx) or '').encode()[:60]
+        m = bytes([NOTICE, idx]) + min(left, 0xFFFF).to_bytes(2, 'big') + min(gone, 0xFFFF).to_bytes(2, 'big') + bytes([len(nm)]) + nm
+        for q in self.peers:
+            if q.rejoin: q.send(m)
 
     def queue_turn(self, p, data):
         self.queue.append((p.idx, data)); self.turn_msgs += 1
@@ -208,11 +226,14 @@ class Session:
             sent = {i for i, _ in q}
             silent = [p.idx for p in self.peers if p.idx not in sent]
             now = time.monotonic()
-            for pid, (i, until) in list(self.away.items()):
+            for pid, a in list(self.away.items()):
+                i, until = a[0], a[1]
                 if until > now:
                     if i not in sent and i not in silent: silent.append(i)
+                    if self.ticks % 10 == 0: self.notice(i, a, now)      # once a second
                 else:
                     del self.away[pid]; self.gone.add(pid); log(ev='away_expired', sid=int.from_bytes(self.sid, 'little'), idx=i)
+                    self.notice(i, None)
             m = bytearray(b'\x0a\xfe') + bytes([len(q)])
             for i, d in q: m += bytes([i]) + d
             m += bytes([len(silent)]) + bytes(silent)
@@ -278,6 +299,21 @@ async def stats_loop():
                 late_ticks=s.late, players=pl)
 
 
+def announce_name(inner):
+    """the player's name from his peer announce (0f 05 ... zlib): "/steam/<id>" (u32 len + UTF-16), then u32 len + the name"""
+    try:
+        import zlib
+        i = inner.find(b'\x78\x01')
+        d = zlib.decompressobj().decompress(inner[i:]) if i >= 0 else b''
+        k = d.find('/steam/'.encode('utf-16-le'))
+        if k < 4: return ''
+        o = k + 2 * int.from_bytes(d[k - 4:k], 'little') + 4            # past the steam path and its trailing u32
+        while o + 4 <= len(d) and int.from_bytes(d[o:o + 4], 'little') == 0: o += 4
+        n = int.from_bytes(d[o:o + 4], 'little')
+        return d[o + 4:o + 4 + 2 * n].decode('utf-16-le', 'replace') if 0 < n < 64 else ''
+    except Exception: return ''
+
+
 def hello_reply(m):
     """the answer to a hello: the hello itself; to a reconnect hello (flag 2 + the ticks the game got) flag 2 + the number of
     game messages we got from that player - the game then sends again the ones after it ("We have sent the server [N] game
@@ -324,6 +360,9 @@ def handle_msg(p, m, echo=True):
             log(ev='mixed', sid=int.from_bytes(s.sid, 'little'), peer=p.addr)  # this lobby's host plays on Relic's servers
             p.w.write(b'DWRERR:mixed\n'); p.w.close(); return              # Relay.dll 7 shows why and closes the game
         if inner[:2] == b'\x0f\x05':                                 # peer announce: everyone, header stripped
+            if p.idx not in s.names:
+                nm = announce_name(inner)
+                if nm: s.names[p.idx] = nm
             for q in s.peers: q.send(inner)
             return
         dst = m[1]
@@ -557,6 +596,8 @@ async def handle(r, w):
                 log(ev='bridge_refused', peer=p.addr, dest=f'{dest[0]}:{dest[1]}'); w.close(); return
             rt = asyncio.ensure_future(reader())
             await pass_on(q, w, p, dest, [], []); return
+        if pre[:4] == b'DWR5':                          # Relay 24, native: reconnects for 3 min, wants our notices
+            p.rejoin = True; pre = b'DWR1' + b'\0' * 6; log(ev='native', peer=p.addr, rejoin=1)
         chain = None
         if pre[:4] == b'DWR4':                          # Relay 22: the player can't reach the session's node - it came here
             chain = socket.inet_ntoa(pre[4:8])

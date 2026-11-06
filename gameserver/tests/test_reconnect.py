@@ -81,6 +81,48 @@ async def too_late(port):
     assert not any(m[:1] == b'\x0a' for m in got), 'a reconnect after GRACE must get no ticks'
     wa.close(); print('too late ok: the reconnect after GRACE was refused')
 
+async def notices(port):
+    """Relay 24 games ("DWR5"): B (DWR5) breaks -> A (DWR5) gets our 0x7e notices about B once a second (number 2, seconds left
+    near RELAY_REJOIN_GRACE, B's name from his peer announce), and the "no longer waited for" one when B is back"""
+    import zlib
+    A, B = b'E' * 8, b'F' * 8
+    name = 'stand two'.encode('utf-16-le')
+    blob = zlib.compress(b'\0' * 8 + (12).to_bytes(4, 'little') + '/steam/76561'.encode('utf-16-le') + b'\0' * 4 + (9).to_bytes(4, 'little') + name, 1)
+    ann = b'\x0f\x05' + b'\0' * 16 + b'\x78\x01' + blob[2:]
+    ra, wa = await asyncio.open_connection('127.0.0.1', port); wa.write(b'DWR5' + b'\0' * 6 + hello(A))
+    rb, wb = await asyncio.open_connection('127.0.0.1', port); wb.write(b'DWR5' + b'\0' * 6 + hello(B))
+    await asyncio.sleep(0.3)
+    m = b'\x13\x00\x02' + ann; wb.write(len(m).to_bytes(2, 'big') + m)
+    turn = lambda w, x: w.write((5).to_bytes(2, 'big') + b'\x09\xfe\x01\x00' + x)
+    for i in range(5): turn(wa, b'a'); turn(wb, b'b'); await asyncio.sleep(0.1)
+    got, stop = [], asyncio.Event()
+    async def rd():
+        try:
+            while True:
+                n = int.from_bytes(await ra.readexactly(2), 'big'); x = await ra.readexactly(n)
+                if x[:1] == b'\x7e': got.append(x)
+        except Exception: pass
+    t = asyncio.ensure_future(rd())
+    wb.close()
+    for i in range(25): turn(wa, b'a'); await asyncio.sleep(0.1)
+    rb, wb = await asyncio.open_connection('127.0.0.1', port); wb.write(b'DWR5' + b'\0' * 6 + hello(B, 10))
+    await asyncio.sleep(0.5); wa.close(); wb.close(); t.cancel()
+    away = [x for x in got if int.from_bytes(x[2:4], 'big') != 0xFFFF]
+    assert away and away[0][1] == 2 and 190 <= int.from_bytes(away[0][2:4], 'big') <= 200, [x.hex() for x in got]
+    assert away[0][7:7 + away[0][6]].decode() == 'stand two', away[0]
+    assert got[-1][1] == 2 and int.from_bytes(got[-1][2:4], 'big') == 0xFFFF, 'the clear notice when B is back'
+    print('notices ok: %d away notices, name %r, then the clear one' % (len(away), away[0][7:7 + away[0][6]].decode()))
+
+if __name__ == '__main__':
+    s = socket.socket(); s.bind(('127.0.0.1', 0)); port = s.getsockname()[1]; s.close()
+    env = dict(os.environ, RELAY_PEERS='', RELAY_STATS_EVERY='0')
+    srv = subprocess.Popen([sys.executable, RELAY, str(port), '127.0.0.1'], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    try:
+        time.sleep(1.0); asyncio.run(notices(port))
+    finally:
+        srv.terminate(); out = srv.communicate(timeout=5)[0].decode(errors='replace')
+        print('\n'.join(l for l in out.splitlines() if 'away' in l or 'back' in l or 'error' in l))
+
 if __name__ == '__main__':
     s = socket.socket(); s.bind(('127.0.0.1', 0)); port = s.getsockname()[1]; s.close()
     env = dict(os.environ, RELAY_PEERS='', RELAY_STATS_EVERY='0', RELAY_RECONNECT_GRACE='1')
