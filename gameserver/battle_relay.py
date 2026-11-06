@@ -325,7 +325,8 @@ def live_answer(sid, frm, delay, game):
         return b'DWLR' + struct.pack('<IIIIII', 1, 2, 0, 0, 0, 0) + struct.pack('<I', 0)
     lr = s.live.get(game)
     if lr is None:
-        lr = s.live[game] = live_rec.LiveRec(game, s.lobby, s.start_msg, s.sid); lr.fed = 0
+        lr = live_rec.LiveRec(game, s.lobby, s.start_msg, s.sid); lr.header(0); lr.fed = 0   # (a header that can't be made: an exception -> not ready)
+        s.live[game] = lr
     while lr.fed < len(s.history):
         lr.feed(s.history[lr.fed], s.tick_t[lr.fed]); lr.fed += 1
     cut = time.time() - max(LIVE_DELAY, delay)
