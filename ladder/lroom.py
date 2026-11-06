@@ -374,6 +374,8 @@ def tick(now):
             _cancel_launch(r, 'late', late, secs=LAUNCH_WAIT); ch = True
         elif r['state'] == 'launching' and r['launch'].get('match') and r['launch']['match'] not in L.MM_MATCHES and r['launch']['match'] not in L.MM_PLAYING:
             _cancel_launch(r, 'match'); ch = True                                # dropped by the ladder some other way
+        elif r['state'] == 'playing' and all(now - s['seen'] > 900 for s in r['slots'] if s):   # every launcher gone for 15 min
+            _close(r, 'gone while playing'); continue
         elif r['state'] == 'playing' and now - r['launch'].get('started', now) > PLAY_KEEP:
             r['state'] = 'lobby'; r['launch'] = None; _note(r, 'played'); ch = True
         if not _members(r) and r['id'] in ROOMS: _close(r, 'empty'); continue
