@@ -33,6 +33,15 @@ def build_from(frames_up, ticks):
     return lr
 
 
+def test_random_army():
+    """a Random race / hero (lobby 255): the header takes what the game rolled (stand match c7, 07.11.2026: the players' test crashed)"""
+    b = open(os.path.join(D, 'live_c7_lobby.bin'), 'rb').read(); n = struct.unpack_from('<I', b)[0]
+    lr = live_rec.LiveRec('elite', b[4:4 + n], b[4 + n:])
+    want = open(os.path.join(D, 'live_c7_header.bin'), 'rb').read(); h = lr.header()
+    assert h[h.find(b'DATASDSC'):h.find(b'DATASDSC') + len(want)] == want, 'Random army header differs from the game\'s'
+    print('builder: a Random army as the game rolled it')
+
+
 def test_builder():
     up = [bytes.fromhex(r['hex']) for r in rows if r['d'] == 'up' and r['n'] == 1]
     ticks = [bytes.fromhex(r['hex']) for r in rows if r['d'] == 'down' and r['n'] == 1 and r['hex'][:2] == '0a']
@@ -111,7 +120,7 @@ async def floor(port):
 
 
 if __name__ == '__main__':
-    test_builder()
+    test_builder(); test_random_army()
     for env, fn in (({'LIVE_DELAY': '0'}, main), ({'LIVE_DELAY': '3600'}, floor)):
         port = free_port()
         p = subprocess.Popen([sys.executable, os.path.join(GS, 'battle_relay.py'), str(port)], env=dict(os.environ, RELAY_PEERS='', RELAY_LOG=os.devnull, **env),

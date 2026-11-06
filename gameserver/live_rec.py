@@ -117,9 +117,16 @@ class Room:
         clan, o = self._ws(o)
         colour = b[o:o + 4]; o += 4
         n = struct.unpack_from('<I', b, o)[0]; badge = b[o + 4:o + 4 + n]; o += 4 + n
-        o += 4 + 1 + 8                                 # 0, 01, 8 x FF
+        o += 4 + 1                                     # 0, 01
+        # 07.11.2026 (players' test: a Random army crashed the spectator's game on loading): the race and hero the game rolled
+        # for a Random pick (the lobby's race / hero are 255 then; FF FF FF FF x 2 when picked by hand) - DOW2.exe 0x44618C
+        # takes them for the match (and marks the slot random)
+        rolled_race, rolled_hero = struct.unpack_from('<ii', b, o); o += 8
         army = b[o]; o += 1
-        return dict(profile=prof, station=station, team=team, hero=hero, race=race, clan=clan, colour=colour, badge=badge, army=army), o
+        rnd = race == 255 or race < 0
+        if rnd and rolled_race >= 0: race, hero = rolled_race, rolled_hero
+        return dict(profile=prof, station=station, team=team, hero=hero, race=race, clan=clan, colour=colour, badge=badge, army=army,
+                    random=rnd), o
 
     def _names(self):
         """profile id -> the player's name, from the stations: <profile> 0 <u32 n> "/steam/<id>" (UTF-16) 0 <u32 n> <name>"""
@@ -171,10 +178,13 @@ class LiveRec:
     # -- header
     def _datainfo(self, s, first):
         if not s: return EMPTY_SLOT
-        race = RACES[self.game][s['race']] if 0 <= s['race'] < len(RACES[self.game]) else 'space_marines'
+        # no race the game knows (a Random pick not rolled yet, another mod): no replay at all - a wrong header crashes the
+        # spectator's game while it loads (players' test 06.11.2026); the node answers "not ready" and is asked again
+        if not 0 <= s['race'] < len(RACES[self.game]) or s['hero'] < 0: raise ValueError('slot %d: race %d hero %d' % (s['station'], s['race'], s['hero']))
+        race = RACES[self.game][s['race']]
         name = self.room.names.get(s['profile']) or 'Player'
         b = _u32s(name) + struct.pack('<II', 0 if first else 3, s['team']) + _u32a(race.encode())
-        b += struct.pack('<IIIIIi', s['profile'], 0, s['army'], 0, 0, s['hero']) + b'\0' + struct.pack('<I', s['army'])
+        b += struct.pack('<IIIIIi', s['profile'], 0, s['army'], 0, 0, s['hero']) + (b'\x01' if s.get('random') else b'\0') + struct.pack('<I', s['army'])
         b += s['colour'] + b'\x01' + _u32a(s['badge']) + b'\0\0\0\0' + _u32s(s['clan']) + struct.pack('<i', s['race'])
         return b
 
