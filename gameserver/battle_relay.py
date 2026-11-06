@@ -60,6 +60,7 @@ BIND = sys.argv[2] if len(sys.argv) > 2 else '127.0.0.1'
 TICK = 0.1
 IDLE = 60
 HISTORY = int(os.environ.get('RELAY_HISTORY', '72000'))   # ticks a session keeps for reconnects (2 h of 0.1 s)
+GRACE = float(os.environ.get('RELAY_RECONNECT_GRACE', '45'))  # s a player whose connection broke mid-game stays in the ticks (silent)
 DECIDE = 5                                          # s: no peer announce from a new session's first peer -> it's the host
 RETRY = 8                                           # s: a guest whose session no node has yet asks our other nodes again (DWR1 / native)
 PEERS = [h for h in os.environ.get('RELAY_PEERS', '83.217.192.34,116.202.106.150,15.220.68.107,91.107.122.186').split(',') if h]
@@ -141,6 +142,8 @@ class Session:
         self.sid, self.peers, self.next_idx, self.queue, self.ticker = sid, [], 1, [], None
         self.by_pid = {}                                  # player id -> its number in this session
         self.history = []                                 # every tick sent (0x0a frames), for players who reconnect
+        self.rx = {}                                      # player id -> game messages (0x09 / 0x17) received from him
+        self.away = {}                                    # player id -> (his number, until): connection broke mid-game
         self.started = time.time(); self.ticks = 0; self.turn_msgs = 0; self.late = 0; self.max_late = 0.0
 
     def join(self, p):
@@ -155,9 +158,15 @@ class Session:
         if p.pid in self.by_pid: p.idx = self.by_pid[p.pid]
         else: p.idx = self.by_pid[p.pid] = self.next_idx; self.next_idx += 1
         p.sess = self; self.peers.append(p)
+        if self.away.pop(p.pid, None): log(ev='back', sid=int.from_bytes(self.sid, 'little'), idx=p.idx, peer=p.addr)
 
     def leave(self, p):
         if p in self.peers: self.peers.remove(p)
+        # 06.11.2026: a player whose connection breaks in the match stays in the ticks as silent for GRACE s - the game reconnects
+        # by itself 15 s after the break; a player missing from a tick (neither sent nor silent) is dropped by the others at once
+        if self.ticks and GRACE > 0 and p.pid and not any(q.pid == p.pid for q in self.peers):
+            self.away[p.pid] = (p.idx, time.monotonic() + GRACE)
+            log(ev='away', sid=int.from_bytes(self.sid, 'little'), idx=p.idx, peer=p.addr, grace=GRACE)
         if not self.peers:
             if self.ticker: self.ticker.cancel()
             sessions.pop(self.sid, None)
@@ -186,6 +195,12 @@ class Session:
             q, self.queue = self.queue, []
             sent = {i for i, _ in q}
             silent = [p.idx for p in self.peers if p.idx not in sent]
+            now = time.monotonic()
+            for pid, (i, until) in list(self.away.items()):
+                if until > now:
+                    if i not in sent and i not in silent: silent.append(i)
+                else:
+                    del self.away[pid]; log(ev='away_expired', sid=int.from_bytes(self.sid, 'little'), idx=i)
             m = bytearray(b'\x0a\xfe') + bytes([len(q)])
             for i, d in q: m += bytes([i]) + d
             m += bytes([len(silent)]) + bytes(silent)
@@ -250,6 +265,16 @@ async def stats_loop():
                 late_ticks=s.late, players=pl)
 
 
+def hello_reply(m):
+    """the answer to a hello: the hello itself; to a reconnect hello (flag 2 + the ticks the game got) flag 2 + the number of
+    game messages we got from that player - the game then sends again the ones after it ("We have sent the server [N] game
+    messages and it has received [M]") and waits for the ticks it missed"""
+    if len(m) >= 22 and m[17] == 2:
+        s = sessions.get(m[1:5]); n = s.rx.get(m[9:17], 0) if s else 0
+        return m[:17] + b'\x02' + n.to_bytes(4, 'little') + m[22:]
+    return m
+
+
 def handle_msg(p, m, echo=True):
     p.iv['msgs'] += 1; p.iv['bytes'] += len(m) + 2
     t = m[0]
@@ -261,12 +286,13 @@ def handle_msg(p, m, echo=True):
             p.pid = m[9:17]; s.join(p)
             log(ev='join', sid=int.from_bytes(sid, 'little'), idx=p.idx, peer=p.addr, pid=p.pid.hex(), members=len(s.peers),
                 **({'reconnect_frames': int.from_bytes(m[18:22], 'little')} if again else {}))
-        if echo: p.send(m)
+        if echo: p.send(hello_reply(m))
         if again and p.sess is not None:                            # the ticks of the gap first, then the live ones
             have = int.from_bytes(m[18:22], 'little'); h = p.sess.history
             missed = h[have:] if 0 <= have <= len(h) else []
             for f in missed: p.send(f)
-            log(ev='rejoin', sid=int.from_bytes(sid, 'little'), idx=p.idx, peer=p.addr, had=have, ticks=len(h), resent=len(missed))
+            log(ev='rejoin', sid=int.from_bytes(sid, 'little'), idx=p.idx, peer=p.addr, had=have, ticks=len(h), resent=len(missed),
+                told=p.sess.rx.get(p.pid, 0))
         return
     if t == 0x14:                                                    # ping
         if echo: p.send(m)
@@ -304,6 +330,7 @@ def handle_msg(p, m, echo=True):
                 if now - _last_warn.get(k, 0) > 60: _last_warn[k] = now; log(ev='no_target', sid=int.from_bytes(s.sid, 'little'), dst=dst, src=p.idx, proxy=1)
             for q in targets: q.send(one)
         return
+    if t in (0x09, 0x17): s.rx[p.pid] = s.rx.get(p.pid, 0) + 1   # what we tell him on a reconnect
     if t == 0x09:
         s.queue_turn(p, m[2:]); return
     if t == 0x17:
@@ -529,12 +556,12 @@ async def handle(r, w):
                 log(ev='chain_here', peer=p.addr, node=chain, sid=int.from_bytes(sid, 'little') if sid else None,
                     why='self' if chain in SELF else 'not ours' if not hp else 'session here' if sid in sessions else 'unreachable')
                 for m in held:
-                    if m[:1] in (b'\x15', b'\x14'): p.send(m); answered.append(m)
+                    if m[:1] in (b'\x15', b'\x14'): p.send(hello_reply(m)); answered.append(m)
             while sid is None and len(held) < 64:
                 m = await asyncio.wait_for(q.get(), IDLE)
                 if m is None: return
                 held.append(m)
-                if m[:1] in (b'\x15', b'\x14'): p.send(m); answered.append(m)
+                if m[:1] in (b'\x15', b'\x14'): p.send(hello_reply(m)); answered.append(m)
                 if m[:1] == b'\x15': sid = m[1:5]
             away, end = False, time.time() + DECIDE
             while sid is not None and sid not in sessions:   # a new session here: its host, or a guest whose host is elsewhere?
@@ -542,7 +569,7 @@ async def handle(r, w):
                 except asyncio.TimeoutError: break           # no announce: the host
                 if m is None: return
                 held.append(m)
-                if m[:1] in (b'\x15', b'\x14'): p.send(m); answered.append(m); continue
+                if m[:1] in (b'\x15', b'\x14'): p.send(hello_reply(m)); answered.append(m); continue
                 away = m[:1] == b'\x13' and m[1] == 0 and m[3:5] == b'\x0f\x05'
                 break
             if away and sid not in sessions:
