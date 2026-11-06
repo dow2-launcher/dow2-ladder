@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>Чат — Elite Mod</title>
 <meta name="description" content="Общий чат игроков Dawn of War II: Retribution (Elite). Вход через Steam.">
 <style>
@@ -23,6 +26,8 @@ a { color:var(--gold2); text-decoration:none; }
 header { display:flex; align-items:center; gap:12px; padding:16px 2px 10px; flex-wrap:wrap; }
 h1 { margin:0; font:900 clamp(22px,5vw,30px) Cinzel,serif; letter-spacing:.04em; color:var(--gold2); text-shadow:0 2px 0 #5a3f12; }
 header .back { margin-left:auto; font:700 13px Cinzel,serif; letter-spacing:.05em; color:var(--muted); }
+.lv { font:700 12px Cinzel,serif; letter-spacing:.04em; color:var(--muted); text-decoration:none; border:1px solid var(--line); border-radius:5px; padding:3px 8px; white-space:nowrap; }
+.lv:hover { color:var(--gold2); border-color:var(--gold2); }
 .me { display:flex; align-items:center; gap:10px; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:8px 12px; margin-bottom:10px; }
 .me img { width:36px; height:36px; border-radius:4px; object-fit:cover; background:#000; }
 .me .nm { font-weight:600; color:var(--gold2); }
@@ -79,6 +84,7 @@ header .back { margin-left:auto; font:700 13px Cinzel,serif; letter-spacing:.05e
 <div class="wrap">
   <header>
     <h1>Общий чат</h1>
+    <a id="lv" class="lv" href="/elite/" title="Скачать актуальную версию лаунчера" style="display:none"></a>
     <a class="back" href="/ladder/">← Ладдер</a>
   </header>
 
@@ -261,12 +267,19 @@ document.addEventListener('click', e => {
   if (t) { e.preventDefault(); mention(t.getAttribute('data-nm')); }
 });
 
+async function showVer() {   // актуальная версия лаунчера: тянем из updater.json (обновляется каждый релиз)
+  try {
+    const d = await fetch('/elite/dl/updater.json', { cache: 'no-store' }).then(r => r.json());
+    if (d && d.version) { const a = $('lv'); a.textContent = 'Лаунчер v' + d.version; a.style.display = ''; }
+  } catch (e) {}
+}
 async function boot() {
   try { CH.me = await api('whoami'); } catch (e) {}
   renderMe();
   await load(CH.room);
   renderMsgs({ toEnd: true });
   pingOnline();
+  showVer();
   setInterval(() => { load(); if (CH.room !== 'all') load('all'); }, 5000);
   setInterval(pingOnline, 25000);
 }

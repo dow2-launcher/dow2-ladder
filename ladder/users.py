@@ -11,7 +11,7 @@ import queue, re, sqlite3, threading, time, urllib.request
 DB = None                                           # community.py: the community.sqlite path
 ALIAS = None                                        # ladder.py: steam -> the ladder / Relic name
 RATING = None                                       # ladder.py: steam -> 1v1 rating or None
-LAUNCHER_SECS = 45
+LAUNCHER_SECS = 120
 PROFILE_SECS = 86400
 RATING_SECS = 1800
 LOCK = threading.Lock()

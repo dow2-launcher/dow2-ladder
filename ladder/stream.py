@@ -64,6 +64,7 @@ def serve(h, ip, steam, seen, missed, me):
                 if steam: seen()
                 continue
             w.write(frame(ev, d))
+            if steam: seen()                                     # 03.11: освежаем присутствие и при доставке событий, а не только на idle-пинге (фикс скачков онлайна)
             if ev == 'user' and steam and d.get('steam') == steam:   # own rating changed: the own card follows
                 m = me()
                 if m: w.write(frame('me', m))
