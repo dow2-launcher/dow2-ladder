@@ -263,7 +263,8 @@ def own_call(call, p, sess, mm=None):
                           'kind': mm.get('kind', 'mm'), 'match': mm['match'], 'steams': mm['steams'], 'pids': mm.get('pids') or set(),
                           'params': {k: v for k, v in p.items() if k.lower() not in SECRET_PARAMS},
                           'members': {sess['pid']: {'sg': sess['sg'], 'steam': sess['steam'], 'alias': sess['alias'], 'race': -1, 'team': 0}},
-                          'created': now, 'seen': now, 'reports': {}, 'started': None, 'lobby_id': None}
+                          'created': now, 'seen': now, 'reports': {}, 'started': None, 'lobby_id': None,
+                          'unrated': bool(mm.get('unrated')), 'lroom': mm.get('lroom') or ''}
         log('room %d (%s, ladder %s) hosted by pid=%d (%s), relay %s:%d' % (mid, p.get('description'), mm['match'], sess['pid'], sess['alias'], ip, port))
         if mm.get('nm'): nm_hosted(mm['nm'], mid, ip)
         return [0, mid, 'authtoken', ip, port, [member_row(r, sess['pid'])]]
@@ -369,6 +370,7 @@ def to_ladder(r):
     mode = {(1, 1): '1v1', (2, 2): '2v2', (3, 3): '3v3'}.get(tuple(sizes), '') if len(teams) == 2 else ''
     elite = 1 if 'elite' in (p.get('modname') or '').lower() else 0
     if flag('unrated.on'): mode = ''                                     # tests: stored and shown, not rated
+    if r.get('unrated'): mode = ''                                       # a launcher room's match (agreed): stored and shown, never rated
     t = time.gmtime(start); season = '%d-Q%d' % (t.tm_year, (t.tm_mon - 1) // 3 + 1)
     try:
         c = sqlite3.connect(LADDER_DB, timeout=30)
@@ -627,7 +629,8 @@ def nm_room(p, sess):
     except ValueError: return None
     if not x or x['state'] != 'matched' or x['view'].get('host_pid') != sess['pid'] or sess['pid'] not in [m['pid'] for m in nm_members(x)]: return None
     v = x['view']
-    return {'match': v['match'], 'steams': set(v['steams']), 'pids': set(v['pids']), 'relay': v.get('relay') or '', 'kind': 'nm', 'nm': x}
+    return {'match': v['match'], 'steams': set(v['steams']), 'pids': set(v['pids']), 'relay': v.get('relay') or '', 'kind': 'nm', 'nm': x,
+            'unrated': bool(v.get('unrated')), 'lroom': v.get('lroom') or ''}   # 05.11.2026: a launcher room's match - agreed, never rated
 
 
 def nm_hosted(x, mid, relay_ip):
