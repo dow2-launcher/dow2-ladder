@@ -25,7 +25,17 @@ Relic's and send those connections here (rts.fintebtc.de:47443). This server:
   session ids never touch the disk), the listening socket is kept (no refused connections), the process re-executes itself with the
   same PID. Open game connections are cut once; the game reconnects (its readSession long poll starts again) and finds its session
   and its room as they were. A file that does not compile is refused before anything is touched;
-- with data/trace.on writes a protocol trace (data/trace.jsonl, 600) with session ids, tickets and keys masked.
+- with data/trace.on writes a protocol trace (data/trace.jsonl, 600) with session ids, tickets and keys masked;
+- no call waits on Relic for long (06.11.2026, owner: hosts lost their RLink session ~30 s after a match - the game gives every
+  call 30 s, then "call timed out. Disconnecting [SetDataAsync]" and a new login, while Custom Games shows the old room):
+  * telemetry/setData (Relic's analytics - its keys are cut from the login answer anyway) is answered here at once with [0], the
+    answer Relic gives, and goes on to Relic in the background on a connection of its own (nobody waits for it);
+  * a kept connection to Relic unused for UP_IDLE_MAX s is not used again (Relic's balancer closes idle ones at 60 s); every call
+    gets RELIC_TIMEOUT (3 s) to connect and RELIC_TIMEOUT to answer, then once more on a new connection, then the game gets the
+    ordinary failure answer [1] (the readSession long poll: RELIC_POLL_TIMEOUT, then an empty answer and the game polls again);
+  * a game connection idle for CLIENT_IDLE s is closed (as Relic does at 60 s), so the game never sends a call into a connection
+    that died quietly during the match (the Moscow mirror, NAT); TCP keepalive on every socket, both ways;
+  * calls to Relic slower than SLOW_LOG s, retries and failures are logged (call, ms, pid).
 Session ids and Steam tickets pass through memory only. Usage: own_lobby.py   (env LOBBY_DATA, LOBBY_PORT, LOBBY_RELAYS, LADDER_DB)
 """
 import asyncio, json, os, re, signal, socket, sqlite3, ssl, sys, time, urllib.parse
@@ -35,6 +45,13 @@ DATA = os.environ.get('LOBBY_DATA', '/srv/ownlobby/data')
 PORT = int(os.environ.get('LOBBY_PORT', '47443'))
 STATUS_PORT = int(os.environ.get('LOBBY_STATUS_PORT', '47444'))          # 127.0.0.1 only: rooms and counters, no session ids
 RELIC = 'dow2r-lobby.reliclink.com'
+RELIC_ADDR = (RELIC, 443)
+RELIC_TIMEOUT = 3.0               # s: connect, and then the answer (owner 06.11: "3 seconds is enough to wait"); one retry on a new connection
+RELIC_POLL_TIMEOUT = 25.0         # s: readSession long poll - Relic answers an empty one every ~20 s (RL_KEEPALIVE 20, the game: RL_DISCONNECT 30)
+UP_IDLE_MAX = 30.0                # s: a kept connection to Relic unused longer is not used again
+CLIENT_IDLE = 55.0                # s: an idle game connection is closed (Relic's balancer: 60 s)
+SLOW_LOG = 2.0                    # s: calls to Relic slower than this go to the journal
+FAIL_BODY = b'[1]'                # the ordinary failure answer of a call (what the game gets when Relic does not answer twice)
 LADDER_DB = os.environ.get('LADDER_DB', '/srv/ladder/data/ladder.sqlite')
 RELAYS = [(h.rsplit(':', 1)[0], int(h.rsplit(':', 1)[1])) for h in
           os.environ.get('LOBBY_RELAYS', '15.220.68.107:47100,116.202.106.150:47100').split(',') if ':' in h]
@@ -715,8 +732,23 @@ async def read_message(r, request):
     return first, lines[1:], hdrs, body
 
 
+def keepalive(sock):
+    """TCP keepalive (probes after 20 s of silence, dead after 3 unanswered) and unacked data dropped after 30 s"""
+    if sock is None: return
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 20)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 5)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT, 30000)
+    except (OSError, AttributeError): pass
+
+
+UP_ERRORS = (asyncio.TimeoutError, ConnectionError, asyncio.IncompleteReadError, asyncio.LimitOverrunError, ssl.SSLError, OSError, ValueError)
+
+
 class Upstream:
-    def __init__(self): self.r = self.w = None
+    def __init__(self): self.r = self.w = None; self.used = 0.0
 
     def close(self):
         if self.w:
@@ -724,17 +756,63 @@ class Upstream:
             except Exception: pass
         self.r = self.w = None
 
-    async def request(self, raw):
+    async def request(self, raw, call='?', pid=None, timeout=RELIC_TIMEOUT, retry_timeout=True):
+        """one call to Relic: a kept connection only if used within UP_IDLE_MAX s; RELIC_TIMEOUT to connect, `timeout` for the
+        answer; on a failure once more on a new connection (retry_timeout=False: a timeout is not retried - the long poll)"""
+        t0 = time.time(); why = None
         for attempt in (0, 1):
-            fresh = self.w is None or self.w.is_closing()
-            if fresh:
-                self.r, self.w = await asyncio.wait_for(asyncio.open_connection(RELIC, 443, ssl=RELIC_CTX, server_hostname=RELIC, limit=8 << 20), 15)
+            if self.w is not None and (self.w.is_closing() or time.time() - self.used > UP_IDLE_MAX): self.close()
+            conn = 'new' if self.w is None else 'kept, idle %.0f s' % (time.time() - self.used)
+            stage = 'answer'
             try:
-                self.w.write(raw); await self.w.drain()
-                return await asyncio.wait_for(read_message(self.r, False), 120)
-            except (ConnectionError, asyncio.IncompleteReadError, ssl.SSLError, OSError):
+                if self.w is None:
+                    stage = 'connect'
+                    self.r, self.w = await asyncio.wait_for(asyncio.open_connection(*RELIC_ADDR, ssl=RELIC_CTX, server_hostname=RELIC, limit=8 << 20), RELIC_TIMEOUT)
+                    keepalive(self.w.get_extra_info('socket')); stage = 'answer'
+                async def send_read():
+                    self.w.write(raw); await self.w.drain()
+                    return await read_message(self.r, False)
+                ans = await asyncio.wait_for(send_read(), timeout)
+                self.used = time.time()
+                ms = (self.used - t0) * 1000
+                if why or (ms > SLOW_LOG * 1000 and call != 'login/readSession'):
+                    STATS['relic_slow'] = STATS.get('relic_slow', 0) + 1
+                    log('relic slow: %s %d ms pid=%s%s' % (call, ms, pid, ', retried on a new connection after: %s' % why if why else ''))
+                return ans
+            except UP_ERRORS as e:
                 self.close()
-                if attempt or fresh: raise                               # a kept connection Relic had closed: once more on a new one
+                e_s = '%s %s (%s connection)' % (stage, 'timeout' if isinstance(e, asyncio.TimeoutError) else repr(e), conn)
+                if attempt or (isinstance(e, asyncio.TimeoutError) and stage == 'answer' and not retry_timeout):
+                    STATS['relic_fail'] = STATS.get('relic_fail', 0) + 1
+                    log('relic failed: %s %d ms pid=%s: %s%s' % (call, (time.time() - t0) * 1000, pid, e_s, '; first: %s' % why if why else ''))
+                    raise
+                why = e_s; STATS['relic_retry'] = STATS.get('relic_retry', 0) + 1
+
+
+TELEM_Q = []                      # telemetry/setData on its way to Relic (memory only; at most TELEM_MAX waiting)
+TELEM_MAX = 200
+TELEM_WAKE = asyncio.Event()
+
+
+def telemetry_bg(raw, pid):
+    if len(TELEM_Q) >= TELEM_MAX:
+        STATS['telem_drop'] = STATS.get('telem_drop', 0) + 1; return
+    TELEM_Q.append((raw, pid)); TELEM_WAKE.set()
+
+
+async def telemetry_sender():
+    """telemetry/setData to Relic one after another on a connection of its own; Relic's answer goes nowhere (the game had [0])"""
+    up = Upstream()
+    while True:
+        await TELEM_WAKE.wait(); TELEM_WAKE.clear()
+        while TELEM_Q:
+            raw, pid = TELEM_Q.pop(0)
+            try:
+                st, _, _, rb = await up.request(raw, 'telemetry/setData (background)', pid, 10.0)
+                STATS['telem_relic'] = STATS.get('telem_relic', 0) + 1
+                if st[9:12] != '200' or not rb.startswith(b'[0'): log('telemetry/setData pid=%s: Relic answered %s %r' % (pid, st[9:12], rb[:40]))
+            except UP_ERRORS: STATS['telem_fail'] = STATS.get('telem_fail', 0) + 1
+            except Exception as e: log('telemetry sender: %r' % e)
 
 
 def response(status, hdr_lines, body):
@@ -745,10 +823,10 @@ def response(status, hdr_lines, body):
 async def handle(r, w):
     conn_key = object(); my_sessions = []
     peer = w.get_extra_info('peername'); ip = peer[0] if peer else '?'
-    STATS['conn'] += 1; up = Upstream()
+    STATS['conn'] += 1; up = Upstream(); keepalive(w.get_extra_info('socket'))
     try:
         while True:
-            try: first, lines, hdrs, body = await asyncio.wait_for(read_message(r, True), 600)
+            try: first, lines, hdrs, body = await asyncio.wait_for(read_message(r, True), CLIENT_IDLE)
             except (asyncio.IncompleteReadError, asyncio.TimeoutError, ConnectionError, ssl.SSLError): break
             STATS['req'] += 1
             try: method, target, _ = first.split(' ', 2)
@@ -792,11 +870,24 @@ async def handle(r, w):
                 w.write(response('HTTP/1.1 200 OK', ['Content-Type: application/json', 'Connection: keep-alive',
                                                      'Cache-Control: no-store, no-cache, must-revalidate, max-age=0', 'Request-Path: ' + path], b))
                 trace(ip=ip, pid=sess and sess['pid'], call=call, p=mask_params(params), own=1, a=b.decode()[:3000])
+            elif call == 'telemetry/setData':                            # answered here at once, Relic gets it in the background
+                raw = (first + '\r\n' + ''.join(h + '\r\n' for h in lines if h)).encode('latin-1') + b'\r\n' + body
+                telemetry_bg(raw, sess and sess['pid'])
+                STATS['telem_own'] = STATS.get('telem_own', 0) + 1
+                w.write(response('HTTP/1.1 200 OK', OWN_HDRS + ['Request-Path: ' + path], b'[0]'))
+                trace(ip=ip, pid=sess and sess['pid'], call=call, p=mask_params(params), own='telemetry', a='[0]')
             else:
                 raw = (first + '\r\n' + ''.join(h + '\r\n' for h in lines if h)).encode('latin-1') + b'\r\n' + body
-                try: status, rlines, rh, rbody = await up.request(raw)
-                except Exception as e:
-                    STATS['relic_err'] += 1; log('relic %s: %r' % (call, e)); break
+                poll = call == 'login/readSession'                       # (a session we do not know: after a restart)
+                try: status, rlines, rh, rbody = await up.request(raw, call, sess and sess['pid'], RELIC_POLL_TIMEOUT if poll else RELIC_TIMEOUT, not poll)
+                except UP_ERRORS as e:                                   # Relic did not answer twice: the ordinary failure answer, never a hang
+                    STATS['relic_err'] += 1
+                    if poll and not isinstance(e, asyncio.TimeoutError): break
+                    w.write(response('HTTP/1.1 200 OK', OWN_HDRS + ['Request-Path: ' + path],
+                                     ('%s,[[]]' % (re.sub(r'\D', '', params.get('ack', '0')) or '0')).encode() if poll else FAIL_BODY)); await w.drain()
+                    trace(ip=ip, pid=sess and sess['pid'], call=call, p=mask_params(params), own='relic_failed', ms=round((time.time() - t0) * 1000), a=FAIL_BODY.decode())
+                    if hdrs.get('connection', '').lower() == 'close': break
+                    continue
                 STATS['relic'] += 1
                 if call == 'advertisement/update' and rbody.startswith(b'[4') and params.get('state') == '0' and params.get('matchtype') == '1':
                     try: status, rlines, rbody = await reopen(up, first, lines, body, params, raw, ip, sess) or (status, rlines, rbody)
@@ -838,11 +929,11 @@ async def reopen(up, first, lines, body, params, raw, ip, sess):
     aid = params.get('advertisementid')
     sp = {'advertisementid': aid, 'state': '0'}
     if 'sessionID' in params: sp['sessionID'] = params['sessionID']
-    st, rl, rh, rb = await up.request(relic_request(first, lines, body, '/game/advertisement/updateState', sp))
+    st, rl, rh, rb = await up.request(relic_request(first, lines, body, '/game/advertisement/updateState', sp), 'advertisement/updateState (Continue)', sess and sess['pid'])
     trace(ip=ip, pid=sess and sess['pid'], call='advertisement/updateState', p=mask_params(sp), st=st[9:12], own='reopen', a=mask_body('advertisement/updateState', rb))
     if not rb.startswith(b'[0'):
         log('room %s back in the lobby (Continue): Relic refused updateState 0 -> %r' % (aid, rb[:40])); return None
-    st, rl, rh, rb = await up.request(raw)
+    st, rl, rh, rb = await up.request(raw, 'advertisement/update (Continue)', sess and sess['pid'])
     log('room %s back in the lobby (Continue): updateState 0 ok, update -> %r' % (aid, rb[:40]))
     STATS['reopen'] = STATS.get('reopen', 0) + 1
     return st, rl, rb
@@ -864,11 +955,14 @@ async def read_session(s, params, first, lines, body, up):
     if s['inj']:
         first = re.sub(r'([?&]ack=)-?\d+', lambda m: m.group(1) + str(ack - s['inj']), first, count=1)
     raw = (first + '\r\n' + ''.join(h + '\r\n' for h in lines if h)).encode('latin-1') + b'\r\n' + body
-    task = asyncio.ensure_future(up.request(raw)); wake = asyncio.ensure_future(s['wake'].wait())
+    task = asyncio.ensure_future(up.request(raw, 'login/readSession', s['pid'], RELIC_POLL_TIMEOUT, False)); wake = asyncio.ensure_future(s['wake'].wait())
     done, _ = await asyncio.wait({task, wake}, return_when=asyncio.FIRST_COMPLETED)
     if task in done:
         wake.cancel()
-        status, rlines, _, rbody = task.result(); STATS['relic'] += 1
+        try: status, rlines, _, rbody = task.result(); STATS['relic'] += 1
+        except asyncio.TimeoutError:                                     # Relic kept the poll too long: an empty answer, the game polls again
+            STATS['own'] += 1
+            return 'HTTP/1.1 200 OK', OWN_HDRS + ['Request-Path: /game/login/readSession'], push_answer(s, ack)
         m = re.match(rb'(\d+),', rbody)
         if m and s['inj']: rbody = str(int(m.group(1)) + s['inj']).encode() + rbody[m.end() - 1:]
         return status, rlines, rbody
@@ -966,7 +1060,7 @@ async def main():
     srv = await asyncio.start_server(handle, sock=ls, ssl=server_ctx(), limit=4 << 20)
     st = await asyncio.start_server(status, sock=lst)
     asyncio.get_running_loop().add_signal_handler(signal.SIGHUP, hot_reload, ls, lst)
-    asyncio.ensure_future(relay_prober()); asyncio.ensure_future(nm_syncer())
+    asyncio.ensure_future(relay_prober()); asyncio.ensure_future(nm_syncer()); asyncio.ensure_future(telemetry_sender())
     log('own lobby on :%d (automatch rooms %s, native automatch %s, trace %s), relays %s' % (PORT, 'ON' if flag('own_mm.on') else 'off', 'ON' if flag('native_mm.on') else 'off', 'on' if flag('trace.on') else 'off',
                                                                  ', '.join('%s:%d' % x for x in RELAYS)))
     async with srv, st: await asyncio.gather(srv.serve_forever(), st.serve_forever())

@@ -1,0 +1,10 @@
+[Unit]
+Description=DoW2 own lobby Moscow mirror (TCP as is to rts 37.27.234.236: lobby 47443, stream check 47445)
+After=network.target
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/lib/tcp_mirror.py 83.217.192.34:47443=37.27.234.236:47443 83.217.192.34:47445=37.27.234.236:47445
+DynamicUser=yes
+Restart=always
+LimitNOFILE=8192
+[Install]
+WantedBy=multi-user.target

@@ -70,3 +70,8 @@ udp_gateway/battle_relay and gave the same stability.
     # optional: rm /etc/systemd/system/{xray-relic,relic-egress}.service /usr/local/sbin/{relic-egress,xray-relic-config}; rm -r /etc/xray-relic /opt/xray-relic
     # iggy: remove the client email bridge-msk from inbound tg-reality (/usr/local/etc/xray/config.json, backup
     # config.json.bak.pre-bridge-msk-*), xray -test, systemctl restart xray
+
+**Lobby mirror (timeweb, 03.11.2026):** `tcp_mirror.py` (-> /usr/local/lib) + `dow2-lobbymirror.service` (-> /etc/systemd/system):
+TCP as is from 83.217.192.34:47443/47445 to own_lobby / its stream check on rts (OwnLobby.dll tries Moscow first). Since
+07.11.2026: TCP keepalive on both sockets and a connection idle both ways for 120 s (MIRROR_IDLE) is closed. Restart only with
+no connections through it: `ss -tn state established "( sport = :47443 or sport = :47445 )"`.
