@@ -4,7 +4,7 @@
 Relic's public list (dow-api community/advertisement/findAdvertisements) has no mod fields. The game's own findAdvertisements
 (dow2r-lobby.reliclink.com, signed in) carries the game's filter - modName, modVersion, dataChecksum, appBinaryChecksum,
 modDLLChecksum - and Relic answers only the rooms of that very game. So every SCAN_EVERY s we ask twice with our own session
-of the stand account (stand 1, cherpekat): once as vanilla DOW2 3.19, once as Elite 3.2, with exactly the parameters the game
+of the stand account (stand 1, cherpekat): once as vanilla DOW2 3.19, once per Elite version (3.2.1, 3.2), with exactly the parameters the game
 sends (stand trace 03.11.2026). Room id -> the fields of the query that listed it goes to the ladder (ADS_OUT, JSON, no secrets),
 which shows it instead of its map/race guess.
 
@@ -18,7 +18,7 @@ One Relic account = one session. The stand's game comes first:
 - no sign-in while DOW2.exe / Elite.exe runs in the stand's prefix, and not until STAND_QUIET s after it is gone;
 - the stand checked every 2 s while signed in: a game starting -> login/logout at once, pause;
 - the session cut from elsewhere (readSession / findAdvertisements say so) -> pause KICK_PAUSE s, then as above.
-Gentle load: two findAdvertisements and one public list per SCAN_EVERY (30 s); sign-ins at most MAX_LOGINS per hour.
+Gentle load: one findAdvertisements per filter (three) and one public list per SCAN_EVERY (30 s); sign-ins at most MAX_LOGINS per hour.
 """
 import base64, http.client, json, os, re, signal, ssl, subprocess, sys, threading, time, urllib.parse, urllib.request
 
@@ -43,9 +43,14 @@ LOGIN_TAIL = [('majorVersion', '0.0.0'), ('minorVersion', '0'), ('installationTy
               ('clientLibVersion', '18')]
 # findAdvertisements as the game sends it (own lobby trace 03.11.2026, Elite 3.2; vanilla differs only in the mod fields):
 # profile_ids / statGroup_ids = the signed-in profile, then these
+# 07.11.2026: Elite 3.2.1 keeps modVersion "3.2" (its Elite.module is unchanged) - only dataChecksum differs (its attrib archives
+# changed), so Relic tells 3.2 and 3.2.1 rooms apart only by that. 'show' = the version written out for the ladder and the launcher
+# (the launcher compares it with the installed Elite: "3.2" for a 3.2.1 room would send 3.2.1 players to 3.2 and back)
 FILTERS = {
-    'vanilla': {'modName': 'DOW2', 'modVersion': '3.19', 'modDLLChecksum': '-1151285252', 'dataChecksum': '371005917', 'appBinaryChecksum': '19'},
-    'elite':   {'modName': 'Elite', 'modVersion': '3.2', 'modDLLChecksum': '-1151285252', 'dataChecksum': '-696231043', 'appBinaryChecksum': '19'},
+    'vanilla':  {'modName': 'DOW2', 'modVersion': '3.19', 'modDLLChecksum': '-1151285252', 'dataChecksum': '371005917', 'appBinaryChecksum': '19'},
+    'elite':    {'modName': 'Elite', 'modVersion': '3.2', 'modDLLChecksum': '-1151285252', 'dataChecksum': '-2120914952', 'appBinaryChecksum': '19',
+                 'show': '3.2.1'},
+    'elite3.2': {'modName': 'Elite', 'modVersion': '3.2', 'modDLLChecksum': '-1151285252', 'dataChecksum': '-696231043', 'appBinaryChecksum': '19'},
 }
 FIELD_OUT = (('modName', 'modname'), ('modVersion', 'modversion'), ('dataChecksum', 'datachecksum'),
              ('appBinaryChecksum', 'appbinarychecksum'), ('modDLLChecksum', 'moddllchecksum'))
@@ -213,9 +218,16 @@ def public_ids():
         return [m.get('id') for m in (json.load(r).get('matches') or []) if isinstance(m.get('id'), int)]
 
 
+def fields(f):
+    """the fields of a filter as the ladder reads them; modversion = the version to show ('show') when it has one"""
+    e = {o: f[i] for i, o in FIELD_OUT}
+    if f.get('show'): e['modversion'] = f['show']
+    return e
+
+
 def write_out(state, ads=None, other=None, public=None, note=''):
     d = {'ts': int(time.time()), 'state': state, 'every': SCAN_EVERY, 'note': note,
-         'filters': {n: {o: f[i] for i, o in FIELD_OUT} for n, f in FILTERS.items()}}
+         'filters': {n: fields(f) for n, f in FILTERS.items()}}
     if ads is not None: d.update(scan_ts=int(time.time()), ads=ads, other=other or [], public=public)
     else:
         try:                                         # paused: keep the last scan (the ladder looks at scan_ts)
@@ -229,11 +241,11 @@ def write_out(state, ads=None, other=None, public=None, note=''):
 
 def scan(s):
     ads, counts = {}, {}
-    for name in ('vanilla', 'elite'):
+    for name in FILTERS:
         ids = s.find(name); counts[name] = len(ids)
         f = FILTERS[name]
         for aid in ids:
-            e = dict({o: f[i] for i, o in FIELD_OUT}, src='scan', q=name)
+            e = dict(fields(f), src='scan', q=name)
             if str(aid) in ads: ads[str(aid)]['both'] = True          # Relic did not filter it: not exact
             else: ads[str(aid)] = e
     for k in [k for k, v in ads.items() if v.get('both')]: ads.pop(k)
@@ -285,7 +297,7 @@ def main():
                 next_scan = time.time() + SCAN_EVERY
                 try:
                     c, no, np = scan(s)
-                    log('scan: vanilla %d, elite %d, neither %d, public %d' % (c['vanilla'], c['elite'], no, np))
+                    log('scan: %s, neither %d, public %d' % (', '.join('%s %d' % kv for kv in c.items()), no, np))
                     if ONCE:
                         ONCE_DONE.append(1)
                         if len(ONCE_DONE) >= ONCE: log('test done: signing out'); s.logout(); return
