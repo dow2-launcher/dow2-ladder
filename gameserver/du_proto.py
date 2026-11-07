@@ -118,6 +118,11 @@ class DuCore:
     def room(self):
         return not self.closed and len(self.unacked) + len(self.pending) < WIN_PKTS and self.inflight_bytes < WIN_BYTES
 
+    def drained(self):
+        """everything written was sent and acknowledged (07.11.2026: FIN has no number - a FIN sent with packets still on
+        the way makes the peer drop them; an end that closes on its own first waits for this, see udp_gateway.run)"""
+        return not self.pending and not self.unacked
+
     def write(self, data):
         """bytes from the local side (game / battle_relay); never refused - the caller waits for room() (back pressure)"""
         if self.closed or not data: return

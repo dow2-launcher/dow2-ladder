@@ -59,6 +59,7 @@ ADDR_BURST = 2 * ADDR_RATE
 # ~650 packets/s, 1.07 M copies in 10 min, the game choking on old retries)
 VERSION = max(1, min(2, int(os.environ.get('UDPGW_VERSION', '2'))))
 STATS_EVERY = float(os.environ.get('UDPGW_STATS_EVERY', '15'))   # s: an ev=conn_stats line per live connection, 0 = none
+LINGER = float(os.environ.get('UDPGW_LINGER', '15'))   # s: after battle_relay closes, wait for the peer's acks of the rest before FIN
 
 
 def log(**k):
@@ -136,6 +137,12 @@ class Conn:
                 if not d: break
                 self.core.write(d)
         except Exception: pass
+        # battle_relay closed its side (an answer such as the live replay's DWRL, then close): FIN only once all of it is
+        # acknowledged - FIN carries no number, so the peer would drop the packets still on the way (07.11.2026: the live
+        # replay's bigger answers came cut off to the ladder, 24000 bytes = the first burst of 20 packets)
+        end = time.time() + LINGER
+        while not self.closed and not self.core.drained() and time.time() < end: await asyncio.sleep(0.02)
+        if not self.closed and not self.core.drained(): log(ev='linger_timeout', cid=self.cid, peer=self.addr[0], unacked=len(self.core.unacked), pending=len(self.core.pending))
         self.core.close('battle_relay')
 
     def on_close(self, by):

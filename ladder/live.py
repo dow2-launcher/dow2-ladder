@@ -12,7 +12,13 @@ Only native matches of our lobby server (automatch v2, launcher rooms) - a Relic
 07.11.2026 (players' test 06.11): the answer goes over our UDP tunnel to the node's udp_gateway (du_client.py, as our nodes talk to
 each other) - TCP from here to the Moscow nodes stalls after a few tens of KB (the same DPI as for the players), every fetch of a
 match there timed out; TCP only when the node's gateway does not answer. A match is offered (watchable) once the node can have
-its first records: LIVE_DELAY + a few s after its start (before that the spectator would sit at its first frame)."""
+its first records: LIVE_DELAY + a few s after its start (before that the spectator would sit at its first frame).
+07.11.2026 (players' test 06.11, "Watch" of a match running for minutes never started): the node's udp_gateway sent FIN right
+after battle_relay's answer, with the last packets still on the way - FIN has no number, the tunnel here dropped them and a
+big answer came cut off (24000 bytes = the first burst of 20 packets), LiveReplay 2 could not read it. The gateway now waits
+for the acks (dow2-ladder fix/live-replay-cut-answers); here, for nodes not updated yet, a cut answer is made whole: its
+header and the whole records in it, "available" = up to there (the spectator asks from there next), the replay header's
+length = the steps in it."""
 import asyncio, json, os, socket, struct, sys, threading, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'gameserver'))   # the repo: du_client next door
 try: import du_client                                      # installed next to this file on the server (livereplay_ladder.sh)
@@ -95,6 +101,33 @@ def _tcp(host, port, req):
     return b''.join(chunks)
 
 
+def whole_envelope(data, frm):
+    """a DWLR envelope that came cut off (its records end inside) -> a whole one of what it has: the header, the whole records,
+    available = frm + their number, not over; None = not even the header in it. A whole answer comes back as it is."""
+    if len(data) < 28 or data[:4] != b'DWLR': return None
+    ver, flags, end, nticks, hl = struct.unpack_from('<IIIII', data, 4)
+    o = 24
+    if o + hl + 4 > len(data): return None
+    head = data[o:o + hl]; o += hl
+    bl = struct.unpack_from('<I', data, o)[0]; o += 4
+    if o + bl + 4 <= len(data):
+        ml = struct.unpack_from('<I', data, o + bl)[0]
+        if o + bl + 4 + ml <= len(data): return data                   # whole
+    body = data[o:o + bl]; w = recs = ticks = 0
+    while w + 8 <= len(body):
+        n = struct.unpack_from('<I', body, w + 4)[0]
+        if w + 8 + n > len(body): break
+        if body[w:w + 4] == b'\0\0\0\0': ticks += 1
+        w += 8 + n; recs += 1
+    if frm == 0 and head:                                              # the file's length = the steps really in it
+        i = head.find(b'DATADATA')
+        if i >= 0 and i + 32 <= len(head) and struct.unpack_from('<I', head, i + 12)[0] == 4:
+            head = head[:i + 28] + struct.pack('<I', ticks) + head[i + 32:]
+    meta = json.dumps({'cut': True}).encode()
+    return (b'DWLR' + struct.pack('<IIII', ver, 0, frm + recs, ticks if frm == 0 else nticks) + struct.pack('<I', len(head)) + head
+            + struct.pack('<I', w) + body[:w] + struct.pack('<I', len(meta)) + meta)
+
+
 def fetch(mid, frm):
     """-> the node's envelope for this match from record frm, None = not a match we know"""
     with LOCK: v = LIVE.get(mid)
@@ -108,6 +141,11 @@ def fetch(mid, frm):
     data = _du(host, int(port), req) if du_client and not NODES else None
     if data is None: data = _tcp(host, int(port), req)
     if data[:4] != b'DWLR': raise IOError('bad answer from %s' % hp)
+    fixed = whole_envelope(data, max(0, frm))
+    if fixed is None: raise IOError('cut answer from %s (%d bytes, no whole header)' % (hp, len(data)))
+    if fixed is not data: print('live: %s from %d: the answer of %s came cut off (%d bytes) - %d bytes of whole records passed on'
+                                % (mid, frm, hp, len(data), len(fixed)), flush=True)
+    data = fixed
     with LOCK:
         _cache[key] = (now, data)
         for k in [k for k, c in _cache.items() if now - c[0] > 30]: _cache.pop(k, None)
