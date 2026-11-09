@@ -1354,6 +1354,8 @@ def live_view():
         ingame = [{'id': m['id'], 'state': 'playing' if m.get('state') == 'playing' else 'setup', 'mode': m['mode'], 'map': m.get('map'),
                    'started': int(m['started']) if m.get('state') == 'playing' and m.get('started') else None,
                    'team1': side(m, m['host']), 'team2': side(m, m['guest']), 'watchers': list(m.get('watchers', [])),
+                   # 09.11.2026 (the launcher's Running matches): a launcher room's match says which room it is
+                   **({'lroom': m['lroom']} if m.get('lroom') else {}),
                    **({'live': (live.info(m['id']) or {}).get('game')} if m.get('state') == 'playing' and live.watchable(m['id']) else {})}
                   for m in sorted(list(MM_MATCHES.values()) + list(MM_PLAYING.values()), key=lambda m: m['created'])]
         busy = {x['steam'] for m in ingame for x in m['team1'] + m['team2']} | {w for m in ingame for w in m['watchers']}

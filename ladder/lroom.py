@@ -181,6 +181,7 @@ def view(r):
             'maps': [{'key': k, 'name': (cat.get(k) or {}).get('name') or k} for k in r['maps']], 'opts': dict(r['opts']),
             'state': r['state'], 'cd_end': int(r['cd'] * 1000) if r['state'] == 'countdown' else 0, 'now': int(now * 1000),
             'slots': slots, 'net': _net(r), 'note': r.get('note'), 'seq': r['seq'],
+            'hs': bool(r.get('hs')), 'all_ready': _all_ready(r, now),
             'launch': {'t': int(la.get('t', 0)), 'deadline': int(la.get('deadline', 0)), 'host': la.get('host'), 'relay': la.get('relay'),
                        'match': la.get('match'), 'room': la.get('room'), 'map': la.get('map'),
                        'map_name': (cat.get(la.get('map')) or {}).get('name') or la.get('map')} if la else None}
@@ -216,10 +217,15 @@ def _unready(r, k=None, who=()):
     if r['state'] == 'countdown': r['state'] = 'lobby'; _note(r, k or 'cd_stop', who)
 
 
+def _all_ready(r, now):
+    return all(r['slots']) and all(s['ready'] and now - s['seen'] < HERE_GONE for s in r['slots'])
+
+
 def _check_ready(r, now):
-    """everybody in, everybody ready, every launcher here: the countdown; anything else stops it"""
-    full = all(r['slots']); ok = full and all(s['ready'] and now - s['seen'] < HERE_GONE for s in r['slots'])
-    if r['state'] == 'lobby' and ok:
+    """everybody in, everybody ready, every launcher here: the countdown; anything else stops it. A room of a launcher 1.5+
+    ('hs', the launcher's redesign 09.11.2026) waits for its owner's Play (verb start) instead of starting by itself."""
+    ok = _all_ready(r, now)
+    if r['state'] == 'lobby' and ok and not r.get('hs'):
         r['state'] = 'countdown'; r['cd'] = now + CD; r['note'] = None; log('room %s: countdown' % r['id']); return True
     if r['state'] == 'countdown' and not ok:
         r['state'] = 'lobby'
@@ -463,7 +469,7 @@ def api(verb, steam, d):
         name = _clean(d.get('name'), NAME_MAX) or ('%s: %s' % (_name(steam), mode))
         r = {'id': _new_id(), 'name': name, 'game': game, 'ver': _clean(d.get('ver'), 24) or '', 'mode': mode, 'map': mp, 'owner': steam,
              'state': 'lobby', 'slots': [None] * (2 * L.TEAM_N[mode]), 'cd': 0, 'launch': None, 'note': None, 'pings': {}, 'seq': 0, 'created': now,
-             'maps': [mp] if mp else [], 'opts': _opts_clean(d.get('opts') or {}, game)}
+             'maps': [mp] if mp else [], 'opts': _opts_clean(d.get('opts') or {}, game), 'hs': d.get('start') == 'host'}
         ROOMS[r['id']] = r; _seat(r, steam, 0)
         log('room %s made by %s (%s %s %s, %s)' % (r['id'], steam, game, r['ver'], mode, mp))
         _pub(r); return {'ok': True, 'room': view(r)}
@@ -550,6 +556,14 @@ def api(verb, steam, d):
         _pub(r); return {'ok': True, 'room': view(r)}
     # the owner's settings: any change of them makes everybody ready again by hand (as the game's lobby)
     if steam != r['owner']: return {'ok': False, 'error': 'owner'}
+    if verb == 'start':                                                     # the owner's Play: everybody ready - the countdown
+        if r['state'] == 'countdown': return {'ok': True, 'room': view(r)}
+        if not _all_ready(r, now): return {'ok': False, 'error': 'not_ready'}
+        r['state'] = 'countdown'; r['cd'] = now + CD; r['note'] = None; log('room %s: countdown (owner)' % r['id'])
+        _pub(r); return {'ok': True, 'room': view(r)}
+    if verb == 'stop':                                                      # the owner's Play again during the countdown
+        if r['state'] != 'countdown': return {'ok': False, 'error': 'state'}
+        r['state'] = 'lobby'; _note(r, 'cd_stop', [steam]); _pub(r); return {'ok': True, 'room': view(r)}
     if verb == 'kick':
         t = str(d.get('steam') or '')
         if t == steam or not _slot(r, t): return {'ok': False, 'error': 'bad'}
@@ -580,6 +594,8 @@ def api(verb, steam, d):
             if o != r['opts']: r['opts'] = o; changed = True
         nm = _clean(d.get('name'), NAME_MAX)
         if nm and nm != r['name']: r['name'] = nm; changed = True
+        v = _clean(d.get('ver'), 24)
+        if v and r['game'] == 'elite' and v != r['ver']: r['ver'] = v; changed = True
         if changed: _unready(r, 'conf'); _note(r, 'conf', [steam]); _pub(r)
         return {'ok': True, 'room': view(r)}
     return {'ok': False, 'error': 'unknown'}
