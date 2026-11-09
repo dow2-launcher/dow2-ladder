@@ -100,15 +100,55 @@ TR_SYS = ('You translate player chat for a Dawn of War 2: Retribution "Elite" mo
     'Keep the tone, profanity and emoji; never censor, explain or add anything. '
     'If there is nothing to translate (only emoji, numbers or symbols), put the original text in both.')
 
+TR_SYS += (' Tokens like @M1, @M2 are player mentions: copy each one verbatim into BOTH versions, at the same place in the sentence.')
+
+# 09.11.2026 (owner): "@Done being the sad girl логи глянем" came back as "@Done будь грустной девочкой глянем логи" (or with
+# the tag dropped) - the translator took a name with spaces for words. Every @<known name> is swapped for @M<n> before
+# translating and put back after; a token the translator lost goes in front, so the tag always survives.
+def _mention_names():
+    with users.LOCK:
+        ns = {n.strip() for u in users.USERS.values() for n in (u.get('name'), u.get('alias')) if n and n.strip()}
+    return sorted(ns, key=len, reverse=True)
+
+def _mask_mentions(t):
+    found, low = [], t.lower()
+    for n in _mention_names():
+        needle, i = '@' + n.lower(), 0
+        while True:
+            i = low.find(needle, i)
+            if i < 0: break
+            j = i + len(needle)
+            if j < len(low) and (low[j].isalnum() or low[j] == '_'): i = j; continue   # "@Al" is not a mention inside "@Altair"
+            found.append((i, len(needle))); low = low[:i] + '\u0000' * len(needle) + low[i + len(needle):]; i += len(needle)
+    if not found: return t, []
+    found.sort(); out, tags, pos = [], [], 0
+    for i, L in found:
+        tags.append(t[i:i + L]); out.append(t[pos:i] + '@M%d' % len(tags)); pos = i + L
+    return ''.join(out) + t[pos:], tags
+
+def _unmask_mentions(s, tags):
+    if not tags: return s
+    seen = set()
+    def put(m):
+        k = int(m.group(1))
+        if 1 <= k <= len(tags): seen.add(k); return tags[k - 1]
+        return m.group(0)
+    s = re.sub(r'@M(\d+)(?!\d)', put, s)
+    lost = [tags[k - 1] for k in range(1, len(tags) + 1) if k not in seen]
+    return (' '.join(lost) + ' ' + s).strip() if lost else s
+
 def translate(text):
     # -> (lang, ru, en). Fail-open to (None, text, text): a translator outage never blocks the chat.
     t = (text or '').strip()
     if not t: return (None, text, text)
     key = _nanogpt_key()
     if not key: return (None, text, text)
+    try: mt, tags = _mask_mentions(t)
+    except Exception: mt, tags = t, []
+    if tags and not re.sub(r'@M\d+', '', mt).strip(): return (None, t, t)   # only mentions: nothing to translate
     body = {'model': NANOGPT_MODEL, 'temperature': 0, 'max_tokens': 800,
             'response_format': {'type': 'json_object'},
-            'messages': [{'role': 'system', 'content': TR_SYS}, {'role': 'user', 'content': t[:1000]}]}
+            'messages': [{'role': 'system', 'content': TR_SYS}, {'role': 'user', 'content': mt[:1000]}]}
     try:
         req = urllib.request.Request('https://nano-gpt.com/api/v1/chat/completions', data=json.dumps(body).encode(),
                                      headers={'content-type': 'application/json', 'authorization': 'Bearer ' + key})
@@ -117,8 +157,8 @@ def translate(text):
         try: o = json.loads(c)
         except Exception:
             m = re.search(r'\{.*\}', c, re.S); o = json.loads(m.group(0)) if m else {}
-        ru = (o.get('ru') or '').strip() or t
-        en = (o.get('en') or '').strip() or t
+        ru = (o.get('ru') or '').strip(); ru = _unmask_mentions(ru, tags) if ru else t
+        en = (o.get('en') or '').strip(); en = _unmask_mentions(en, tags) if en else t
         lang = ((o.get('lang') or '').strip().lower() or None)
         return (lang[:8] if lang else None, ru, en)
     except Exception as e:
