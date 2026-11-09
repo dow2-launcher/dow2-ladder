@@ -155,8 +155,8 @@ def translate(text):
         with urllib.request.urlopen(req, timeout=12) as r:
             c = json.load(r)['choices'][0]['message']['content']
         try: o = json.loads(c)
-        except Exception:
-            m = re.search(r'\{.*\}', c, re.S); o = json.loads(m.group(0)) if m else {}
+        except Exception:   # 09.11: the model sometimes adds a second object / text after the JSON - take the first object
+            i = c.find('{'); o = json.JSONDecoder().raw_decode(c[i:])[0] if i >= 0 else {}
         ru = (o.get('ru') or '').strip(); ru = _unmask_mentions(ru, tags) if ru else t
         en = (o.get('en') or '').strip(); en = _unmask_mentions(en, tags) if en else t
         lang = ((o.get('lang') or '').strip().lower() or None)
