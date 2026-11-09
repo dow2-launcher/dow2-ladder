@@ -1,5 +1,10 @@
 # dow2-ladder — сайт, ладдер и сервисы DoW2 Elite
 
+[![build](https://github.com/dow2-launcher/dow2-ladder/actions/workflows/check.yml/badge.svg)](https://github.com/dow2-launcher/dow2-ladder/actions/workflows/check.yml)
+[![CodeQL](https://github.com/dow2-launcher/dow2-ladder/actions/workflows/codeql.yml/badge.svg)](https://github.com/dow2-launcher/dow2-ladder/actions/workflows/codeql.yml)
+[![secret scan](https://github.com/dow2-launcher/dow2-ladder/actions/workflows/secrets.yml/badge.svg)](https://github.com/dow2-launcher/dow2-ladder/actions/workflows/secrets.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/dow2-launcher/dow2-ladder/badge)](https://scorecard.dev/viewer/?uri=github.com/dow2-launcher/dow2-ladder)
+
 Всё, что крутится на rts.fintebtc.de (и зеркалах dow2 / dow2ru) вокруг автоматча и сайта, плюс наш игровой сервер в Москве.
 
 | Папка | Что это | Куда ставится | Сервис |
