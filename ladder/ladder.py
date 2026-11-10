@@ -9,6 +9,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from concurrent.futures import ThreadPoolExecutor
 import stream, users                                # launcher users / presence, the live stream (SSE)
 import nodeq                                        # node quality per player: the nodes not used for him (06.11.2026)
+import own_matches                                  # our automatch's matches kept for our own rating, storage only (10.11.2026)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB = ROOT + '/data/ladder.sqlite'
@@ -925,6 +926,7 @@ def _end_match(mid, m, now):  # под MM_LOCK: матч закончился (�
         try:
             with _db_lock, db() as c: c.execute('UPDATE mm_history SET ended = ? WHERE lobby = ? AND ended IS NULL', (int(now), m['lobby']))
         except Exception: pass
+        own_matches.on_match_over(m['lobby'], now)       # never raises
 
 ALIVE_GAP = 180   # MMFind 0.23+ шлёт alive раз в минуту, пока идёт матч; 3 минуты тишины от всех = все вышли
 def mm_alive(steam):
@@ -940,10 +942,11 @@ def _reap_playing(now):  # под MM_LOCK
         if a and now - max(a.values()) > ALIVE_GAP: _end_match(mid, m, now)       # старые клиенты alive не шлют - для них как раньше
 
 def mm_ended(steam):  # игрок вернулся в меню после матча
-    steam = str(steam)
+    steam = str(steam); lob = []
     with MM_LOCK:
         for mid, m in list(MM_PLAYING.items()):
             if steam in m['host'] + m['guest']:
+                lob.append(m.get('lobby'))
                 if not m.get('back') and m.get('lobby'):
                     try:
                         with _db_lock, db() as c: c.execute('UPDATE mm_history SET ended = ? WHERE lobby = ? AND ended IS NULL', (int(time.time()), m['lobby']))
@@ -952,7 +955,8 @@ def mm_ended(steam):  # игрок вернулся в меню после ма�
                 if len(m['back']) >= 1:
                     MM_PLAYING.pop(mid, None); users.refresh_rating(m['host'] + m['guest'])
                     if m.get('lroom'): lroom.on_match_over(m)
-        return {'ok': True}
+    own_matches.on_ended(steam, lob[0] if lob else None)   # menu_t (storage only, never raises)
+    return {'ok': True}
 
 # ---------- сорванные загрузки: у кого игра упала, пока матч грузился (остальные остались без игры) ----------
 RUIN_PENALTY = 25      # очков рейтинга за каждый срыв в сезоне (в таблице и в подборе)
@@ -962,6 +966,7 @@ with db() as c:
 
 def mm_ruined(steam, lobby):
     steam = str(steam); lobby = _clean(lobby, 80)
+    if steam and lobby and lobby.startswith('NM-'): return {'ok': own_matches.on_ruined(steam, lobby)}   # 10.11.2026: our automatch - stored only, no penalty
     if not steam or not lobby or not lobby.startswith('MM-'): return {'ok': False}
     with db() as c:
         row = c.execute('SELECT players, started FROM mm_history WHERE lobby = ?', (lobby,)).fetchone()
@@ -992,6 +997,7 @@ with db() as c:
     ''')
     try: c.execute('ALTER TABLE mm_history ADD COLUMN kind TEXT')   # 05.11.2026: 'room' = a match from a launcher room (agreed, never rated)
     except sqlite3.OperationalError: pass
+own_matches.setup(db, _db_lock, season_of)
 
 def _history_add(m):  # под MM_LOCK, в момент старта: кто, за какую сторону, рейтинг на входе
     if not m.get('lobby') or m.get('bots'):                # тесты против компьютера (TestBots) — не матчи ладдера
@@ -1010,6 +1016,7 @@ def _history_add(m):  # под MM_LOCK, в момент старта: кто, з
         c.execute('INSERT OR IGNORE INTO mm_history (lobby, mid, mode, map, started, players, watchers, kind) VALUES (?,?,?,?,?,?,?,?)',
                   (m['lobby'], m['id'], m['mode'], m.get('map'), int(m['started']), json.dumps(pl, ensure_ascii=False), json.dumps(w, ensure_ascii=False),
                    'room' if m.get('lroom') else None))
+    own_matches.on_start(m, pl)                           # own_matches (storage only, never raises)
 
 def _local_json(url, timeout=30):
     try:
@@ -1745,7 +1752,8 @@ def nm_fail(d):  # own_lobby knows better (a join refused, the host's game left 
         _nm_fail(m, culprits, _clean(d.get('why'), 60) or 'failed')
         return {'ok': True}
 
-NM_API = {'join': nm_join, 'sync': nm_sync, 'room': nm_room, 'joined': nm_joined, 'started': nm_started, 'leave': nm_leave, 'fail': nm_fail}
+NM_API = {'join': nm_join, 'sync': nm_sync, 'room': nm_room, 'joined': nm_joined, 'started': nm_started, 'leave': nm_leave, 'fail': nm_fail,
+          'report': own_matches.on_reports}             # 10.11.2026: every game's report of a room (own_lobby to_ladder), storage only
 
 def mm_native(steam, d):
     """MMFind 0.38 asks before Start Searching: will the game's own search be served natively (OwnLobby.dll signed this player in

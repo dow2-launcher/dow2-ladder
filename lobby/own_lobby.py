@@ -347,8 +347,12 @@ def report(r, sess, p):
     if r['state'] == 'lobby': start_room(r)
     r.setdefault('first_report', time.time())
     r['reports'][sess['pid']] = {k: v for k, v in p.items() if k.lower() not in SECRET_PARAMS}
+    r['reports'][sess['pid']]['_t'] = int(time.time())                    # 10.11.2026: when each game reported (own_matches)
     log('room %d: result from pid=%d (%d of %d)' % (r['mid'], sess['pid'], len(r['reports']), len(r['members'])))
-    if len(r['reports']) >= len(r.get('order') or r['members']):
+    if r.get('stored'):                                                   # a report after the 90 s: the ladder's own_matches still gets it
+        try: report_all(r)
+        except Exception as e: log('room %d: nm/report failed: %r' % (r['mid'], e))
+    elif len(r['reports']) >= len(r.get('order') or r['members']):
         to_ladder(r)
     return [0]
 
@@ -410,6 +414,23 @@ def to_ladder(r):
                                                                      ', '.join('%d:%s' % (x['profile_id'], x['outcome']) for x in members)))
     except Exception as e:
         log('room %d: ladder write failed: %r' % (r['mid'], e))
+    try: report_all(r)
+    except Exception as e: log('room %d: nm/report failed: %r' % (r['mid'], e))
+
+
+REPORT_KEYS = ('profile_ids', 'results', 'race_ids', 'teamIDs', 'counters', '_t')
+
+
+def report_all(r):
+    """10.11.2026 (own_rating step 1a): EVERY game's report of the room -> the ladder's own_matches (storage only, rates nothing):
+    pid -> results/race_ids/counters/_t, the room's relay, who never reported (missing; to_ladder runs 90 s after the first report)"""
+    if r.get('kind') != 'nm': return                                  # the native automatch's rooms (NM-<mid>) only
+    order = r.get('order') or list(r['members'])
+    ladder_bg('report', {'room': r['mid'], 'match': r.get('match'), 'relay': r.get('relay'), 'started': int(r['started'] or r['created']),
+                         'first_t': int(r.get('first_report') or 0) or None, 'stored_t': int(time.time()),
+                         'reports': {str(pid): {k: v for k, v in x.items() if k in REPORT_KEYS} for pid, x in r['reports'].items()},
+                         'missing': [pid for pid in order if pid not in r['reports']],
+                         'members': {str(pid): {'team': m.get('team'), 'race': m.get('race')} for pid, m in r['members'].items()}})
 
 
 # ---------------- native automatch (03.11.2026): the game's OWN "Find a Game", the match decided by the ladder ----------------
