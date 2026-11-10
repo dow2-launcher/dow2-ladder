@@ -10,6 +10,7 @@ The lines go into own_matches.node_log + own_match_players (join_t, leave_t, lea
 through own_matches.on_node_log - only sessions of OUR matches (a row exists, the time fits); a second run of the same line
 replaces itself. Lines younger than LAG s wait for the next run (the gateway's close comes up to ~20 s after the leave).
   match_log_collect.py [--print]                  the new lines (--print: show, write nothing, keep the state)
+  match_log_collect.py --resolve                  only own rating step 2: the results + the shadow rating (also after every run)
   match_log_collect.py --backfill [--print]       sessions of our matches from before the protocol, rebuilt from the
                                                   join/leave/away/back/away_expired/vote_drop/session_end lines (v=0)
 """
@@ -127,8 +128,15 @@ def ask(host, *args):
     return d
 
 
+def step2():
+    """own rating step 2 (shadow, shown to nobody): every own match's result + "a leave = a loss", then own_ratings from scratch"""
+    try: own_matches.step2(DB, log=lambda s: print('mlog: ' + s, flush=True))
+    except Exception as e: print('mlog: step2: %r' % e, flush=True)
+
+
 def main():
     show, back = '--print' in sys.argv, '--backfill' in sys.argv
+    if '--resolve' in sys.argv: return step2()
     own_matches.setup(lambda: sqlite3.connect(DB, timeout=30), threading.Lock(), lambda t: None)
     ips = [r['ip'] for r in json.load(open(RELAYS)).get('relays', []) if r.get('ip')]
     st = load_state(); upto = time.time() - LAG
@@ -152,6 +160,7 @@ def main():
         if not show and not back: st[ip] = dict(pos=d['pos'], t=int(time.time()))
         print('mlog: %s: %d lines %s' % (ip, len(d['logs']), json.dumps(res)), flush=True)
     if not show and not back: save_state(st)
+    if not show: step2()
 
 
 if __name__ == '__main__':

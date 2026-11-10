@@ -4,7 +4,7 @@ Nothing here changes a rating, the queue or a room: every call is wrapped (an er
 written and never read by the matchmaking. sid = own_lobby room id (mid) = the node's session id = mm_history 'NM-<sid>'.
 Writers: ladder.py _history_add (the players at the start, rating before), mm_ended (menu_t), _end_match (ended), mm_ruined for
 NM- lobbies (ruined_t: his game fell while loading), nm/report from own_lobby (every game's report + who never reported).
-The columns of step 2 (final, winner_team, result_src, rated...) stay empty here. Plan: reports/rating_plan/STEP1_DATA_RU.md 3.3.
+The columns of step 2 (final, winner_team, result_src, rated...) are filled by the step 2 part at the end (shadow only). Plan: reports/rating_plan/STEP1_DATA_RU.md 3.3.
 """
 import json, sqlite3, time, traceback
 
@@ -219,3 +219,250 @@ def backfill(c, log=print):
         n += 1
     log('own_matches backfill: %d matches' % n)
     return n
+
+
+# ---------------------------------------------------------------------------------------------------------------------------
+# Step 2 (10.11.2026): the result of a match and "a leave = a loss" + the SHADOW rating own_ratings. Shown to nobody: the ladder's
+# tables (matches / ratings), its Glicko over Relic and data/unrated.on are not touched. Plan: reports/rating_plan/PLAN_RU.md
+# rules 1-7, STEP1_DATA_RU.md 3.3; the comparison on the history: STEP2_RU.md. Called by match_log_collect.py after its writes.
+END_EPS = 5             # s: he left at least this long before the end of the game = he left DURING the game
+END_EPS_EST = 15        # s: the same when the end is only estimated (backfill: the time the ladder stored the match)
+REPORT_WAIT = 90        # s: own_lobby stores a match this long after the first report when someone's report is missing
+EARLY_S = 120           # s from the start: a leave before this = the match did not take place (rated for nobody)
+FORGIVE_S = 86400       # ... and the leaver is forgiven his first such leave in this window, every next one is his loss
+ALL_GONE_S = 3          # s: everyone gone within this (before any result) = our node / the network, no rating
+SHORT_W = 0.5           # weight of the loss of a leaver's teammate whose team then lost short-handed
+ROOMS_RATED = False     # launcher rooms: there is no "rated" tick yet (rule 1) -> unrated 'room'
+CAL_GAMES = 5           # the first games of a player in a mode+season: calibration (cal_left)
+MODES_N = {1: '1v1', 2: '2v2', 3: '3v3'}
+
+MIGRATE = [('own_matches', 'notes', 'TEXT'), ('own_matches', 'resolved', 'INTEGER'),
+           ('own_match_players', 'weight', 'REAL'), ('own_match_players', 'early_leave', 'INTEGER'),
+           ('own_match_players', 'note', 'TEXT')]
+RATINGS_SCHEMA = '''
+CREATE TABLE IF NOT EXISTS own_ratings (
+  steam TEXT, mode TEXT, season TEXT, rating REAL, rd REAL, vol REAL, games INTEGER, wins INTEGER, losses INTEGER,
+  leaves INTEGER, cal_left INTEGER, cons REAL, last INTEGER, PRIMARY KEY (steam, mode, season));
+'''
+
+
+def migrate(c):
+    c.executescript(SCHEMA + RATINGS_SCHEMA)
+    for t, col, typ in MIGRATE:
+        if col not in [r[1] for r in c.execute('PRAGMA table_info(%s)' % t)]:
+            c.execute('ALTER TABLE %s ADD COLUMN %s %s' % (t, col, typ))
+
+
+_LADDER_FN = {}
+def ladder_fn():
+    """glicko2_update and season_of: the very code of ladder.py (its functions are taken out of its source - importing the ladder
+    would start its module-level setup)"""
+    if not _LADDER_FN:
+        import ast, math, os, time as _t
+        src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ladder.py'), encoding='utf-8').read()
+        want = {'Q', 'TAU', '_g', '_E', 'glicko2_update', 'season_of'}
+        body = [n for n in ast.parse(src).body
+                if (isinstance(n, ast.FunctionDef) and n.name in want) or
+                   (isinstance(n, ast.Assign) and any(getattr(t, 'id', None) in want for t in n.targets))]
+        ns = {'math': math, 'time': _t}
+        exec(compile(ast.Module(body=body, type_ignores=[]), 'ladder.py', 'exec'), ns)
+        _LADDER_FN.update(glicko=ns['glicko2_update'], season=ns['season_of'])
+    return _LADDER_FN
+
+
+def _loads(s, d=None):
+    try: return json.loads(s) if s else d
+    except Exception: return d
+
+
+def decide(m, ps, early_before=lambda steam: 0):
+    """the result of one match. m: {kind, started, end_est (bool), all_gone_s, conflict (bool)}; ps: [{steam, team, rep (1/0/3/-1/None),
+    rep_t, leave (s, his effective leave time or None)}] -> {winner_team, result_src, rated, why, notes, players: {steam: (final, weight,
+    early, note)}}. Pure: the tests feed it made-up matches."""
+    fin = {p['steam']: ['none', 1.0, 0, None] for p in ps}
+    r = dict(winner_team=None, result_src=None, rated=0, why=None, notes=[], players=fin)
+    teams = {}
+    for p in ps: teams.setdefault(p['team'], []).append(p)
+    sizes = sorted(len(v) for v in teams.values())
+    why_el = None                                        # rule 1: what makes the match unrated whatever happened in it
+    if len(teams) != 2 or sizes[0] != sizes[1] or sizes[0] not in MODES_N: why_el = 'not_full_teams'
+    elif any(not p['steam'] or str(p['steam']).startswith('pid:') for p in ps): why_el = 'no_steam'
+    elif m.get('kind') == 'room' and not ROOMS_RATED: why_el = 'room'
+    elif m.get('kind') not in ('mm', 'room'): why_el = 'no_history'      # not known to come from our automatch / a room
+    tids = sorted(teams, key=lambda t: (t is None, t))
+    def other(t): return tids[1] if t == tids[0] else tids[0]
+    def done(why, src=None):
+        r['why'] = why_el or why; r['result_src'] = src
+        if why_el and why: r['notes'].append(why)
+        r['rated'] = 1 if (r['why'] is None and r['winner_team'] is not None) else 0
+        return r
+    if len(teams) != 2: return done('not_full_teams')
+    # the reports: only 1/0 say who won (3 = "ended by a leave, no winner", -1/None = no report)
+    real = [p for p in ps if p['rep'] in (0, 1)]
+    tv = {t: {p['rep'] for p in real if p['team'] == t} for t in tids}
+    if m.get('conflict') or any(len(v) > 1 for v in tv.values()) or (tv[tids[0]] and tv[tids[0]] == tv[tids[1]]):
+        return done('reports_disagree', 'check')
+    eps = END_EPS_EST if m.get('end_est') else END_EPS
+    ts = [p['rep_t'] for p in real if p.get('rep_t')]
+    end_t = min(ts) if ts else None
+    known = [p for p in ps if p['leave'] is not None]
+    gone = sorted(known, key=lambda p: p['leave'])
+    # rule 5: everybody dropped at once before any result -> the node / the network
+    if len(gone) == len(ps) and gone[-1]['leave'] - gone[0]['leave'] <= ALL_GONE_S and (end_t is None or gone[-1]['leave'] < end_t - eps):
+        return done('all_gone', 'node')
+    started = m.get('started') or 0
+    if real:
+        win = next(t for t in tids if tv[t] == {1}) if any(tv[t] == {1} for t in tids) else other(next(t for t in tids if tv[t] == {0}))
+        if end_t is None:                                # 1/0 without a time: nobody can be judged a leaver
+            leavers = []; r['notes'].append('no_report_time')
+        else:
+            leavers = [p for p in known if p['leave'] < end_t - eps]
+        src = 'reports+node' if leavers else 'reports'
+    else:
+        # no 1/0 report: the team all of whose players left first lost, if the others stayed longer than ALL_GONE_S
+        if not ps or len(known) < len(ps): return done('no_data' if not any(p['rep'] is not None for p in ps) else 'no_winner', None)
+        cnt = {t: 0 for t in tids}; lost = t_lost = None
+        for p in gone:
+            cnt[p['team']] += 1
+            if cnt[p['team']] == len(teams[p['team']]): lost, t_lost = p['team'], p['leave']; break
+        win = other(lost)
+        stay = [p['leave'] for p in teams[win] if p['leave'] > t_lost]
+        if not stay or min(stay) - t_lost <= ALL_GONE_S: return done('all_gone', 'node')
+        leavers = [p for p in gone if p['leave'] <= t_lost]
+        src = 'node'
+    if all(p in leavers for p in teams[win]): return done('winners_left', 'check')
+    r['winner_team'] = win
+    # rule 4, early: a leave before EARLY_S = no match; the leaver loses unless it is his first such in FORGIVE_S
+    early = [p for p in leavers if p['leave'] - started < EARLY_S] if started else []
+    if early:
+        for p in early:
+            f = fin[p['steam']]; f[2] = 1
+            if early_before(p['steam']) > 0: f[0] = 'loss_leave'; f[3] = 'early_leave'
+            else: f[3] = 'early_forgiven'
+        return done('early_leave', src)
+    nl = {t: sum(1 for p in leavers if p['team'] == t) for t in tids}
+    for p in ps:
+        f = fin[p['steam']]
+        if p in leavers: f[0] = 'loss_leave'; f[3] = ('left_%ds_before_end' % (end_t - p['leave'])) if real else 'left_first'
+        elif p['team'] == win: f[0] = 'win'
+        else:
+            f[0] = 'loss'
+            if nl[p['team']] > nl[other(p['team'])]: f[1] = SHORT_W; f[3] = 'short_handed'
+    return done(None, src)
+
+
+def _match_input(c, sid):
+    """own_matches + own_match_players rows -> decide()'s m, ps (+ pid by steam)"""
+    row = c.execute('SELECT kind, started, reports, node_log, flags FROM own_matches WHERE sid = ?', (sid,)).fetchone()
+    if not row: return None, None
+    kind, started, reports, node_log, flags = row
+    rep = _loads(reports, {}) or {}
+    logs = _loads(node_log, []) or []
+    if not isinstance(logs, list): logs = [logs]
+    best = max(logs, key=lambda x: x.get('ticks') or 0) if logs else {}
+    m = dict(kind=kind, started=started, end_est=False, all_gone_s=best.get('all_gone_within_s'), conflict=False)
+    cols = 'steam, pid, team, report_result, report_t, leave_t, menu_t, ruined_t'
+    pl = [dict(zip(cols.split(', '), x)) for x in c.execute('SELECT %s FROM own_match_players WHERE sid = ?' % cols, (sid,))]
+    if rep.get('backfill'):                              # 06-09.11: only the first report + the ladder's outcome per pid, no times
+        out = rep.get('outcome') or {}
+        try: ct = c.execute('SELECT json_extract(data, "$.completiontime") FROM matches WHERE id = ?', (sid,)).fetchone()
+        except Exception: ct = None
+        ct = ct[0] if ct else None
+        miss = any(_int(v) == -1 for v in out.values())
+        for p in pl:
+            v = _int(out.get(str(p['pid'])))
+            p['report_result'] = v if v != -1 else None
+            p['report_t'] = (ct - (REPORT_WAIT if miss else 0)) if (ct and v is not None and v != -1) else None
+        m['end_est'] = True
+    else:                                                # every game's report: the same player told differently = a conflict
+        seen = {}
+        for x in (rep.get('reports') or {}).values():
+            if not isinstance(x, dict): continue
+            try: res = dict(zip([int(q) for q in json.loads(x.get('profile_ids') or '[]')], json.loads(x.get('results') or '[]')))
+            except Exception: continue
+            for pid, v in res.items():
+                if v in (0, 1): seen.setdefault(pid, set()).add(v)
+        m['conflict'] = any(len(v) > 1 for v in seen.values())
+    ps = []
+    for p in pl:
+        lv = [t for t in (p['leave_t'], p['menu_t'], p['ruined_t']) if t]
+        ps.append(dict(steam=p['steam'], pid=p['pid'], team=p['team'], rep=p['report_result'], rep_t=p['report_t'], leave=min(lv) if lv else None))
+    return m, ps
+
+
+def resolve(sid, c):
+    """decide() on the stored data and write it: own_matches winner_team/result_src/rated/why_unrated/notes, players final/weight/early_leave/note"""
+    m, ps = _match_input(c, sid)
+    if m is None: return None
+    def early_before(steam):
+        return c.execute('SELECT COUNT(*) FROM own_match_players p JOIN own_matches x ON x.sid = p.sid WHERE p.steam = ? AND p.early_leave = 1 '
+                         'AND p.sid != ? AND x.started >= ? AND x.started < ?', (steam, sid, (m['started'] or 0) - FORGIVE_S, m['started'] or 0)).fetchone()[0]
+    r = decide(m, ps, early_before)
+    c.execute('UPDATE own_matches SET winner_team = ?, result_src = ?, rated = ?, why_unrated = ?, notes = ?, resolved = ? WHERE sid = ?',
+              (r['winner_team'], r['result_src'], r['rated'], r['why'], ','.join(r['notes']) or None, int(time.time()), sid))
+    for steam, (final, w, early, note) in r['players'].items():
+        c.execute('UPDATE own_match_players SET final = ?, weight = ?, early_leave = ?, note = ? WHERE sid = ? AND steam = ?',
+                  (final, w, early, note, sid, steam))
+    return r
+
+
+def recompute_own(c, log=print):
+    """the shadow rating from scratch: Glicko-2 of the ladder over own_matches rated=1 (+ the leaver's own loss in an 'early_leave'
+    match), in the order of the start; one match = one period, against the other team's average (as ladder.recompute); the weight
+    w < 1 scales his rating change. -> own_ratings (cons = rating - 2*RD, cal_left = calibration games left)"""
+    L = ladder_fn(); g2 = L['glicko']
+    R = {}
+    def get(steam, mode, season): return R.setdefault((steam, mode, season), [1500.0, 350.0, 0.06, 0, 0, 0, 0, 0])
+    ms = c.execute('SELECT sid, started, season, rated, why_unrated, winner_team FROM own_matches WHERE rated = 1 OR why_unrated = "early_leave" '
+                   'ORDER BY started, sid').fetchall()
+    n = 0
+    for sid, started, season, rated, why, win in ms:
+        ps = c.execute('SELECT steam, team, final, coalesce(weight, 1) FROM own_match_players WHERE sid = ?', (sid,)).fetchall()
+        teams = {}
+        for p in ps: teams.setdefault(p[1], []).append(p)
+        if len(teams) != 2: continue
+        mode = MODES_N.get(len(ps) // 2); season = season or L['season'](started)
+        if not mode: continue
+        avg = {}
+        for t, v in teams.items():
+            rs = [get(p[0], mode, season) for p in v]
+            avg[t] = (sum(a[0] for a in rs) / len(rs), (sum(a[1] * a[1] for a in rs) / len(rs)) ** 0.5)
+        upd = []
+        for t, v in teams.items():
+            ot = [k for k in teams if k != t][0]
+            for steam, _, final, w in v:
+                if final not in ('win', 'loss', 'loss_leave') or (not rated and final != 'loss_leave'): continue
+                st = get(steam, mode, season); s = 1.0 if final == 'win' else 0.0
+                nr, nrd, nv = g2(st[0], st[1], st[2], [(avg[ot][0], avg[ot][1], s)])
+                upd.append((st, st[0] + w * (nr - st[0]), nrd, nv, final, started))
+        for st, nr, nrd, nv, final, t in upd:
+            st[0], st[1], st[2] = nr, nrd, nv
+            st[3] += 1; st[4] += final == 'win'; st[5] += final != 'win'; st[6] += final == 'loss_leave'; st[7] = t
+        n += 1
+    c.execute('DELETE FROM own_ratings')
+    for (steam, mode, season), st in R.items():
+        if not st[3]: continue
+        c.execute('INSERT INTO own_ratings VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                  (steam, mode, season, st[0], st[1], st[2], st[3], st[4], st[5], st[6], max(0, CAL_GAMES - st[3]), st[0] - 2 * st[1], st[7]))
+    log('own_matches: shadow rating from %d matches, %d player rows' % (n, sum(1 for v in R.values() if v[3])))
+    return n
+
+
+def step2(db_path, log=print):
+    """match_log_collect.py: resolve every own match in the order of the start (the forgiveness of the first early leave depends on
+    the earlier ones), then recompute_own. Its own connection; any error -> one log line, nothing raised"""
+    try:
+        c = sqlite3.connect(db_path, timeout=30)
+        try:
+            with c:
+                migrate(c)
+                c.execute('UPDATE own_match_players SET early_leave = NULL')
+                sids = [r[0] for r in c.execute('SELECT sid FROM own_matches ORDER BY started, sid')]
+                res = {}
+                for sid in sids:
+                    r = resolve(sid, c); k = (r or {}).get('why') or 'rated'; res[k] = res.get(k, 0) + 1
+                log('own_matches: resolved %d: %s' % (len(sids), json.dumps(res, sort_keys=True)))
+                recompute_own(c, log)
+        finally: c.close()
+        return True
+    except Exception as e: _log('step2', e); return False
