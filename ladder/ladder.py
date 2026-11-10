@@ -1846,7 +1846,7 @@ def fb_send(d, author='player'):
             raw = base64.b64decode(str(b64).split(',', 1)[-1], validate=False)
         except Exception:
             continue
-        if not raw or len(raw) > 8 << 20: continue
+        if not raw or len(raw) > 20 << 20: continue   # 10.11: phone photos
         ext = 'png' if raw[:4] == b'\x89PNG' else 'jpg' if raw[:2] == b'\xff\xd8' else 'gif' if raw[:3] == b'GIF' else 'webp' if raw[8:12] == b'WEBP' else None
         if not ext: continue
         fn = '%d_%s.%s' % (int(time.time() * 1000), os.urandom(4).hex(), ext)
@@ -2097,7 +2097,7 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith('/ladder/api/inbox/'): return inbox.handle_post(self, u)
             if u.path in ('/ladder/api/fb/send', '/ladder/api/fb/reply'):
                 n = int(self.headers.get('Content-Length') or 0)
-                if n <= 0 or n > 24 << 20: return self.send(413, {'error': 'size'}, cache=0)
+                if n <= 0 or n > 96 << 20: return self.send(413, {'error': 'size'}, cache=0)
                 try: d = json.loads(self.rfile.read(n).decode('utf-8'))
                 except Exception: return self.send(400, {'error': 'json'}, cache=0)
                 if u.path == '/ladder/api/fb/send': return self.send(200, fb_send(d), cache=0)
