@@ -16,7 +16,7 @@ RELAYS = '/srv/ladder/data/relays.json'
 TOKEN = '/srv/ladder/data/nm_token'
 STATE = os.environ.get('NODEQ_STATE', '/var/lib/nodeq-collect/state.json')
 LADDER = os.environ.get('NODEQ_LADDER', 'http://127.0.0.1:8217/ladder/api/nq/match')
-SSH = {'83.217.192.34': 'timeweb', '116.202.106.150': 'root@iggy', '15.220.68.107': 'root@polsha', '91.107.122.186': 'root@ru.pivolan.ru'}
+SSH = {'83.217.192.34': 'node-timeweb', '116.202.106.150': 'node-iggy', '15.220.68.107': 'node-polsha', '91.107.122.186': 'node-rupivolan'}  # ~/.ssh/config: User dow2deploy (no root on the nodes)
 LAG = 150            # s: a leave this fresh waits for the next run (the gateway's close line comes up to ~20 s after it)
 FIRST = 3 * 86400    # s back on the very first run of a node
 

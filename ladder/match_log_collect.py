@@ -23,7 +23,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB = os.environ.get('MLOG_DB', ROOT + '/data/ladder.sqlite')
 RELAYS = ROOT + '/data/relays.json'
 STATE = os.environ.get('MLOG_STATE', '/var/lib/match-log-collect/state.json')
-SSH = {'83.217.192.34': 'timeweb', '116.202.106.150': 'root@iggy', '15.220.68.107': 'root@polsha', '91.107.122.186': 'root@ru.pivolan.ru'}
+SSH = {'83.217.192.34': 'node-timeweb', '116.202.106.150': 'node-iggy', '15.220.68.107': 'node-polsha', '91.107.122.186': 'node-rupivolan'}  # ~/.ssh/config: User dow2deploy (no root on the nodes)
 LAG = 150
 
 NODE = r'''

@@ -1,0 +1,17 @@
+# Фрагмент /root/.ssh/config на rts: алиасы node-* для деплоя и сборщиков (ключ только у root на rts).
+# Игровые узлы DoW2 под пользователем dow2deploy (этап 1 прав доступа, 10.11.2026):
+# сборщики relay-links/nodeq/match-log и выкладка в /srv/dow2battle; root на узлах rts больше не нужен.
+Host node-timeweb
+    HostName 83.217.192.34
+Host node-iggy
+    HostName 116.202.106.150
+Host node-polsha
+    HostName 15.220.68.107
+Host node-rupivolan
+    HostName 91.107.122.186
+Host node-timeweb node-iggy node-polsha node-rupivolan
+    User dow2deploy
+    IdentityFile /root/.ssh/dow2deploy_ed25519
+    IdentitiesOnly yes
+    BatchMode yes
+    StrictHostKeyChecking accept-new

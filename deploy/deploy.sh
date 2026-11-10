@@ -86,11 +86,11 @@ if has site/; then
 fi
 # ---- our game servers: Moscow (Timeweb) + iggy (Hetzner) + polsha (AWS Frankfurt), each only with no game on it
 if has gameserver/; then
-  for h in timeweb root@iggy root@polsha root@ru.pivolan.ru; do
+  for h in node-timeweb node-iggy node-polsha node-rupivolan; do      # ~/.ssh/config: User dow2deploy, sudo only systemctl restart|status
     live=$(ssh -o BatchMode=yes $h "ss -tn state established \"( sport = :47100 or sport = :47000 )\" | tail -n +2 | wc -l" 2>/dev/null || echo 99)
     if [ "${live:-99}" -gt 0 ]; then pending="$pending
 gameserver/"; continue; fi
-    scp -q gameserver/battle_relay.py gameserver/du_client.py gameserver/du_proto.py gameserver/udp_gateway.py $h:/srv/dow2battle/ && ssh $h "chmod 644 /srv/dow2battle/battle_relay.py /srv/dow2battle/du_client.py /srv/dow2battle/du_proto.py /srv/dow2battle/udp_gateway.py; systemctl restart dow2-battle dow2-udpgw" && done_parts="$done_parts сервер-$h"
+    scp -q gameserver/battle_relay.py gameserver/du_client.py gameserver/du_proto.py gameserver/udp_gateway.py $h:/srv/dow2battle/ && ssh $h "chmod 644 /srv/dow2battle/battle_relay.py /srv/dow2battle/du_client.py /srv/dow2battle/du_proto.py /srv/dow2battle/udp_gateway.py; sudo -n systemctl restart dow2-battle dow2-udpgw" && done_parts="$done_parts сервер-$h"
   done
   pending=$(echo "$pending" | sort -u)
 fi
