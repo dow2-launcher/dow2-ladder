@@ -622,7 +622,7 @@ def _splittable(grp, n):  # can these players make two teams of n without splitt
 
 def _assign_watchers():  # под MM_LOCK: зрителей — в собираемые матчи (до старта), по вместимости слотов наблюдателей
     forming = sorted([m for m in MM_MATCHES.values() if m.get('state') != 'playing'], key=lambda m: m['created'])
-    for w in sorted([p for p in MM.values() if p['mode'] == WATCH and p['state'] == 'searching'], key=lambda p: p['ts']):
+    for w in sorted([p for p in MM.values() if p['mode'] == WATCH and p['state'] == 'searching' and not p.get('lroom')], key=lambda p: p['ts']):   # a launcher room's observer: lroom._watch_in
         for m in forming:
             if m.get('pool', '') != w.get('pool', ''): continue
             cap = 8 - 2 * TEAM_N[m['mode']]
@@ -848,7 +848,14 @@ def mm_join(steam, mode, d=None):
                      'own': bool(d.get('own_server')), 'ping': _relay_ping(d.get('relay_ping')) if d.get('own_server') else None,
                      'group': _clean(d.get('group'), 24) or '', 'compat': bool(d.get('relay_compat')),
                      'ua': _clean(d.get('_ua'), 80) or '', 'ver': _clean(d.get('ver') or d.get('launcher'), 32) or '', 'elite': _clean(d.get('elite'), 32) or '', 'os': _clean(d.get('os'), 24) or ''}
-        if mode == WATCH: _assign_watchers()
+        if mode == WATCH:
+            # 10.11.2026: an observer of a launcher room (MMFind's Watch with "lroom") goes into that room's match, not any match
+            if lroom.on_watch_join(steam, MM[steam], d):
+                if steam not in MM:
+                    c = MM_CANCELLED.get(steam) or {}
+                    return {'state': 'cancelled', 'match': c.get('match'), 'by': c.get('by'), 'again': False}
+                return _player_view(MM[steam])
+            _assign_watchers()
         elif d.get('bots'):   # тест: матч сразу против компьютеров, хост заполнит пустые слоты ИИ
             MM_SEQ[0] += 1; mid = 'm%d' % MM_SEQ[0]; p = MM[steam]
             p.update(state='matched', match=mid, role='host')
@@ -1781,7 +1788,7 @@ def mm_native(steam, d):
     if not st.get('here'): return {'native': False, 'why': 'not signed in through our lobby server', 'pool': pool}
     if peek: return {'native': True, 'peek': True, 'pool': pool}
     if d.get('room'):                                    # MMFind 0.46: the search of a launcher room (lroom.py) - only while it starts
-        with MM_LOCK: ok = lroom.launching_member(str(d.get('room')), steam)
+        with MM_LOCK: ok = lroom.launching_member(str(d.get('room')), steam, bool(d.get('watch')))   # an observer: only for a watch search
         if not ok: return {'native': False, 'why': 'the launcher room is not starting a match now'}
     with MM_LOCK:
         NM_HINTS[steam] = {'t': time.time(), 'd': d}

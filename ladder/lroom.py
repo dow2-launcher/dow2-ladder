@@ -16,12 +16,25 @@
 # calls the whole launch off for everybody and the room is back to its lobby with the reason.
 #
 # Matches from rooms are never rated (agreed games: own_lobby stores them without a mode); mm_history has kind 'room'.
-import json, random, secrets, string, threading, time
+#
+# 10.11.2026 (owner, launcher 1.5.3): observers - a room keeps up to 8 - 2 x its team of them (as the automatch's watch: 3v3 2,
+# 2v2 4, 1v1 6); at the launch their MMFind searches in its Watch mode with the room's id ("lroom") and goes into the room's
+# match as a watcher (an observer never blocks or calls off the start). Invitations (verb invite -> "lroom_invite" on the
+# invited player's stream) and pings (verb ping: the owner's ready check to who is not ready, a player's call of the owner
+# when all are ready -> "lroom_ping"). The list's summary carries the seats and the observers (the launcher draws the teams).
+import json, random, re, secrets, string, threading, time
 
 L = None                    # the ladder module (ladder.py sets it right after the import)
 ROOMS = {}                  # id -> room
 BY = {}                     # steam -> room id (one room per player)
 KICKED = {}                 # (room id, steam) -> until when he can't come back
+INVITED = {}                # (room id, steam) -> until when he is not invited into that room again
+INVITE_GAP = 30             # s between two invitations of one player into one room
+INVITE_MAX = 10             # invitations one player may send in a minute (into any rooms)
+INV_SENT = {}               # steam -> the times of his invitations of the last minute
+PING_GAP = 30               # s between two pings of one kind in one room
+PING_TTL = 30               # s the pinged player has to answer (the launcher's window)
+INVITE_TTL = 180            # s an invitation stays on the invited player's screen
 CD = 10                     # s of the countdown once everybody is ready (as the game's lobby)
 HERE_GONE = 45              # s without a heartbeat from his launcher: out of the room (only while it is in its lobby)
 LAUNCH_WAIT = int(__import__('os').environ.get('LROOM_LAUNCH_WAIT', '150'))   # s from the end of the countdown to every game in the search
@@ -96,6 +109,15 @@ def _members(r): return [s['steam'] for s in r['slots'] if s]
 
 
 def _slot(r, steam): return next((s for s in r['slots'] if s and s['steam'] == steam), None)
+
+
+def _obs_cap(r): return max(0, 8 - 2 * _size(r))      # the observer seats of the match (the automatch's watch, ladder.py)
+
+
+def _obs(r, steam): return next((o for o in r.setdefault('obs', []) if o['steam'] == steam), None)
+
+
+def _everyone(r): return _members(r) + [o['steam'] for o in r.setdefault('obs', [])]
 
 
 def _name(steam):
@@ -175,12 +197,16 @@ def view(r):
                       'team': 0 if i < n else 1, 'race': s['race'], 'hero': s['hero'], 'ready': s['ready'], 'game': s.get('gst') or '',
                       'game_t': int(s.get('gst_t') or 0), 'here': now - s['seen'] < HERE_GONE, 'owner': s['steam'] == r['owner'],
                       'spoil': (r.get('spoil') or {}).get(s['steam'], 0)})
+    obs = []
+    for o in r.setdefault('obs', []):
+        u = L.users.get(o['steam'])
+        obs.append({'steam': o['steam'], 'name': u['name'] or 'Player', 'avatar': u['avatar'], 'here': now - o['seen'] < HERE_GONE, 'game': o.get('gst') or ''})
     la = r.get('launch') or {}
     return {'id': r['id'], 'name': r['name'], 'game': r['game'], 'ver': r['ver'], 'mode': r['mode'], 'size': n,
             'map': r['map'], 'map_name': (cat.get(r['map']) or {}).get('name') or r['map'], 'owner': r['owner'],
             'maps': [{'key': k, 'name': (cat.get(k) or {}).get('name') or k} for k in r['maps']], 'opts': dict(r['opts']),
             'state': r['state'], 'cd_end': int(r['cd'] * 1000) if r['state'] == 'countdown' else 0, 'now': int(now * 1000),
-            'slots': slots, 'net': _net(r), 'note': r.get('note'), 'seq': r['seq'],
+            'slots': slots, 'obs': obs, 'obs_cap': _obs_cap(r), 'net': _net(r), 'note': r.get('note'), 'seq': r['seq'],
             'hs': bool(r.get('hs')), 'all_ready': _all_ready(r, now),
             'launch': {'t': int(la.get('t', 0)), 'deadline': int(la.get('deadline', 0)), 'host': la.get('host'), 'relay': la.get('relay'),
                        'match': la.get('match'), 'room': la.get('room'), 'map': la.get('map'),
@@ -192,7 +218,10 @@ def summary(r):
     return {'id': r['id'], 'name': r['name'], 'game': r['game'], 'ver': r['ver'], 'mode': r['mode'], 'map': r['map'],
             'map_name': (cat.get(r['map']) or {}).get('name') or r['map'], 'state': r['state'],
             'players': len(_members(r)), 'cap': 2 * _size(r), 'owner_name': _name(r['owner']), 'owner': r['owner'],
-            'names': [_name(s) for s in _members(r)]}
+            'names': [_name(s) for s in _members(r)],
+            'slots': [{'steam': s['steam'], 'name': _name(s['steam']), 'race': s['race'], 'hero': s['hero'], 'ready': s['ready'],
+                       'rating': (L.users.get(s['steam']) or {}).get('rating')} if s else None for s in r['slots']],
+            'obs': [{'steam': o['steam'], 'name': _name(o['steam'])} for o in r.setdefault('obs', [])], 'obs_cap': _obs_cap(r)}
 
 
 def _pub(r):
@@ -203,7 +232,7 @@ def _pub(r):
 
 def _close(r, why):
     ROOMS.pop(r['id'], None)
-    for s in _members(r):
+    for s in _everyone(r):
         if BY.get(s) == r['id']: BY.pop(s, None)
     log('room %s closed (%s)' % (r['id'], why))
     try: L.stream.publish('lroom_gone', {'id': r['id'], 'why': why})
@@ -254,7 +283,7 @@ def _launch(r, now):
     r['launch'] = {'t': now, 'deadline': now + LAUNCH_WAIT, 'relay': pick, 'host': host, 'heroes': heroes, 'map': mp,
                    'teams': [[s['steam'] for s in r['slots'][:n]], [s['steam'] for s in r['slots'][n:]]], 'match': None, 'room': None}
     r['state'] = 'launching'; r['note'] = None
-    for s in r['slots']: s['gst'] = 'starting'; s['gst_t'] = now
+    for s in r['slots'] + r.setdefault('obs', []): s['gst'] = 'starting'; s['gst_t'] = now
     log('room %s: launch - %s %s (of %s), host %s, relay %r (worst %s ms), teams %s' % (r['id'], r['mode'], mp, r['maps'], host, pick, net['worst'], r['launch']['teams']))
 
 
@@ -264,7 +293,7 @@ def _cancel_launch(r, k, who=(), **kw):
     la = r.get('launch') or {}; now = time.time()
     mid = la.get('match')
     m = L.MM_MATCHES.pop(mid, None) if mid else None
-    for s in _members(r):
+    for s in _everyone(r):
         p = L.MM.get(s)
         if p and (p.get('lroom') == r['id'] or (mid and p.get('match') == mid)):
             L.MM.pop(s, None)
@@ -272,6 +301,7 @@ def _cancel_launch(r, k, who=(), **kw):
     r['state'] = 'lobby'; r['launch'] = None
     for s in r['slots']:
         if s: s['ready'] = False; s['gst'] = ''
+    for o in r.setdefault('obs', []): o['gst'] = ''
     if k in SPOIL_KINDS:                                                    # "spoiled the start x2" next to his name; the owner may kick
         for s in who: r.setdefault('spoil', {})[s] = r.setdefault('spoil', {}).get(s, 0) + 1
     _note(r, k, who, **kw)
@@ -285,6 +315,11 @@ def on_nm_join(steam, p, hint, d):
     if not r or r['state'] != 'launching' or (r.get('launch') or {}).get('match'): return False
     hr = str((hint or {}).get('room') or '')
     if hr and hr != r['id']: return False                                    # MMFind searches for another room: not this one
+    if not _slot(r, steam):                                                  # an observer's game searching as a player: dropped
+        L.MM.pop(steam, None)
+        L.MM_CANCELLED[steam] = {'by': 'launcher room: an observer watches, he does not play', 'match': 'lroom-' + r['id'], 't': time.time(), 'again': False, 'native': True}
+        log('room %s: observer %s searched as a player - dropped (his MMFind has no room watch)' % (r['id'], steam))
+        return True
     p['lroom'] = r['id']; p['pool'] = 'lroom:%s|%s' % (r['id'], p.get('pool') or ''); p['party'] = ''; p['party_of'] = []
     if not p.get('ping'): p['ping'] = _pings_of(r, steam) or None           # MMFind sends Relay.dll's pings; else his launcher's
     hero = (r['launch'].get('heroes') or {}).get(steam)
@@ -333,7 +368,39 @@ def _assemble(r):
                                                   'race': p.get('race'), 'hero': p.get('hero')} for p in ps}}
     la['match'] = mid
     for s in r['slots']: s['gst'] = 'matched'; s['gst_t'] = time.time()
+    _watch_in(r)
     log('room %s: match %s made - host %s, %s vs %s, map %s, relay %r' % (r['id'], mid, host, host_team, guest_team, la.get('map'), la.get('relay')))
+
+
+def _watch_in(r):
+    """the room's observers who are in their watch search go into its match (made, not playing yet), as many as it has seats"""
+    mid = (r.get('launch') or {}).get('match'); m = L.MM_MATCHES.get(mid) if mid else None
+    if not m or m.get('state') == 'playing': return
+    for o in r.setdefault('obs', []):
+        p = L.MM.get(o['steam'])
+        if not p or p.get('lroom') != r['id'] or p['state'] != 'searching' or p['mode'] != L.WATCH: continue
+        if len(m['watchers']) >= _obs_cap(r): break
+        m['watchers'].append(o['steam']); p.update(state='matched', match=mid, role='watcher')
+        m['players'][o['steam']] = {'name': p.get('name') or 'Player', 'watcher': True}
+        o['gst'] = 'matched'; o['gst_t'] = time.time()
+        log('room %s: observer %s in the match %s' % (r['id'], o['steam'], mid))
+
+
+def on_watch_join(steam, p, d):
+    """a watch search came in (ladder mm/join, mode watch) with "lroom" = a room's id: an observer of that room while it
+    launches waits for its match (or goes into it at once). True = taken (the ladder's own watchers do not get him)"""
+    rid = str((d or {}).get('lroom') or '')
+    if not rid: return False
+    r = ROOMS.get(BY.get(steam) or '')
+    if not r or r['id'] != rid or not _obs(r, steam) or r['state'] != 'launching':
+        L.MM.pop(steam, None)
+        L.MM_CANCELLED[steam] = {'by': 'launcher room: not starting a match with this observer', 'match': 'lroom-' + rid, 't': time.time(), 'again': False}
+        return True
+    p['lroom'] = r['id']; p['pool'] = 'lroom:%s|%s' % (r['id'], p.get('pool') or '')
+    o = _obs(r, steam); o['gst'] = 'searching'; o['gst_t'] = time.time()
+    log('room %s: observer %s is in the watch search' % (r['id'], steam))
+    _watch_in(r); _pub(r)
+    return True
 
 
 def on_match_failed(m, culprits, why):
@@ -341,7 +408,16 @@ def on_match_failed(m, culprits, why):
     goes on - everybody's is stopped, the room is back to its lobby"""
     r = ROOMS.get(m.get('lroom') or '')
     if r and (r.get('launch') or {}).get('match') == m['id']:
-        _cancel_launch(r, 'match', [s for s in culprits if s in _members(r)], why=why); _pub(r)
+        pl = [s for s in culprits if s in _members(r)]
+        if culprits and not pl:                                               # only observers failed: they are out, the match goes on
+            for s in culprits:
+                if s in m.get('watchers', []): m['watchers'].remove(s)
+                m.get('players', {}).pop(s, None); L.MM.pop(s, None)
+                o = _obs(r, s)
+                if o: o['gst'] = ''
+            log('room %s: observers %s not in the match %s (%s) - the players go on' % (r['id'], culprits, m['id'], why)); _pub(r)
+            return
+        _cancel_launch(r, 'match', pl, why=why); _pub(r)
         return
     L.MM_MATCHES.pop(m['id'], None)                                          # the room is gone meanwhile: just end the searches
     now = time.time()
@@ -352,6 +428,10 @@ def on_match_failed(m, culprits, why):
 def on_search_left(steam, why):
     """a player of a launching room stopped his search (Stop Searching, his game is gone) before the match was made"""
     r = ROOMS.get(BY.get(steam) or '')
+    if r and _obs(r, steam):                                                  # an observer: only he is out of this start
+        L.MM.pop(steam, None); _obs(r, steam)['gst'] = ''
+        log('room %s: observer %s left his watch search (%s)' % (r['id'], steam, why)); _pub(r)
+        return
     if r and r['state'] == 'launching':
         _cancel_launch(r, 'left_search', [steam], why=why); _pub(r)
 
@@ -369,6 +449,7 @@ def on_match_started(m):
     if r and r.get('launch'):
         r['state'] = 'playing'; r['launch']['started'] = time.time(); r['note'] = None
         for s in r['slots']: s['gst'] = 'playing'; s['gst_t'] = time.time(); s['ready'] = False
+        for o in r.setdefault('obs', []): o['gst'] = 'playing' if o['steam'] in m.get('watchers', []) else ''
         log('room %s: match %s started' % (r['id'], m['id'])); _pub(r)
 
 
@@ -378,6 +459,7 @@ def on_match_over(m):
         r['state'] = 'lobby'; r['launch'] = None
         for s in r['slots']:
             if s: s['ready'] = False; s['gst'] = ''
+        for o in r.setdefault('obs', []): o['gst'] = ''
         _note(r, 'played'); log('room %s: match %s over - back in the room' % (r['id'], m['id'])); _pub(r)
 
 
@@ -394,7 +476,7 @@ def tick(now):
     for r in list(ROOMS.values()):
         ch = False
         if r['state'] in ('lobby', 'countdown'):
-            gone = [s['steam'] for s in r['slots'] if s and now - s['seen'] > HERE_GONE]
+            gone = [s['steam'] for s in r['slots'] if s and now - s['seen'] > HERE_GONE] + [o['steam'] for o in r.setdefault('obs', []) if now - o['seen'] > HERE_GONE]
             for st in gone: _leave(r, st); _note(r, 'gone', [st]); ch = True
             if r['id'] not in ROOMS: continue
             ch |= _check_ready(r, now)
@@ -411,12 +493,15 @@ def tick(now):
         if not _members(r) and r['id'] in ROOMS: _close(r, 'empty'); continue
         if ch: _pub(r)
     for k in [k for k, t in KICKED.items() if t < now]: KICKED.pop(k, None)
+    for k in [k for k, t in INVITED.items() if t < now]: INVITED.pop(k, None)
+    for k in [k for k, ts in INV_SENT.items() if not ts or now - ts[-1] > 60]: INV_SENT.pop(k, None)
 
 
 # ---------- the launcher's calls ----------
 def _leave(r, steam):
     for i, s in enumerate(r['slots']):
         if s and s['steam'] == steam: r['slots'][i] = None
+    r['obs'] = [o for o in r.setdefault('obs', []) if o['steam'] != steam]
     r['pings'].pop(steam, None)
     if BY.get(steam) == r['id']: BY.pop(steam, None)
     if r['owner'] == steam and _members(r): r['owner'] = _members(r)[0]
@@ -469,29 +554,39 @@ def api(verb, steam, d):
         name = _clean(d.get('name'), NAME_MAX) or ('%s: %s' % (_name(steam), mode))
         r = {'id': _new_id(), 'name': name, 'game': game, 'ver': _clean(d.get('ver'), 24) or '', 'mode': mode, 'map': mp, 'owner': steam,
              'state': 'lobby', 'slots': [None] * (2 * L.TEAM_N[mode]), 'cd': 0, 'launch': None, 'note': None, 'pings': {}, 'seq': 0, 'created': now,
-             'maps': [mp] if mp else [], 'opts': _opts_clean(d.get('opts') or {}, game), 'hs': d.get('start') == 'host'}
+             'maps': [mp] if mp else [], 'opts': _opts_clean(d.get('opts') or {}, game), 'hs': d.get('start') == 'host', 'obs': []}
         ROOMS[r['id']] = r; _seat(r, steam, 0)
         log('room %s made by %s (%s %s %s, %s)' % (r['id'], steam, game, r['ver'], mode, mp))
         _pub(r); return {'ok': True, 'room': view(r)}
-    if verb == 'join':
+    if verb == 'join':                                                      # 'as': 'obs' - an observer seat (1.5.3)
         t = ROOMS.get(str(d.get('id') or ''))
         if not t: return {'ok': False, 'error': 'no_room'}
-        if r is t: s = _slot(t, steam); s['seen'] = now; return {'ok': True, 'room': view(t)}
+        if r is t: (_slot(t, steam) or _obs(t, steam))['seen'] = now; return {'ok': True, 'room': view(t)}
         if r and r['state'] not in ('lobby', 'countdown'): return {'ok': False, 'error': 'busy'}
         if KICKED.get((t['id'], steam), 0) > now: return {'ok': False, 'error': 'kicked'}
         if t['state'] not in ('lobby', 'countdown'): return {'ok': False, 'error': 'state'}
+        if d.get('as') == 'obs':
+            if len(t.setdefault('obs', [])) >= _obs_cap(t): return {'ok': False, 'error': 'obs_full'}
+            if r: _leave(r, steam); _note(r, 'left', [steam]); (_pub(r) if _members(r) else _close(r, 'empty'))
+            t['obs'].append({'steam': steam, 'seen': now, 'gst': ''}); BY[steam] = t['id']; _note(t, 'joined_obs', [steam])
+            _pub(t); return {'ok': True, 'room': view(t)}
         if all(t['slots']): return {'ok': False, 'error': 'full'}
         if r: _leave(r, steam); _note(r, 'left', [steam]); (_pub(r) if _members(r) else _close(r, 'empty'))
         _seat(t, steam); _unready(t, 'joined', [steam]); _note(t, 'joined', [steam])
         _pub(t); return {'ok': True, 'room': view(t)}
     if not r: return {'ok': False, 'error': 'no_room'}
-    me = _slot(r, steam); me['seen'] = now
+    me = _slot(r, steam); ob = None if me else _obs(r, steam)
+    if not me and not ob: BY.pop(steam, None); return {'ok': False, 'error': 'no_room'}
+    (me or ob)['seen'] = now
     if verb == 'here':                                                      # the launcher's heartbeat (every 15 s while in the room)
         return {'ok': True, 'seq': r['seq']}
     if verb == 'get': return {'ok': True, 'room': view(r)}
     if verb == 'ticket':                                                    # what MMFind needs, only for the player himself
         la = r.get('launch')
         if r['state'] != 'launching' or not la: return {'ok': False, 'error': 'state'}
+        if ob:                                                              # an observer: MMFind's Watch with the room's id
+            return {'ok': True, 'ticket': {'room': r['id'], 'game': r['game'], 'ver': r['ver'], 'mode': r['mode'], 'map': la.get('map') or r['map'],
+                                           'watch': True, 'deadline': int(la['deadline']), 'relay': la.get('relay') or '', 'ttl': max(0, int(la['deadline'] - now))}}
         races = _races(r['game']); hero = la['heroes'].get(steam, -1)
         return {'ok': True, 'ticket': {'room': r['id'], 'game': r['game'], 'ver': r['ver'], 'mode': r['mode'], 'map': la.get('map') or r['map'],
                                        'opts': _opt_values(r) if la['host'] == steam else {},
@@ -500,6 +595,9 @@ def api(verb, steam, d):
                                        'ttl': max(0, int(la['deadline'] - now))}}     # 0.48: how long the game may still take to search
     if verb == 'game':                                                      # what his game does now (the launcher hears it from MMFind)
         ev = _clean(d.get('ev'), 24) or ''
+        if ob:                                                              # an observer's game: told, never calls the start off
+            if r['state'] == 'launching': ob['gst'] = ev; ob['gst_t'] = now; _pub(r)
+            return {'ok': True}
         if r['state'] == 'launching':
             me['gst'] = ev; me['gst_t'] = now
             if ev == 'failed':
@@ -521,12 +619,52 @@ def api(verb, steam, d):
         r['pings'][steam] = {'p': p, 'raw': raw, 'chain': bool(d.get('chain')), 't': now}
         _pub(r); return {'ok': True}
     if verb == 'leave':
+        if ob:                                                              # an observer: the room goes on as it is
+            if (L.MM.get(steam) or {}).get('lroom') == r['id']: L.MM.pop(steam, None)
+            m = L.MM_MATCHES.get((r.get('launch') or {}).get('match') or '')
+            if m and steam in m.get('watchers', []): m['watchers'].remove(steam); m.get('players', {}).pop(steam, None)
+            _leave(r, steam); _note(r, 'left', [steam]); _pub(r); return {'ok': True}
         if r['state'] == 'launching': _cancel_launch(r, 'left', [steam])
         elif r['state'] == 'playing': pass                                  # the match goes on; he just leaves the room
         _leave(r, steam); _note(r, 'left', [steam])
         if _members(r): _pub(r)
         else: _close(r, 'empty')
         return {'ok': True}
+    if verb == 'invite':                                                    # 1.5.3: anybody in the room invites a player (his stream)
+        t = str(d.get('steam') or '')
+        if not re.fullmatch(r'\d{1,20}', t) or t == steam or t in _everyone(r): return {'ok': False, 'error': 'bad'}   # a SteamID only
+        if r['state'] not in ('lobby', 'countdown'): return {'ok': False, 'error': 'state'}
+        if INVITED.get((r['id'], t), 0) > now: return {'ok': True, 'again': True}   # invited a moment ago: once is enough
+        sent = [x for x in INV_SENT.get(steam, []) if now - x < 60]
+        if len(sent) >= INVITE_MAX: INV_SENT[steam] = sent; return {'ok': False, 'error': 'too_soon'}   # no flood of invitations
+        INV_SENT[steam] = sent + [now]; INVITED[(r['id'], t)] = now + INVITE_GAP
+        cat = L._catalog()
+        try: L.stream.publish('lroom_invite', {'id': r['id'], 'name': r['name'], 'mode': r['mode'], 'map': r['map'],
+                                               'map_name': (cat.get(r['map']) or {}).get('name') or r['map'], 'game': r['game'], 'ver': r['ver'],
+                                               'from': steam, 'from_name': _name(steam), 'players': len(_members(r)), 'cap': len(r['slots']),
+                                               'ttl': INVITE_TTL}, to=t)
+        except Exception as e: log('invite %s -> %s: %r' % (r['id'], t, e))
+        log('room %s: %s invites %s' % (r['id'], steam, t)); return {'ok': True}
+    if verb == 'ping':                                                      # 1.5.3: the owner's ready check / a player calls the owner
+        kind = d.get('kind')
+        if r['state'] != 'lobby': return {'ok': False, 'error': 'state'}
+        if kind == 'ready':
+            if steam != r['owner']: return {'ok': False, 'error': 'owner'}
+            to = [s['steam'] for s in r['slots'] if s and s['steam'] != steam and not s['ready']]
+        elif kind == 'start':
+            if not me or steam == r['owner']: return {'ok': False, 'error': 'bad'}
+            if not (r.get('hs') and _all_ready(r, now)): return {'ok': False, 'error': 'not_ready'}
+            to = [r['owner']]
+        else: return {'ok': False, 'error': 'bad'}
+        if not to: return {'ok': False, 'error': 'bad'}
+        pg = r.setdefault('pinged', {})
+        if pg.get(kind, 0) > now: return {'ok': False, 'error': 'too_soon'}
+        pg[kind] = now + PING_GAP
+        for t in to:
+            try: L.stream.publish('lroom_ping', {'kind': kind, 'id': r['id'], 'name': r['name'], 'from': steam, 'from_name': _name(steam), 'ttl': PING_TTL}, to=t)
+            except Exception as e: log('ping %s -> %s: %r' % (r['id'], t, e))
+        log('room %s: %s pings %s (%s)' % (r['id'], steam, ','.join(to), kind)); return {'ok': True, 'n': len(to)}
+    if ob and verb in ('cancel', 'ready', 'army'): return {'ok': False, 'error': 'obs'}   # an observer has no army and no say in the start
     if verb == 'cancel':                                                    # stop the launch (any player, as Cancel on the game's countdown)
         if r['state'] == 'countdown': me['ready'] = False; r['state'] = 'lobby'; _note(r, 'unready', [steam])
         elif r['state'] == 'launching': _cancel_launch(r, 'cancel', [steam])
@@ -551,6 +689,10 @@ def api(verb, steam, d):
         try: i = int(d.get('slot'))
         except Exception: return {'ok': False, 'error': 'bad'}
         if not 0 <= i < len(r['slots']) or r['slots'][i]: return {'ok': False, 'error': 'taken'}
+        if ob:                                                              # an observer sits down: a player now
+            r['obs'] = [o for o in r['obs'] if o['steam'] != steam]
+            r['slots'][i] = {'steam': steam, 'race': 'random', 'hero': -1, 'ready': False, 'seen': now, 'gst': ''}
+            _unready(r, 'joined', [steam]); _note(r, 'joined', [steam]); _pub(r); return {'ok': True, 'room': view(r)}
         j = r['slots'].index(me); r['slots'][i], r['slots'][j] = me, None; me['ready'] = False
         if r['state'] == 'countdown': r['state'] = 'lobby'; _note(r, 'changed', [steam])
         _pub(r); return {'ok': True, 'room': view(r)}
@@ -566,8 +708,11 @@ def api(verb, steam, d):
         r['state'] = 'lobby'; _note(r, 'cd_stop', [steam]); _pub(r); return {'ok': True, 'room': view(r)}
     if verb == 'kick':
         t = str(d.get('steam') or '')
-        if t == steam or not _slot(r, t): return {'ok': False, 'error': 'bad'}
-        _leave(r, t); KICKED[(r['id'], t)] = now + 120; _unready(r); _note(r, 'kicked', [t])
+        if t == steam or not (_slot(r, t) or _obs(r, t)): return {'ok': False, 'error': 'bad'}
+        was_obs = not _slot(r, t)
+        _leave(r, t); KICKED[(r['id'], t)] = now + 120
+        if not was_obs: _unready(r)
+        _note(r, 'kicked', [t])
         try: L.stream.publish('lroom_kicked', {'id': r['id'], 'steam': t}, to=t)
         except Exception: pass
         _pub(r); return {'ok': True, 'room': view(r)}
@@ -618,7 +763,10 @@ def catalog(game, mode):
                      'res': ['standard', 'high'], 'default': OPT_DEFAULT}}
 
 
-def launching_member(room, steam):
-    """MMFind asks before it searches for a room (mm/native with "room"): is that room starting a match with him in it now"""
+def launching_member(room, steam, watch=False):
+    """MMFind asks before it searches for a room (mm/native with "room"): is that room starting a match with him in it now.
+    An observer only for a watch search ("watch": true - an older MMFind would search as a player with his ticket)"""
     r = ROOMS.get(str(room))
-    return bool(r and r['state'] == 'launching' and steam in _members(r) and not (r.get('launch') or {}).get('match'))
+    if not r or r['state'] != 'launching': return False
+    if watch: return bool(_obs(r, steam))
+    return steam in _members(r) and not (r.get('launch') or {}).get('match')
