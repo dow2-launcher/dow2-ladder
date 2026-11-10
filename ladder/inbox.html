@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<title>Inbox — Elite Ladder</title>
+<style>
+@font-face { font-family: Cinzel; src: url(/elite/fonts/cinzel-700.ttf); font-weight: 700; font-display: swap; }
+@font-face { font-family: CinzelCyr; src: url(/elite/fonts/cormorantsc-cyr-700.ttf); font-weight: 700 900; unicode-range: U+0400-045F, U+0490-0491, U+2116; font-display: swap; }
+@font-face { font-family: Spectral; src: url(/elite/fonts/spectral-400.ttf); font-weight: 400; font-display: swap; }
+@font-face { font-family: Spectral; src: url(/elite/fonts/spectral-600.ttf); font-weight: 600; font-display: swap; }
+:root { --bg: #0d0b09; --panel: #16130f; --panel-2: #1c1813; --line: #3a3124; --gold: #d9b25f; --gold-2: #f0d48f;
+  --text: #e6dccb; --muted: #a39782; --red: #c42a24; --green: #6fae53; --demo: #e0a526; }
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 Spectral, Georgia, serif; overflow-x: hidden;
+  background-image: radial-gradient(ellipse at 50% -10%, #2a1d0933 0%, transparent 60%); }
+a { color: var(--gold-2); text-decoration: none; }
+button, input, textarea { font: inherit; color: inherit; }
+.top { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: #110e0b; }
+.top h1 { margin: 0; font: 900 22px Cinzel, CinzelCyr, serif; letter-spacing: .05em; color: var(--gold-2); white-space: nowrap; }
+.top .sp { flex: 1; }
+.top .me { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; min-width: 0; }
+.top .me img { width: 26px; height: 26px; border-radius: 3px; }
+.top .me span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 30vw; }
+.btn { display: inline-block; font: 700 13px Cinzel, CinzelCyr, serif; letter-spacing: .06em; text-transform: uppercase; color: #1a1206;
+  background: linear-gradient(var(--gold), var(--gold-2)); border: 0; border-radius: 4px; padding: 8px 16px; cursor: pointer; }
+.btn.ghost { background: none; color: var(--gold-2); border: 1px solid #5a4a2e; }
+.btn:disabled { opacity: .5; cursor: default; }
+.card { max-width: 460px; margin: 12vh auto 0; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 26px 22px; text-align: center; }
+.card h2 { font: 700 20px Cinzel, CinzelCyr, serif; color: var(--gold-2); margin: 0 0 10px; }
+.card p { color: var(--muted); margin: 0 0 18px; }
+.app { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; height: calc(100vh - 53px); height: calc(100dvh - 53px); }
+.list { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; background: var(--panel); }
+.tools { padding: 10px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.tools input[type=search] { width: 100%; background: #0e0c09; border: 1px solid #5a4a2e; border-radius: 4px; padding: 7px 10px; }
+.tools .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 14px; color: var(--muted); }
+.tools label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+.threads { overflow-y: auto; flex: 1; }
+.th { display: flex; gap: 10px; padding: 10px 12px; border-bottom: 1px solid #241f17; cursor: pointer; min-width: 0; }
+.th:hover { background: #1d1811; } .th.on { background: #241c10; box-shadow: inset 3px 0 0 var(--gold); }
+.av { flex: 0 0 38px; width: 38px; height: 38px; border-radius: 4px; background: #2a2116; color: var(--gold-2); display: grid; place-items: center;
+  font: 700 16px Cinzel, CinzelCyr, serif; overflow: hidden; }
+.av img { width: 100%; height: 100%; object-fit: cover; }
+.th .b { flex: 1; min-width: 0; }
+.th .n { display: flex; gap: 6px; align-items: baseline; }
+.th .n b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.th .n time { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.th .l { color: var(--muted); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.th.unread .n b { color: var(--gold-2); } .th.unread .l { color: var(--text); }
+.badge { background: var(--red); color: #fff; border-radius: 9px; font: 600 12px/18px Spectral, serif; min-width: 18px; padding: 0 5px; text-align: center; }
+.muted-tag { color: var(--demo); font-size: 11px; }
+.view { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.vh { display: flex; gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); background: #110e0b; min-width: 0; }
+.vh .b { flex: 1; min-width: 0; }
+.vh .b b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vh .b small { color: var(--muted); font-size: 12px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.back { display: none; }
+.msgs { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+.m { max-width: 82%; align-self: flex-start; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 8px 11px; cursor: pointer; min-width: 0; }
+.m.dev { align-self: flex-end; background: #231a0c; border-color: #5a4a2e; }
+.m .h { font-size: 12px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; }
+.m .h b { color: var(--gold); font-weight: 600; } .m.dev .h b { color: var(--gold-2); }
+.m .t { white-space: pre-wrap; overflow-wrap: anywhere; }
+.m .imgs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.m .imgs img { max-width: 160px; max-height: 120px; border-radius: 3px; border: 1px solid var(--line); }
+.m .new { color: var(--red); font-size: 11px; }
+.det { margin-top: 8px; border-top: 1px dashed var(--line); padding-top: 6px; font-size: 13px; cursor: auto; }
+.det table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+.det td { padding: 2px 4px; vertical-align: top; overflow-wrap: anywhere; }
+.det td:first-child { color: var(--muted); width: 34%; }
+.det code { font-size: 12px; background: #0e0c09; padding: 1px 4px; border-radius: 3px; }
+.det .cp { font-size: 11px; padding: 1px 6px; margin-left: 4px; background: none; border: 1px solid #5a4a2e; border-radius: 3px; color: var(--gold-2); cursor: pointer; }
+.reply { border-top: 1px solid var(--line); padding: 10px; display: flex; gap: 8px; align-items: flex-end; background: var(--panel); }
+.reply textarea { flex: 1; min-width: 0; min-height: 44px; max-height: 40vh; resize: vertical; background: #0e0c09; border: 1px solid #5a4a2e; border-radius: 4px; padding: 8px 10px; }
+.reply .att { font-size: 12px; color: var(--muted); }
+.empty { color: var(--muted); text-align: center; margin: auto; padding: 30px; }
+.toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: #2a1d0c; border: 1px solid var(--gold); color: var(--gold-2);
+  padding: 8px 16px; border-radius: 4px; max-width: calc(100vw - 32px); }
+@media (max-width: 720px) {
+  .app { grid-template-columns: 1fr; }
+  .app.open .list { display: none; } .app:not(.open) .view { display: none; }
+  .back { display: inline-block; }
+  .m { max-width: 94%; }
+  .top h1 { font-size: 18px; }
+  .top .me span { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="top">
+  <h1><a href="/ladder/">Elite</a> · Inbox</h1>
+  <div class="sp"></div>
+  <div class="me" id="me"></div>
+</div>
+<div id="root"></div>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const S = { me: null, csrf: '', token: '', threads: [], cur: null, open: {}, q: '', unread: false, mod: {} };
+try { const m = /token=([^&]+)/.exec(location.hash); if (m) { sessionStorage.setItem('fbtok', decodeURIComponent(m[1])); history.replaceState(null, '', location.pathname); } S.token = sessionStorage.getItem('fbtok') || ''; } catch (e) {}
+function hdrs(post) { const h = {}; if (S.token) h['X-Admin-Token'] = S.token; if (post) { h['Content-Type'] = 'application/json'; if (S.csrf) h['X-CSRF'] = S.csrf; } return h; }
+async function api(path, body) {
+  const r = await fetch('/ladder/api/inbox/' + path, body ? { method: 'POST', headers: hdrs(true), body: JSON.stringify(body), credentials: 'same-origin' } : { headers: hdrs(false), credentials: 'same-origin' });
+  return r.json();
+}
+function toast(t) { const d = document.createElement('div'); d.className = 'toast'; d.textContent = t; document.body.appendChild(d); setTimeout(() => d.remove(), 3000); }
+const pad = n => String(n).padStart(2, '0');
+function fullTime(ts) { const d = new Date(ts * 1000); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); }
+function shortTime(ts) { const d = new Date(ts * 1000), n = new Date();
+  if (d.toDateString() === n.toDateString()) return pad(d.getHours()) + ':' + pad(d.getMinutes());
+  return pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + (d.getFullYear() !== n.getFullYear() ? '.' + String(d.getFullYear()).slice(2) : ''); }
+function av(t) { return t.avatar ? '<div class="av"><img src="' + esc(t.avatar) + '" alt=""></div>' : '<div class="av">' + esc(((t.name || '').replace(/[^\p{L}\p{N}]/gu, '').charAt(0) || '?').toUpperCase()) + '</div>'; }
+function signIn() {
+  let nonce = ''; const a = new Uint8Array(24); crypto.getRandomValues(a); a.forEach(b => nonce += b.toString(16).padStart(2, '0'));
+  location.href = '/ladder/api/c/login?nonce=' + nonce + '&to=' + encodeURIComponent('/ladder/inbox');
+}
+function card(h, p, btn) { $('root').innerHTML = '<div class="card"><h2>' + h + '</h2><p>' + p + '</p>' + (btn || '') + '</div>'; }
+
+async function boot() {
+  let me; try { me = await api('me'); } catch (e) { return card('Нет связи', 'Сервер не ответил. Обновите страницу.'); }
+  S.me = me; S.csrf = me.csrf || '';
+  if (me.signed_in) $('me').innerHTML = (me.avatar ? '<img src="' + esc(me.avatar) + '" alt="">' : '') + '<span>' + esc(me.name || me.steam) + '</span>';
+  const bad = /[?&]bad=1/.test(location.search);
+  if (!me.admin && me.signed_in && me.invite) {
+    const r = await api('bind', {});
+    if (r.ok) { toast('Steam-аккаунт привязан'); return boot(); }
+    return card('Не получилось', 'Приглашение недействительно или уже использовано (' + esc(r.error || '') + ').');
+  }
+  if (!me.admin && !me.signed_in) {
+    return card(me.invite ? 'Приглашение принято' : (bad ? 'Ссылка недействительна' : 'Вход'),
+      me.invite ? 'Войдите через Steam — этот аккаунт запомнится, и дальше Inbox будет открываться без ссылок (кнопка «Inbox» на странице ладдера).'
+                : (bad ? 'Приглашение истекло или уже использовано. Если доступ уже привязан — просто войдите через Steam.' : 'Страница для разработчиков. Войдите через Steam.'),
+      '<button class="btn" onclick="signIn()">Войти через Steam</button>');
+  }
+  if (!me.admin) return card('Нет доступа', 'Аккаунт ' + esc(me.name || me.steam) + ' не в списке админов. Нужна ссылка-приглашение.');
+  $('root').innerHTML = '<div class="app" id="app"><div class="list"><div class="tools">' +
+    '<input type="search" id="q" placeholder="Поиск: текст, ник, uid, Steam ID">' +
+    '<div class="row"><label><input type="checkbox" id="unread"> непрочитанные</label><span id="cnt"></span></div>' +
+    '<div class="row" style="font-size:12px"><label title="Премодерация сообщений игроков (JEV)"><input type="checkbox" id="premod"> премодерация</label>' +
+    '<label title="Игроки не могут писать"><input type="checkbox" id="allmuted"> чат закрыт</label>' +
+    '<a href="#" id="invite" title="Одноразовая ссылка для ещё одного админа, 7 дней">пригласить админа</a></div></div>' +
+    '<div class="threads" id="threads"></div></div><div class="view" id="view"><div class="empty">Выберите диалог слева</div></div></div>';
+  let tq; $('q').oninput = e => { clearTimeout(tq); tq = setTimeout(() => { S.q = e.target.value; loadThreads(); }, 250); };
+  $('unread').onchange = e => { S.unread = e.target.checked; loadThreads(); };
+  $('premod').onchange = e => setMod('premod', e.target.checked);
+  $('allmuted').onchange = e => setMod('all_muted', e.target.checked);
+  $('invite').onclick = async e => { e.preventDefault(); if (!confirm('Создать одноразовую ссылку-приглашение админа (7 дней)?')) return;
+    const r = await api('invite', {}); if (!r.ok) return toast('Ошибка: ' + (r.error || ''));
+    prompt('Ссылка-приглашение (одноразовая, ' + r.days + ' дн.):', r.url); };
+  await loadThreads();
+  const h = /uid=([A-Za-z0-9_-]+)/.exec(location.hash); if (h) openThread(h[1]);
+  setInterval(() => { loadThreads(); if (S.cur && !document.hidden) refreshThread(); }, 20000);
+  window.onpopstate = () => { if (!/uid=/.test(location.hash)) { $('app').classList.remove('open'); S.cur = null; renderList(); } };
+}
+async function setMod(set, on, uid) {
+  const r = await api('mod', { set, on, uid }); if (!r.ok) return toast('Ошибка: ' + (r.error || ''));
+  toast('Сохранено'); loadThreads(); if (uid && S.cur === uid) refreshThread();
+}
+async function loadThreads() {
+  const r = await api('threads?q=' + encodeURIComponent(S.q) + (S.unread ? '&unread=1' : ''));
+  if (r.error) return toast('Нет доступа: ' + r.error);
+  S.threads = r.threads; S.mod = r.mod || {};
+  $('premod').checked = !!S.mod.premod; $('allmuted').checked = !!S.mod.all_muted;
+  $('cnt').textContent = r.threads.length + ' диал.' + (r.total_unseen ? ' · ' + r.total_unseen + ' непрочит.' : '');
+  document.title = (r.total_unseen ? '(' + r.total_unseen + ') ' : '') + 'Inbox — Elite Ladder';
+  renderList();
+}
+function renderList() {
+  $('threads').innerHTML = S.threads.length ? S.threads.map(t =>
+    '<div class="th' + (t.unseen ? ' unread' : '') + (S.cur === t.uid ? ' on' : '') + '" data-uid="' + esc(t.uid) + '">' + av(t) +
+    '<div class="b"><div class="n"><b>' + esc(t.name || 'без имени · ' + t.uid.slice(0, 6)) + '</b>' + (t.muted ? '<span class="muted-tag">мьют</span>' : '') +
+    '<time>' + shortTime(t.ts) + '</time>' + (t.unseen ? '<span class="badge">' + t.unseen + '</span>' : '') + '</div>' +
+    '<div class="l">' + (t.last.author === 'dev' ? '↩ ' : '') + esc(t.last.text || (t.last.images ? '[картинка]' : '')) + '</div>' +
+    (t.hits ? '<div class="l" style="font-size:12px">совпадений: ' + t.hits + '</div>' : '') + '</div></div>').join('')
+    : '<div class="empty">Ничего не найдено</div>';
+  for (const el of $('threads').querySelectorAll('.th')) el.onclick = () => openThread(el.dataset.uid);
+}
+async function openThread(uid) {
+  S.cur = uid; S.open = {}; renderList(); $('app').classList.add('open');
+  if (!/uid=/.test(location.hash)) history.pushState(null, '', '#uid=' + uid); else history.replaceState(null, '', '#uid=' + uid);
+  await refreshThread(true);
+}
+async function refreshThread(first) {
+  const uid = S.cur, r = await api('thread?uid=' + encodeURIComponent(uid));
+  if (uid !== S.cur) return;
+  if (r.error) { $('view').innerHTML = '<div class="empty">' + esc(r.error) + '</div>'; return; }
+  const sig = r.messages.length + ':' + (r.messages.length && r.messages[r.messages.length - 1].id) + ':' + r.thread.muted;
+  if (!first && sig === S.sig) return; S.sig = sig;
+  const t = r.thread, box = $('msgs'), atEnd = !box || box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  const draft = $('rt') ? $('rt').value : '';
+  const meta = t.meta || {};
+  $('view').innerHTML = '<div class="vh"><button class="btn ghost back" onclick="history.back()">←</button>' + av(t) +
+    '<div class="b"><b>' + esc(t.name || 'без имени') + '</b><small>uid ' + esc(t.uid) + (t.steam ? ' · Steam ' + esc(t.steam) : '') +
+    ' · ' + t.count + ' сообщ. · ' + [meta.launcher && 'лаунчер ' + meta.launcher, meta.os, meta.elite && 'Elite ' + meta.elite].filter(Boolean).map(esc).join(' · ') + '</small></div>' +
+    '<button class="btn ghost" id="mute" title="Запретить/разрешить этому игроку писать">' + (t.muted ? 'Снять мьют' : 'Мьют') + '</button></div>' +
+    '<div class="msgs" id="msgs">' + r.messages.map(m => msgHtml(m, t)).join('') + '</div>' +
+    '<div class="reply"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px"><textarea id="rt" placeholder="Ответ игроку от «Elite dev» (Ctrl+Enter — отправить)"></textarea>' +
+    '<div class="att"><label style="cursor:pointer">📎 картинки <input type="file" id="rf" accept="image/*" multiple hidden></label> <span id="rfn"></span></div></div>' +
+    '<button class="btn" id="rs">Отправить</button></div>';
+  $('rt').value = draft;
+  $('mute').onclick = () => setMod('mute_uid', !t.muted, t.uid);
+  $('rs').onclick = sendReply; $('rt').onkeydown = e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendReply(); };
+  $('rf').onchange = e => $('rfn').textContent = [...e.target.files].map(f => f.name).join(', ');
+  refreshThreadHandlers(r, t);
+  if (first || atEnd) $('msgs').scrollTop = 1e9;
+  if (t.unseen === 0) { const x = S.threads.find(q => q.uid === uid); if (x && x.unseen) { x.unseen = 0; renderList(); } }
+}
+function refreshThreadHandlers(r, t) {
+  for (const el of $('msgs').querySelectorAll('.m')) if (!el.onclick) el.onclick = e => {
+    if (e.target.closest('.det') || e.target.closest('a')) return;
+    S.open[el.dataset.id] = !S.open[el.dataset.id]; el.outerHTML = msgHtml(r.messages.find(m => String(m.id) === el.dataset.id), t); refreshThreadHandlers(r, t);
+  };
+  for (const b of $('msgs').querySelectorAll('.cp')) b.onclick = () => { navigator.clipboard && navigator.clipboard.writeText(b.dataset.v); toast('Скопировано'); };
+}
+function msgHtml(m, t) {
+  const dev = m.author === 'dev', img = fn => '/ladder/api/fb/img/' + encodeURIComponent(fn) + '?uid=' + encodeURIComponent(t.uid);
+  const meta = m.meta || {}, cp = v => '<code>' + esc(v) + '</code><button class="cp" data-v="' + esc(v) + '">копир.</button>';
+  let h = '<div class="m' + (dev ? ' dev' : '') + '" data-id="' + m.id + '"><div class="h"><b>' + esc(dev ? (m.name || 'Elite dev') : (m.name || t.name || 'игрок')) + '</b><span title="' + fullTime(m.ts) + '">' + fullTime(m.ts).slice(5, 16) + '</span>' +
+    (!dev && !m.seen ? '<span class="new">новое</span>' : '') + (m.logs.length ? '<span>📋 логи</span>' : '') + '</div>' +
+    '<div class="t">' + esc(m.text) + '</div>' +
+    (m.images.length ? '<div class="imgs">' + m.images.map(f => '<a href="' + img(f) + '" target="_blank" rel="noopener"><img src="' + img(f) + '" alt="" loading="lazy"></a>').join('') + '</div>' : '');
+  if (S.open[m.id]) {
+    const rows = [
+      ['От', dev ? esc(m.name || 'Elite dev') + ' (разработчик)' : esc(m.name || t.name || '—') + ' (игрок)'],
+      ['Кому', dev ? esc(t.name || 'игрок') + ' · uid ' + esc(t.uid.slice(0, 8)) + '…' : 'Elite dev (разработчики)'],
+      ['Когда', fullTime(m.ts) + ' (местное) · ' + new Date(m.ts * 1000).toISOString().replace('T', ' ').slice(0, 19) + ' UTC'],
+      ['uid треда', cp(t.uid)],
+      ['Steam ID', meta.steam || t.steam ? cp(meta.steam || t.steam) : '<span style="color:var(--muted)">лаунчер не прислал</span>'],
+      ['id сообщения', String(m.id)],
+      ['Лаунчер', esc(meta.launcher || '—')], ['ОС', esc(meta.os || '—')], ['Elite', esc(meta.elite || '—')],
+      ['Прочитано', dev ? 'ответ разработчика' : (m.seen ? 'да' : 'нет (отмечено при открытии)')],
+    ];
+    if (m.images.length) rows.push(['Картинки', m.images.map(f => '<a href="' + img(f) + '" target="_blank" rel="noopener">' + esc(f) + '</a>').join('<br>')]);
+    if (m.logs.length) rows.push(['Логи', m.logs.map(id => cp(id)).join('<br>') + '<br><span style="color:var(--muted)">просмотра в вебе нет: rts /srv/relicstats/logs/&lt;id&gt;_*.txt.gz</span>']);
+    h += '<div class="det"><table>' + rows.map(r => '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>').join('') + '</table></div>';
+  }
+  return h + '</div>';
+}
+async function sendReply() {
+  const text = $('rt').value, files = [...($('rf').files || [])].slice(0, 6);
+  if (!text.trim() && !files.length) return;
+  $('rs').disabled = true;
+  const images = await Promise.all(files.map(f => new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => res(''); fr.readAsDataURL(f); })));
+  try {
+    const r = await api('reply', { uid: S.cur, text, images: images.filter(Boolean) });
+    if (r.ok) { $('rt').value = ''; $('rf').value = ''; $('rfn').textContent = ''; await refreshThread(true); loadThreads(); toast('Отправлено'); }
+    else toast('Не отправлено: ' + (r.error || ''));
+  } catch (e) { toast('Сеть недоступна'); }
+  if ($('rs')) $('rs').disabled = false;
+}
+boot();
+</script>
+</body>
+</html>

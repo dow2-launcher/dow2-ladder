@@ -1994,6 +1994,7 @@ class H(BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path); qs = urllib.parse.parse_qs(u.query)
         try:
             if u.path.startswith('/ladder/api/c/'): return community.handle(self, 'GET', u, None)
+            if u.path == '/ladder/inbox' or u.path.startswith('/ladder/api/inbox/'): return inbox.handle_get(self, u, qs)
             if u.path in ('/ladder', '/ladder/', '/ladder/index.html'):
                 try:
                     with open(os.path.dirname(os.path.abspath(__file__)) + '/ladder.html', 'rb') as f:
@@ -2093,6 +2094,7 @@ class H(BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         try:
             if u.path.startswith('/ladder/api/c/'): return community.handle(self, 'POST', u, self._body())
+            if u.path.startswith('/ladder/api/inbox/'): return inbox.handle_post(self, u)
             if u.path in ('/ladder/api/fb/send', '/ladder/api/fb/reply'):
                 n = int(self.headers.get('Content-Length') or 0)
                 if n <= 0 or n > 24 << 20: return self.send(413, {'error': 'size'}, cache=0)
@@ -2157,6 +2159,8 @@ class H(BaseHTTPRequestHandler):
 
 import community                                    # launcher community: Steam sign-in, who is online, the players' chat
 import sys, lroom                                   # launcher match rooms (05.11.2026)
+import inbox                                        # admin inbox of the feedback chat (10.11.2026): /ladder/inbox
+inbox.L = sys.modules[__name__]
 import live                                         # the live replay: watch a running match of our servers (06.11.2026)
 lroom.L = sys.modules[__name__]
 community.ADMIN_OK = _fb_token_ok

@@ -209,6 +209,7 @@ body.ownv .wrap > :not(header):not(.vtabs):not(#own) { display: none !important;
     <div class="lang" id="lang"><button data-l="ru">RU</button><button data-l="en">EN</button></div>
     <a class="dl" href="/elite/" data-t="dlLauncher">Скачать лаунчер</a>
     <a class="dl" href="/ladder/chat" data-t="chatLink">Чат</a>
+    <a class="dl" href="/ladder/inbox" id="inboxLink" style="display:none">Inbox</a>
   </header>
 
   <div class="ostabs vtabs" id="vtabs"><button data-v="ladder" class="on" data-o="tabLadder">Ладдер</button><button data-v="elite" data-o="tabOwn">Elite (тест)</button></div>
@@ -647,6 +648,10 @@ q('#lang').addEventListener('click', () => setTimeout(() => { oLang(); if (view 
 window.addEventListener('hashchange', route);
 oLang(); route();
 })();
+</script>
+<script>
+/* Inbox: only for the admins of the feedback chat (their Steam sign-in on this site); nobody else sees the link */
+fetch('/ladder/api/inbox/me', { credentials: 'same-origin' }).then(r => r.json()).then(m => { if (m && m.admin) { const a = document.getElementById('inboxLink'); a.style.display = ''; } }).catch(() => {});
 </script>
 </body>
 </html>
