@@ -22,7 +22,7 @@
 # match as a watcher (an observer never blocks or calls off the start). Invitations (verb invite -> "lroom_invite" on the
 # invited player's stream) and pings (verb ping: the owner's ready check to who is not ready, a player's call of the owner
 # when all are ready -> "lroom_ping"). The list's summary carries the seats and the observers (the launcher draws the teams).
-import json, random, secrets, string, threading, time
+import json, random, re, secrets, string, threading, time
 
 L = None                    # the ladder module (ladder.py sets it right after the import)
 ROOMS = {}                  # id -> room
@@ -30,6 +30,8 @@ BY = {}                     # steam -> room id (one room per player)
 KICKED = {}                 # (room id, steam) -> until when he can't come back
 INVITED = {}                # (room id, steam) -> until when he is not invited into that room again
 INVITE_GAP = 30             # s between two invitations of one player into one room
+INVITE_MAX = 10             # invitations one player may send in a minute (into any rooms)
+INV_SENT = {}               # steam -> the times of his invitations of the last minute
 PING_GAP = 30               # s between two pings of one kind in one room
 PING_TTL = 30               # s the pinged player has to answer (the launcher's window)
 INVITE_TTL = 180            # s an invitation stays on the invited player's screen
@@ -406,7 +408,16 @@ def on_match_failed(m, culprits, why):
     goes on - everybody's is stopped, the room is back to its lobby"""
     r = ROOMS.get(m.get('lroom') or '')
     if r and (r.get('launch') or {}).get('match') == m['id']:
-        _cancel_launch(r, 'match', [s for s in culprits if s in _members(r)], why=why); _pub(r)
+        pl = [s for s in culprits if s in _members(r)]
+        if culprits and not pl:                                               # only observers failed: they are out, the match goes on
+            for s in culprits:
+                if s in m.get('watchers', []): m['watchers'].remove(s)
+                m.get('players', {}).pop(s, None); L.MM.pop(s, None)
+                o = _obs(r, s)
+                if o: o['gst'] = ''
+            log('room %s: observers %s not in the match %s (%s) - the players go on' % (r['id'], culprits, m['id'], why)); _pub(r)
+            return
+        _cancel_launch(r, 'match', pl, why=why); _pub(r)
         return
     L.MM_MATCHES.pop(m['id'], None)                                          # the room is gone meanwhile: just end the searches
     now = time.time()
@@ -417,6 +428,10 @@ def on_match_failed(m, culprits, why):
 def on_search_left(steam, why):
     """a player of a launching room stopped his search (Stop Searching, his game is gone) before the match was made"""
     r = ROOMS.get(BY.get(steam) or '')
+    if r and _obs(r, steam):                                                  # an observer: only he is out of this start
+        L.MM.pop(steam, None); _obs(r, steam)['gst'] = ''
+        log('room %s: observer %s left his watch search (%s)' % (r['id'], steam, why)); _pub(r)
+        return
     if r and r['state'] == 'launching':
         _cancel_launch(r, 'left_search', [steam], why=why); _pub(r)
 
@@ -479,6 +494,7 @@ def tick(now):
         if ch: _pub(r)
     for k in [k for k, t in KICKED.items() if t < now]: KICKED.pop(k, None)
     for k in [k for k, t in INVITED.items() if t < now]: INVITED.pop(k, None)
+    for k in [k for k, ts in INV_SENT.items() if not ts or now - ts[-1] > 60]: INV_SENT.pop(k, None)
 
 
 # ---------- the launcher's calls ----------
@@ -616,10 +632,12 @@ def api(verb, steam, d):
         return {'ok': True}
     if verb == 'invite':                                                    # 1.5.3: anybody in the room invites a player (his stream)
         t = str(d.get('steam') or '')
-        if not t or t == steam or t in _everyone(r): return {'ok': False, 'error': 'bad'}
+        if not re.fullmatch(r'\d{1,20}', t) or t == steam or t in _everyone(r): return {'ok': False, 'error': 'bad'}   # a SteamID only
         if r['state'] not in ('lobby', 'countdown'): return {'ok': False, 'error': 'state'}
         if INVITED.get((r['id'], t), 0) > now: return {'ok': True, 'again': True}   # invited a moment ago: once is enough
-        INVITED[(r['id'], t)] = now + INVITE_GAP
+        sent = [x for x in INV_SENT.get(steam, []) if now - x < 60]
+        if len(sent) >= INVITE_MAX: INV_SENT[steam] = sent; return {'ok': False, 'error': 'too_soon'}   # no flood of invitations
+        INV_SENT[steam] = sent + [now]; INVITED[(r['id'], t)] = now + INVITE_GAP
         cat = L._catalog()
         try: L.stream.publish('lroom_invite', {'id': r['id'], 'name': r['name'], 'mode': r['mode'], 'map': r['map'],
                                                'map_name': (cat.get(r['map']) or {}).get('name') or r['map'], 'game': r['game'], 'ver': r['ver'],

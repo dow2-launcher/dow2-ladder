@@ -49,9 +49,9 @@ ok(lroom.api('ping', 'h', {'kind': 'ready'})['error'] == 'too_soon', 'a second r
 ok(lroom.api('ping', 'p2', {'kind': 'ready'})['error'] == 'owner', 'only the owner checks who is ready')
 ok(lroom.api('ping', 'p2', {'kind': 'start'})['error'] == 'not_ready', 'calling the owner needs everybody ready')
 del pub[:]
-r = lroom.api('invite', 'p2', {'steam': 'x'})
-ok(r['ok'] and pub and pub[0][0] == 'lroom_invite' and pub[0][2] == 'x' and pub[0][1]['from'] == 'p2' and pub[0][1]['id'] == rid, 'an invitation goes to the invited player\'s stream')
-ok(lroom.api('invite', 'h', {'steam': 'x'}).get('again') and len(pub) == 1, 'invited again at once: not sent twice')
+r = lroom.api('invite', 'p2', {'steam': '76561198000000099'})
+ok(r['ok'] and pub and pub[0][0] == 'lroom_invite' and pub[0][2] == '76561198000000099' and pub[0][1]['from'] == 'p2' and pub[0][1]['id'] == rid, 'an invitation goes to the invited player\'s stream')
+ok(lroom.api('invite', 'h', {'steam': '76561198000000099'}).get('again') and len(pub) == 1, 'invited again at once: not sent twice')
 ok(lroom.api('invite', 'h', {'steam': 'w1'})['error'] == 'bad', 'nobody already in the room is invited')
 v = lroom.api('seat', 'w1', {'slot': 3})['room']
 ok(v['slots'][3] and v['slots'][3]['steam'] == 'w1' and not v['obs'], 'an observer sits down on a free seat')
@@ -80,5 +80,17 @@ lroom.api('join', 's2', {'id': v['id']}); lroom.api('ready', 's1', {'on': True})
 r = lroom.api('ping', 's2', {'kind': 'start'})
 ok(r['ok'] and [(e, t, d['kind']) for e, d, t in pub] == [('lroom_ping', 's1', 'start')], 'all ready: a player calls the owner to start')
 ok(lroom.api('ping', 's1', {'kind': 'start'})['error'] == 'bad', 'the owner does not call himself')
+ok(lroom.api('invite', 'h', {'steam': 'not-a-steam-id'})['error'] == 'bad', 'an invitation only to a SteamID')
+res = [lroom.api('invite', 's1', {'steam': str(76561198000000100 + i)}).get('error') for i in range(12)]
+ok(res[:10] == [None] * 10 and res[10:] == ['too_soon', 'too_soon'], 'one player: 10 invitations a minute at most')
+# an observer never calls the start off
+R2 = lroom.ROOMS[rid2]; R2['launch']['match'] = None
+lroom.api('join', 'o7', {'id': rid2, 'as': 'obs'}) if not lroom._obs(R2, 'o3') else None
+L.MM['o3'] = {'steam': 'o3', 'mode': 'watch', 'state': 'searching', 'pool': '|elite', 'lroom': rid2}
+lroom.on_search_left('o3', 'went silent')
+ok(R2['state'] == 'launching' and 'o3' not in L.MM, 'an observer\'s search gone: the start goes on')
+L.MM_MATCHES['m2'] = {'id': 'm2', 'lroom': rid2, 'state': 'creating', 'watchers': ['o4'], 'players': {'o4': {}}}; R2['launch']['match'] = 'm2'
+lroom.on_match_failed(L.MM_MATCHES['m2'], ['o4'], 'not in the room')
+ok(R2['state'] == 'launching' and L.MM_MATCHES['m2']['watchers'] == [], 'only an observer not in the match: he is out, the players go on')
 print('FAILED %d' % fails if fails else 'all ok')
 sys.exit(1 if fails else 0)
