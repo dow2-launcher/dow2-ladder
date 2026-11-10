@@ -106,7 +106,9 @@ def _local(ip):                                     # an address of this machine
 SELF = set(x for x in os.environ.get('RELAY_SELF', '').split(',') if x) | {h for h, _ in map(_hp, PEERS) if _local(h)}
 _last_warn = {}
 LOG = os.environ.get('RELAY_LOG', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'battle_relay.jsonl'))
-sessions = {}                                       # sid bytes -> Session
+try: NODE = os.environ.get('RELAY_NODE') or socket.gethostname()   # the match protocol's "node" (the collector knows the ip anyway)
+except Exception: NODE = ''
+sessions = {}                                     # sid bytes -> Session
 finished = {}                                       # sid bytes -> (Session, when it ended): for the live replay's spectators
 LIVE_DELAY = float(os.environ.get('LIVE_DELAY', '120'))   # s: the least delay of the live replay (the server's setting)
 LIVE_KEEP = float(os.environ.get('LIVE_KEEP', '1200'))    # s an ended session stays for spectators
@@ -146,6 +148,16 @@ def log(**k):
     print(time.strftime('%T'), ' '.join(f'{a}={b}' for a, b in k.items() if a != 't'), flush=True)
 
 
+_mlog_errs = [0]
+def mlog_err(where, e):
+    """the match protocol (own rating step 1b, 10.11.2026: one "match_log" line per played session) never stops the relay:
+    an error of it is logged (the first 20 of the process) and forgotten"""
+    _mlog_errs[0] += 1
+    if _mlog_errs[0] <= 20:
+        try: log(ev='mlog_error', where=where, err=repr(e))
+        except Exception: pass
+
+
 class Peer:
     def __init__(self, w, addr):
         self.w, self.addr, self.sess, self.idx, self.pid = w, addr, None, 0, b''
@@ -156,6 +168,8 @@ class Peer:
         self.rejoin = False                               # "DWR5": its Relay.dll keeps reconnecting for 3 min and reads our notices
         self.solo, self.max_solo = 0, 0.0                 # stalls >= SOLO_GAP of his alone (the others' turns kept coming)
         self.turn_mark = 0                                # the session's turn count at his last turn
+        self.why = None                                   # why the connection ended: fin / reset / idle / replaced / vote_drop / error
+        self.pl = None                                    # his record in Session.plog (the match protocol)
 
     def stats(self):
         i = tcp_info(self.w)
@@ -188,6 +202,47 @@ class Session:
         self.lagging = set()                              # numbers told as "silent" (connected, no turns for LAG s)
         self.votes = {}                                   # number waited for -> player ids that voted "don't wait"
         self.started = time.time(); self.ticks = 0; self.turn_msgs = 0; self.late = 0; self.max_late = 0.0
+        self.plog = {}                                    # player id -> his record for the "match_log" line (10.11.2026)
+
+    def _plog_join(self, p, a):
+        r = self.plog.get(p.pid)
+        if r is None:
+            r = self.plog[p.pid] = dict(idx=p.idx, join_t=round(time.time(), 3), rejoins=0, ftt=None, ltt=None, leave_t=None,
+                                        leave_tick=None, leave_turns=None, reason=None, away_s=0.0, solo=0, max_solo_ms=0,
+                                        gaps=0, max_gap_ms=0, turns=0, drops=[], peer=p.addr)
+        else:
+            r['rejoins'] += 1; r['peer'] = p.addr
+            r['leave_t'] = r['leave_tick'] = r['leave_turns'] = r['reason'] = None
+            if a: r['away_s'] += time.monotonic() - a[2]
+        p.pl = r
+
+    def _plog_leave(self, p, why):
+        r = p.pl
+        if r is None: return
+        r['solo'] += p.solo; r['gaps'] += p.gaps; r['turns'] += p.turns
+        r['max_solo_ms'] = max(r['max_solo_ms'], round(p.max_solo * 1000)); r['max_gap_ms'] = max(r['max_gap_ms'], round(p.max_gap * 1000))
+        if len(r['drops']) < 20: r['drops'].append([round(time.time() - self.started, 1), self.ticks, why])
+        if any(q.pid == p.pid for q in self.peers): return     # his newer connection is here already (replaced)
+        r['leave_t'] = round(time.time(), 3); r['leave_tick'] = self.ticks; r['leave_turns'] = self.turn_msgs; r['reason'] = why
+
+    def _plog_gone(self, pid, why, a):
+        r = self.plog.get(pid)
+        if r is None: return
+        r['conn_reason'] = r['reason']; r['reason'] = why; r['drop_t'] = round(time.time(), 3); r['drop_tick'] = self.ticks
+        if a: r['away_s'] += time.monotonic() - a[2]
+
+    def match_log(self):
+        now = time.time(); pl = []
+        for pid, r in self.plog.items():
+            x = dict(r); i = r['idx']
+            x.update(pid=pid.hex(), steam=self.steams.get(i, ''), name=self.names.get(i, ''), first_turn_tick=x.pop('ftt'),
+                     last_turn_tick=x.pop('ltt'), away_s=round(r['away_s'], 1), gw_reason=None)
+            pl.append(x)
+        lt = [x['leave_t'] for x in pl if x['leave_t']]
+        return dict(ev='match_log', v=1, sid=int.from_bytes(self.sid, 'little'), node=NODE, started=round(self.started, 3),
+                    t0=round(self.tick_t[0], 3) if self.tick_t else None, t_end=round(now, 3), ticks=self.ticks, turns=self.turn_msgs,
+                    late_ticks=self.late, players=pl,
+                    all_gone_within_s=round(max(lt) - min(lt), 1) if lt and len(lt) == len(pl) else None)
 
     def join(self, p):
         # 30.10.2026: a number per PLAYER, not per connection - the host numbers the players itself in the order they came
@@ -195,20 +250,24 @@ class Session:
         # messages to the next newcomer went to a number nobody had, and every later guest of that lobby failed to join
         old = [q for q in self.peers if q.pid == p.pid]
         for q in old:
-            self.peers.remove(q)
+            self.peers.remove(q); q.why = q.why or 'replaced'
             try: q.w.close()
             except Exception: pass
         if p.pid in self.by_pid: p.idx = self.by_pid[p.pid]
         else: p.idx = self.by_pid[p.pid] = self.next_idx; self.next_idx += 1
         p.sess = self; self.peers.append(p)
         a = self.away.pop(p.pid, None)
+        try: self._plog_join(p, a)
+        except Exception as e: mlog_err('join', e)
         if a:
             log(ev='back', sid=int.from_bytes(self.sid, 'little'), idx=p.idx, peer=p.addr, after_s=round(time.monotonic() - a[2], 1))
             self.votes.pop(p.idx, None)
             self.notice(a[0], None)
 
-    def leave(self, p):
+    def leave(self, p, why=None):
         if p in self.peers: self.peers.remove(p)
+        try: self._plog_leave(p, p.why or why or 'closed')
+        except Exception as e: mlog_err('leave', e)
         # 06.11.2026: a player whose connection breaks in the match stays in the ticks as silent for GRACE s - the game reconnects
         # by itself 15 s after the break; a player missing from a tick (neither sent nor silent) is dropped by the others at once
         if self.ticks and GRACE > 0 and p.pid and p.pid not in self.gone and not any(q.pid == p.pid for q in self.peers):
@@ -225,6 +284,9 @@ class Session:
         if self.ticks and self.lobby and self.start_msg: finished[self.sid] = (self, time.time())   # spectators are minutes behind
         log(ev='session_end', sid=int.from_bytes(self.sid, 'little'), secs=round(time.time() - self.started), ticks=self.ticks, turns=self.turn_msgs,
             late_ticks=self.late, max_late_ms=round(self.max_late * 1000))
+        if self.ticks:                                    # a played session: one line of who was here, when and why he left
+            try: log(**self.match_log())
+            except Exception as e: mlog_err('end', e)
 
     def vote(self, p, idx):
         """Relay 25: player p votes "don't wait" for player idx; when every other connected player has voted, idx is dropped at
@@ -238,9 +300,12 @@ class Session:
             a = next((a for a in self.away.values() if a[0] == idx), None) or (idx, None, time.monotonic())
             self.notice(idx, a); return
         for pid, a in list(self.away.items()):
-            if a[0] == idx: del self.away[pid]; self.gone.add(pid)
+            if a[0] == idx:
+                del self.away[pid]; self.gone.add(pid)
+                try: self._plog_gone(pid, 'vote_drop', a)
+                except Exception as e: mlog_err('vote', e)
         for q in [q for q in self.peers if q.idx == idx]:
-            self.gone.add(q.pid); self.peers.remove(q)
+            self.gone.add(q.pid); self.peers.remove(q); q.why = 'vote_drop'
             try: q.w.close()
             except Exception: pass
         self.lagging.discard(idx); self.votes.pop(idx, None)
@@ -276,6 +341,12 @@ class Session:
             if g >= SOLO_GAP and others and self.turn_msgs - 1 - p.turn_mark >= max(3, 5 * (g - 0.3) * others):
                 p.solo += 1; p.max_solo = max(p.max_solo, g)
         p.last_turn = now; p.turn_mark = self.turn_msgs; p.turns += 1; p.iv['turns'] += 1
+        r = p.pl                                          # match protocol: his first / last turn's tick (no allocation)
+        if r is not None:
+            try:
+                if r['ftt'] is None: r['ftt'] = self.ticks
+                r['ltt'] = self.ticks
+            except Exception as e: mlog_err('turn', e)
         if p.idx in self.lagging: self.lagging.discard(p.idx); self.votes.pop(p.idx, None); self.notice(p.idx, None)
         if not self.ticker: self.ticker = asyncio.ensure_future(self.tick_loop())
 
@@ -303,6 +374,8 @@ class Session:
                     if self.ticks % 10 == 0: self.notice(i, a, now)      # once a second
                 else:
                     del self.away[pid]; self.gone.add(pid); log(ev='away_expired', sid=int.from_bytes(self.sid, 'little'), idx=i)
+                    try: self._plog_gone(pid, 'grace_over', a)
+                    except Exception as e: mlog_err('grace', e)
                     self.notice(i, None)
             m = bytearray(b'\x0a\xfe') + bytes([len(q)])
             for i, d in q: m += bytes([i]) + d
@@ -689,6 +762,8 @@ async def handle(r, w):
                 await q.put(await r.readexactly(n) if n else b'')
                 try: sock.setsockopt(socket.IPPROTO_TCP, TCP_QUICKACK, 1)   # acknowledge at once: the player's next turn
                 except Exception: pass                                    # does not wait for our delayed ack
+        except asyncio.IncompleteReadError: p.why = p.why or 'fin'     # the player's side closed (FIN)
+        except ConnectionError: p.why = p.why or 'reset'               # reset / broken
         except Exception: pass
         await q.put(None)
     try:
@@ -787,12 +862,13 @@ async def handle(r, w):
             if m is None: break
             if m: handle_msg(p, m)
             await w.drain()
-    except (asyncio.IncompleteReadError, ConnectionError, asyncio.TimeoutError): pass
-    except Exception as e: log(ev='error', peer=p.addr, err=repr(e))
+    except (asyncio.IncompleteReadError, ConnectionError, asyncio.TimeoutError) as e:
+        p.why = p.why or ('idle' if isinstance(e, asyncio.TimeoutError) else 'fin' if isinstance(e, asyncio.IncompleteReadError) else 'reset')
+    except Exception as e: p.why = p.why or 'error'; log(ev='error', peer=p.addr, err=repr(e))
     finally:
         if rt: rt.cancel()
         if p.sess:
-            log(ev='leave', sid=int.from_bytes(p.sess.sid, 'little'), **p.stats())
+            log(ev='leave', sid=int.from_bytes(p.sess.sid, 'little'), **p.stats(), why=p.why, tick=p.sess.ticks)
             p.sess.leave(p)
         try: w.close()
         except Exception: pass

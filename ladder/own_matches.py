@@ -144,6 +144,46 @@ def on_reports(d):
     except Exception as e: _log('on_reports %s' % d.get('room'), e); return {'ok': False}
 
 
+def leave_reason(x):
+    """the node's reasons in one word: how his connection ended (fin/reset/idle/replaced/error/closed), what the node then did
+    (grace_over: not back in time / vote_drop: the others voted him out), how the UDP gateway saw it (gw:peer / gw:dead / ...)"""
+    parts = [x.get('conn_reason'), x.get('reason')] if x.get('conn_reason') else [x.get('reason')]
+    if x.get('gw_reason'): parts.append('gw:%s' % x['gw_reason'])
+    return '/'.join(str(p) for p in parts if p) or None
+
+
+def on_node_log(ml, ip):
+    """match_log_collect.py (rts, own rating step 1b): a node's "match_log" of session sid -> own_matches.node_log (a JSON list,
+    one entry per node + session end: a second run replaces it, never adds) and the players' join/leave fields from the entry
+    with the most ticks. Only a session of one of OUR matches (a row exists) whose time fits the match. -> 'ok' / why not"""
+    try:
+        sid = _int(ml.get('sid'))
+        if sid is None: return 'no_sid'
+        with _lock, _db() as c:
+            row = c.execute('SELECT started, ended, node_log FROM own_matches WHERE sid = ?', (sid,)).fetchone()
+            if not row: return 'not_ours'
+            started, ended = row[0] or 0, row[1] or row[0] or 0
+            if started and not (ml.get('t_end', 0) >= started - 120 and ml.get('started', 0) <= ended + 600): return 'time'
+            try: logs = json.loads(row[2]) if row[2] else []
+            except Exception: logs = []
+            if not isinstance(logs, list): logs = [logs]
+            e = dict(ml, ip=ip); e.pop('ev', None)
+            logs = [x for x in logs if not (x.get('ip') == ip and x.get('t_end') == e.get('t_end'))] + [e]
+            logs.sort(key=lambda x: x.get('t_end') or 0)
+            best = max(logs, key=lambda x: x.get('ticks') or 0)
+            now = int(time.time())
+            c.execute('UPDATE own_matches SET node_log = ?, node = coalesce(node, ?), ticks = coalesce(?, ticks), updated = ? WHERE sid = ?',
+                      (json.dumps(logs, separators=(',', ':')), best.get('ip'), _int(best.get('ticks')), now, sid))
+            for p in best.get('players') or []:
+                if not p.get('steam'): continue
+                c.execute('UPDATE own_match_players SET join_t = ?, leave_t = ?, leave_tick = ?, leave_reason = ?, rejoins = ?, max_solo_ms = ? '
+                          'WHERE sid = ? AND steam = ?',
+                          (_int(p.get('join_t')), _int(p.get('leave_t')), _int(p.get('leave_tick')), leave_reason(p), _int(p.get('rejoins')),
+                           _int(p.get('max_solo_ms')), sid, str(p['steam'])))
+        return 'ok'
+    except Exception as e: _log('on_node_log %s' % ml.get('sid'), e); return 'error'
+
+
 def backfill(c, log=print):
     """the own matches stored before 10.11.2026: mm_history NM- rows + matches source=ownlobby; no per-player reports existed then
     (own_lobby kept only the first), so report_result/report_t stay NULL and the first report goes to reports as it was"""

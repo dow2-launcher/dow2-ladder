@@ -1,0 +1,8 @@
+[Unit]
+Description=Game nodes' match protocol into own_matches (ladder/match_log_collect.py: match_log + gateway close -> node_log, leave fields; storage only)
+After=network-online.target dow2-ladder.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /srv/ladder/app/match_log_collect.py
+TimeoutStartSec=600

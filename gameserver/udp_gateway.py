@@ -59,6 +59,17 @@ ADDR_BURST = 2 * ADDR_RATE
 # ~650 packets/s, 1.07 M copies in 10 min, the game choking on old retries)
 VERSION = max(1, min(2, int(os.environ.get('UDPGW_VERSION', '2'))))
 STATS_EVERY = float(os.environ.get('UDPGW_STATS_EVERY', '15'))   # s: an ev=conn_stats line per live connection, 0 = none
+# 10.11.2026 (own rating step 1b): every "close" also as a JSON line here, so the match collector on rts does not depend on the
+# journal's retention; the unit gives the directory (StateDirectory=dow2udpgw). Empty = journal only, as before
+GWLOG = os.environ.get('UDPGW_LOG', '')
+
+
+def gwlog(**k):
+    if not GWLOG: return
+    try:
+        k['t'] = round(time.time(), 3)
+        with open(GWLOG, 'a') as f: f.write(json.dumps(k, default=str) + '\n')
+    except Exception: pass
 
 
 def log(**k):
@@ -146,6 +157,9 @@ class Conn:
         st = self.core.stats
         log(ev='close', cid=self.cid, peer=self.addr[0], lport=getattr(self, 'lport', 0), secs=round(time.time() - self.started, 1), srtt_ms=round(self.core.srtt * 1000),
             by=by, storm=int(self.core.fuse_tripped), **st)
+        try: gwlog(ev='close', cid=self.cid, peer=self.addr[0], lport=getattr(self, 'lport', 0), by=by,
+                   secs=round(time.time() - self.started, 1), srtt_ms=round(self.core.srtt * 1000), **st)
+        except Exception: pass
 
 
 class Gateway(asyncio.DatagramProtocol):
