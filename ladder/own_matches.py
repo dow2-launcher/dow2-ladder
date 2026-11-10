@@ -466,3 +466,61 @@ def step2(db_path, log=print):
         finally: c.close()
         return True
     except Exception as e: _log('step2', e); return False
+
+
+# ---------- step 3: the site (/ladder/ "Elite (test)" tab), read only (10.11.2026) ----------
+def _names(c, steams):
+    """steam -> his latest name in our matches (own_mp_steam index)"""
+    out = {}
+    for s in set(steams):
+        r = c.execute('SELECT name FROM own_match_players WHERE steam = ? AND coalesce(name, "") != "" ORDER BY sid DESC LIMIT 1', (s,)).fetchone()
+        out[s] = r[0] if r else ''
+    return out
+
+
+def site_board(mode, season):
+    """/ladder/api/own: the table (cal_left = 0, by cons = rating - 2*RD) and the players still in calibration (no rating shown)"""
+    with _db() as c:
+        try:
+            rows = c.execute('SELECT steam, rating, rd, games, wins, losses, leaves, cal_left, last FROM own_ratings '
+                             'WHERE mode = ? AND season = ? ORDER BY cons DESC, games DESC', (mode, season)).fetchall()
+            seasons = [r[0] for r in c.execute('SELECT DISTINCT season FROM own_ratings ORDER BY season DESC')]
+        except sqlite3.OperationalError: rows, seasons = [], []          # no own_ratings yet (step 2 not run)
+        nm = _names(c, [r[0] for r in rows])
+    board, cal = [], []
+    for steam, rating, rd, games, wins, losses, leaves, cal_left, last in rows:
+        p = {'steam': steam, 'name': nm.get(steam) or steam, 'games': games, 'wins': wins,
+             'losses': losses - leaves, 'leaves': leaves, 'last': last}
+        if cal_left > 0: p['cal_left'] = cal_left; cal.append(p)
+        else:
+            p.update(rank=len(board) + 1, cons=round(rating - 2 * rd), rating=round(rating), rd=round(rd)); board.append(p)
+    cal.sort(key=lambda p: -(p['last'] or 0))
+    return {'mode': mode, 'season': season, 'seasons': seasons, 'cal_games': CAL_GAMES, 'board': board, 'calibrating': cal}
+
+
+def site_player(steam, race_key=lambda rc, modname: None, limit=50):
+    """/ladder/api/own/player: his ratings and his latest own matches (teams, his final with the reason)"""
+    with _db() as c:
+        try:
+            rt = c.execute('SELECT mode, season, rating, rd, games, wins, losses, leaves, cal_left, last FROM own_ratings '
+                           'WHERE steam = ? ORDER BY season DESC, mode', (steam,)).fetchall()
+        except sqlite3.OperationalError: rt = []
+        sids = [r[0] for r in c.execute('SELECT sid FROM own_match_players WHERE steam = ? ORDER BY sid DESC LIMIT ?', (steam, limit))]
+        ms = []
+        for sid in sids:
+            m = c.execute('SELECT kind, mode, map, modname, started, ended, winner_team, rated, why_unrated FROM own_matches WHERE sid = ?',
+                          (sid,)).fetchone()
+            if not m: continue
+            ps = c.execute('SELECT steam, name, team, race, final, note, weight FROM own_match_players WHERE sid = ? ORDER BY team, pid',
+                           (sid,)).fetchall()
+            teams, me = {}, None
+            for s, name, team, race, final, note, w in ps:
+                p = {'steam': s, 'name': name or s, 'team': team, 'race': race_key(race, m[3]), 'final': final}
+                teams.setdefault(team, []).append(p)
+                if s == steam: me = {'team': team, 'final': final, 'note': note, 'weight': w}
+            ms.append({'sid': sid, 'kind': m[0], 'mode': m[1], 'map': m[2], 'started': m[4], 'ended': m[5], 'winner_team': m[6],
+                       'rated': bool(m[7]), 'why': m[8], 'me': me, 'teams': [teams[k] for k in sorted(teams, key=lambda t: (t is None, t))]})
+        name = _names(c, [steam]).get(steam) or ''
+    ratings = [{'mode': r[0], 'season': r[1], 'games': r[4], 'wins': r[5], 'losses': r[6] - r[7], 'leaves': r[7], 'cal_left': r[8], 'last': r[9],
+                **({} if r[8] > 0 else {'cons': round(r[2] - 2 * r[3]), 'rating': round(r[2]), 'rd': round(r[3])})} for r in rt]
+    return {'steam': steam, 'name': name, 'ratings': ratings, 'matches': ms}

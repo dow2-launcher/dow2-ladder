@@ -153,6 +153,52 @@ select { font: 600 14px Spectral, serif; color: var(--text); background: var(--p
   .board th, .board td { padding: 9px 8px; }
   .player { font-size: 15px; }
 }
+/* own rating, "Elite (test)" tab (10.11.2026) */
+.vtabs { margin: 18px auto 0; }
+body.ownv .wrap > :not(header):not(.vtabs):not(#own) { display: none !important; }
+#own { display: none; } body.ownv #own { display: block; }
+.onote { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--demo); border-radius: 4px; padding: 10px 14px; margin: 18px 0 14px; font-size: 15px; }
+.onote b { color: var(--demo); font: 700 13px Cinzel, CinzelCyr, serif; letter-spacing: .08em; text-transform: uppercase; }
+.ocontrols { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; margin: 6px 0 14px; }
+.oboard { width: 100%; table-layout: fixed; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; }
+.oboard th { font: 700 12px Cinzel, CinzelCyr, serif; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); text-align: right; padding: 12px 14px; border-bottom: 1px solid var(--line); background: #110e0b; }
+.oboard td { padding: 10px 14px; border-bottom: 1px solid #241f17; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.oboard th.l, .oboard td.l { text-align: left; }
+.oboard tr:last-child td { border-bottom: 0; } .oboard tbody tr:hover td { background: #1d1811; }
+.oboard .c-rank { width: 52px; } .oboard .c-r { width: 90px; } .oboard .c-rd { width: 110px; } .oboard .c-g { width: 64px; } .oboard .c-wl { width: 120px; } .oboard .c-last { width: 130px; }
+.oboard td.player { overflow: hidden; text-overflow: ellipsis; }
+.oboard .pn, .opl .pn { color: var(--gold-2); cursor: pointer; }
+.oboard .pn:hover, .opl .pn:hover { text-decoration: underline; }
+.oboard .muted, .ohm .muted { color: var(--muted); font-size: 14px; }
+.wl .ll { color: var(--demo); }
+.ocal { margin-top: 18px; } .ocal .chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 14px; }
+.ocal .chip { border: 1px solid #5a4a2e; border-radius: 4px; padding: 4px 10px; font-size: 15px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ocal .chip i { font-style: normal; color: var(--muted); font-size: 13px; margin-left: 4px; }
+.oback { font: 700 12px Cinzel, CinzelCyr, serif; letter-spacing: .06em; border: 1px solid #5a4a2e; border-radius: 4px; padding: 6px 12px; color: var(--gold-2); background: none; cursor: pointer; }
+.ophead { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin: 4px 0 12px; }
+.ophead h3 { margin: 0; font: 700 clamp(20px, 3.4vw, 26px) Cinzel, CinzelCyr, serif; color: var(--gold-2); min-width: 0; overflow-wrap: anywhere; }
+.orts { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.orts .stat { min-width: 0; flex: 1 1 140px; } .orts .stat b { font-size: 22px; }
+.ohm { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 10px 12px; margin-bottom: 8px; }
+.ohm .hd { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--muted); font-size: 13px; margin-bottom: 6px; } .ohm .hd b { color: var(--text); font-weight: 600; }
+.ohm .teams { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: center; }
+.ohm .vsx { font: 700 13px Cinzel, serif; color: var(--muted); }
+.ohm .side { min-width: 0; border-radius: 3px; padding: 4px 6px; }
+.ohm .side.win { background: linear-gradient(90deg, #6fae5322, transparent); box-shadow: inset 2px 0 0 var(--green); }
+.opl { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 15px; line-height: 1.25; padding: 2px 0; }
+.opl img { width: 20px; height: 20px; border-radius: 3px; flex: none; }
+.opl .pn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.opl.me .pn { color: var(--text); }
+.ores { margin-top: 6px; font-size: 14px; } .ores b { font: 700 12px Cinzel, CinzelCyr, serif; letter-spacing: .06em; text-transform: uppercase; }
+.ores .win { color: var(--green); } .ores .loss { color: #c9756f; } .ores .loss_leave { color: var(--demo); } .ores .none { color: var(--muted); }
+.ores span { color: var(--muted); }
+.oempty { text-align: center; color: var(--muted); padding: 30px 14px; }
+@media (max-width: 760px) { .oboard .hide { display: none; } }
+@media (max-width: 620px) {
+  .oboard th, .oboard td { padding: 9px 6px; } .oboard .c-rank { width: 34px; } .oboard .c-r { width: 64px; } .oboard .c-g { width: 44px; } .oboard .c-wl { width: 84px; }
+  .oboard td.player { font-size: 15px; } .ohm .teams { grid-template-columns: 1fr; } .ohm .vsx { display: none; }
+  .vtabs button { padding: 8px 14px; font-size: 14px; }
+}
 </style>
 </head>
 <body>
@@ -164,6 +210,28 @@ select { font: 600 14px Spectral, serif; color: var(--text); background: var(--p
     <a class="dl" href="/elite/" data-t="dlLauncher">Скачать лаунчер</a>
     <a class="dl" href="/ladder/chat" data-t="chatLink">Чат</a>
   </header>
+
+  <div class="ostabs vtabs" id="vtabs"><button data-v="ladder" class="on" data-o="tabLadder">Ладдер</button><button data-v="elite" data-o="tabOwn">Elite (тест)</button></div>
+
+  <div id="own">
+    <div class="onote"><b data-o="testTag">Тест</b> <span data-o="noteText"></span></div>
+    <div id="o-board-v">
+      <div class="ocontrols">
+        <div class="ostabs" id="o-modes"><button data-mode="1v1" class="on">1 vs 1</button><button data-mode="2v2">2 vs 2</button><button data-mode="3v3">3 vs 3</button></div>
+        <select id="o-season" hidden></select>
+      </div>
+      <table class="oboard">
+        <thead><tr>
+          <th class="l c-rank">#</th><th class="l" data-o="player">Игрок</th><th class="c-r" data-o="rating" data-ot="ratingHint">Рейтинг</th>
+          <th class="c-rd hide" data-ot="rdHint">Glicko ± RD</th><th class="c-g" data-o="games">Игр</th><th class="c-wl" data-ot="wlHint">W–L–<span class="ll">LL</span></th>
+          <th class="c-last hide" data-o="last">Последний</th>
+        </tr></thead>
+        <tbody id="o-rows"><tr><td colspan="7" class="oempty" data-o="loading">Загрузка…</td></tr></tbody>
+      </table>
+      <div class="box ocal" id="o-cal" hidden><h2><span data-o="calib">На калибровке</span> <em id="o-cal-n">0</em></h2><div class="chips" id="o-cal-list"></div></div>
+    </div>
+    <div id="o-player-v" hidden></div>
+  </div>
 
   <div class="mm">
     <div class="stat"><b id="s-ingame">—</b><span data-t="ingame">в DoW II</span></div>
@@ -489,6 +557,96 @@ $('#lang').addEventListener('click', e => { const b = e.target.closest('button')
   try { localStorage.setItem('ladderLang', LANG); } catch (er) {} applyLang(); loadLive(); loadBoard(); hMapsFilled = false; hFillSelects(null); loadHistory(); });
 applyLang();
 (async () => { const _db = $('#dbg'); if (_db) { try { _db.checked = localStorage.getItem('ladderDbg') === '1'; } catch (e) {} _db.addEventListener('change', () => { try { localStorage.setItem('ladderDbg', _db.checked ? '1' : '0'); } catch (e) {} loadLive(); }); } loadLive(); setInterval(loadLive, 5000); loadRooms(); setInterval(loadRooms, 15000); initHistory(); await loadSeasons(); await loadBoard(); })();
+</script>
+<script>
+// own rating, "Elite (test)" tab (10.11.2026): /ladder/api/own, /ladder/api/own/player. Read only, the other tabs untouched.
+(() => {
+const OI = {
+  ru: { tabLadder: 'Ладдер', tabOwn: 'Elite (тест)', testTag: 'Тест', loading: 'Загрузка…', player: 'Игрок', rating: 'Рейтинг', games: 'Игр', last: 'Последний',
+    noteText: 'Новый рейтинг по матчам нашего автоматча. Вылет или выход до конца матча — поражение. Первые 5 игр — калибровка. Пока тестовый и ни на что не влияет.',
+    ratingHint: 'Осторожный рейтинг: Glicko-2 минус 2·RD', rdHint: 'Glicko-2 и его неопределённость (RD)', wlHint: 'Победы – поражения – поражения за уход',
+    calib: 'На калибровке', calLeft: n => `ещё ${n}`, empty: 'Пока никто не прошёл калибровку в этом режиме.', err: 'Не удалось загрузить.',
+    back: '← К таблице', noMatches: 'Матчей нет.', season: 'сезон', calShort: 'калибровка',
+    fin: { win: 'Победа', loss: 'Поражение', loss_leave: 'Поражение за уход', none: 'Без итога' }, unrated: 'без рейтинга', half: 'половина изменения',
+    why: { room: 'комната лаунчера, не автоматч', early_leave: 'выход в первые 2 минуты', no_winner: 'итог не определён', no_data: 'нет данных о выходе игроков',
+      no_history: 'нет записи автоматча', all_gone: 'все вышли разом (сбой сети или сервера)', reports_disagree: 'отчёты игр расходятся, на проверке',
+      winners_left: 'победители вышли до конца, на проверке', not_full_teams: 'неполные команды', no_steam: 'нет Steam ID' },
+    note: { early_forgiven: 'первый ранний выход за сутки — прощён', left_first: 'вышел до конца матча', short_handed: 'играл в меньшинстве' } },
+  en: { tabLadder: 'Ladder', tabOwn: 'Elite (test)', testTag: 'Test', loading: 'Loading…', player: 'Player', rating: 'Rating', games: 'Games', last: 'Last game',
+    noteText: 'A new rating from the matches of our automatch. A disconnect or leaving before the end is a loss. The first 5 games are calibration. A test for now: it affects nothing.',
+    ratingHint: 'Conservative rating: Glicko-2 minus 2·RD', rdHint: 'Glicko-2 and its uncertainty (RD)', wlHint: 'Wins – losses – losses by leaving',
+    calib: 'In calibration', calLeft: n => `${n} left`, empty: 'Nobody has finished calibration in this mode yet.', err: 'Could not load.',
+    back: '← Back to the table', noMatches: 'No matches.', season: 'season', calShort: 'calibration',
+    fin: { win: 'Win', loss: 'Loss', loss_leave: 'Loss by leaving', none: 'No result' }, unrated: 'unrated', half: 'half the change',
+    why: { room: 'a launcher room, not the automatch', early_leave: 'a leave in the first 2 minutes', no_winner: 'no result', no_data: 'no data on the leaves',
+      no_history: 'no automatch record', all_gone: 'everyone left at once (network or server)', reports_disagree: 'the game reports disagree, under review',
+      winners_left: 'the winners left before the end, under review', not_full_teams: 'teams not full', no_steam: 'no Steam ID' },
+    note: { early_forgiven: 'the first early leave in a day, forgiven', left_first: 'left before the end', short_handed: 'played short-handed' } } };
+const q = s => document.querySelector(s), L = () => OI[LANG] || OI.en, t = k => L()[k];
+let mode = '1v1', season = '', view = 'ladder';
+function oLang() {
+  document.querySelectorAll('[data-o]').forEach(e => { const v = t(e.dataset.o); if (typeof v === 'string') e.textContent = v; });
+  document.querySelectorAll('[data-ot]').forEach(e => { e.title = t(e.dataset.ot); });
+}
+const ago = s => s ? (typeof humanAgo === 'function' ? humanAgo(s) : hDate(s)) : '—';
+const pn = p => `<span class="pn" data-steam="${esc(p.steam)}" title="${esc(p.steam)}">${esc(p.name || p.steam)}</span>`;
+async function oBoard() {
+  const rows = q('#o-rows');
+  try {
+    const d = await (await fetch('/ladder/api/own?' + new URLSearchParams({ mode, season }))).json();
+    if (!season && d.seasons && d.seasons.length > 1) { q('#o-season').innerHTML = d.seasons.map(s => `<option>${esc(s)}</option>`).join(''); q('#o-season').hidden = false; }
+    season = season || d.season;
+    rows.innerHTML = d.board.length ? d.board.map(p => `<tr><td class="l rank${p.rank <= 3 ? ' top' + p.rank : ''}">${p.rank}</td>
+      <td class="l player">${pn(p)}</td><td class="rating">${p.cons}</td><td class="hide rd">${p.rating} ± ${p.rd}</td><td>${p.games}</td>
+      <td class="wl"><span class="w">${p.wins}</span>–<span class="l">${p.losses}</span>–<span class="ll">${p.leaves}</span></td>
+      <td class="hide muted">${ago(p.last)}</td></tr>`).join('') : `<tr><td colspan="7" class="oempty">${t('empty')}</td></tr>`;
+    q('#o-cal').hidden = !d.calibrating.length; q('#o-cal-n').textContent = d.calibrating.length;
+    q('#o-cal-list').innerHTML = d.calibrating.map(p => `<span class="chip">${pn(p)}<i>${p.games}/${d.cal_games} · ${t('calLeft')(p.cal_left)}</i></span>`).join('');
+  } catch (e) { rows.innerHTML = `<tr><td colspan="7" class="oempty">${t('err')}</td></tr>`; }
+}
+function oMatch(m) {
+  const me = m.me || {}, wt = m.winner_team, ti = m.teams;
+  const side = (tm, i) => `<div class="side${wt != null && tm[0] && tm[0].team === wt ? ' win' : ''}">${tm.map(p => `<div class="opl${p.steam === OS ? ' me' : ''}">${p.race ? heroImg({ race: p.race }) : ''}${pn(p)}</div>`).join('')}</div>`;
+  const teams = ti.length === 2 ? side(ti[0], 0) + '<div class="vsx">vs</div>' + side(ti[1], 1) : ti.map(side).join('');
+  const f = me.final || 'none', why = [];
+  if (me.note && L().note[me.note]) why.push(L().note[me.note]);
+  if (me.weight != null && me.weight < 1 && m.rated) why.push(t('half'));
+  if (!m.rated && !(m.why === 'early_leave' && f === 'loss_leave')) why.push(t('unrated') + ': ' + ((m.why && L().why[m.why]) || m.why || '—'));
+  return `<div class="ohm"><div class="hd"><b>${hDate(m.started)}</b><span>${esc(m.mode || '')}</span><span>${mapTitle(mapKey({ map: m.map, mode: m.mode }))}</span></div>
+    <div class="teams">${teams}</div><div class="ores"><b class="${f}">${(L().fin[f]) || esc(f)}</b>${why.length ? ' <span>· ' + why.map(esc).join(' · ') + '</span>' : ''}</div></div>`;
+}
+let OS = '';
+async function oPlayer(steam) {
+  OS = steam; const v = q('#o-player-v'); q('#o-board-v').hidden = true; v.hidden = false;
+  v.innerHTML = `<div class="oempty">${t('loading')}</div>`;
+  try {
+    if (!Object.keys(ASSETS.maps || {}).length) { try { ASSETS = await (await fetch(A + 'index.json')).json(); } catch (e) {} }
+    const d = await (await fetch('/ladder/api/own/player?steam=' + encodeURIComponent(steam))).json();
+    if (OS !== steam) return;
+    const rts = (d.ratings || []).map(r => `<div class="stat"><b>${r.cons != null ? r.cons : '—'}</b><span>${esc(r.mode)} · ${r.cons != null ? r.rating + ' ± ' + r.rd : t('calShort') + ' ' + r.games + '/5'}
+      · <span class="wl"><span class="w">${r.wins}</span>–<span class="l">${r.losses}</span>–<span class="ll">${r.leaves}</span></span></span></div>`).join('');
+    v.innerHTML = `<div class="ophead"><button class="oback" data-back="1">${t('back')}</button><h3>${esc(d.name || steam)}</h3></div>
+      ${rts ? `<div class="orts">${rts}</div>` : ''}${d.matches.length ? d.matches.map(oMatch).join('') : `<div class="oempty">${t('noMatches')}</div>`}`;
+  } catch (e) { v.innerHTML = `<div class="ophead"><button class="oback" data-back="1">${t('back')}</button></div><div class="oempty">${t('err')}</div>`; }
+}
+function route() {
+  const h = decodeURIComponent(location.hash.slice(1)); const m = h.match(/^elite(?:[:/](\d{5,20}))?$/);
+  view = m ? 'elite' : 'ladder'; document.body.classList.toggle('ownv', !!m);
+  document.querySelectorAll('#vtabs button').forEach(b => b.classList.toggle('on', b.dataset.v === view));
+  if (!m) return;
+  if (m[1]) oPlayer(m[1]); else { OS = ''; q('#o-player-v').hidden = true; q('#o-board-v').hidden = false; oBoard(); }
+}
+q('#vtabs').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.v === 'elite') location.hash = 'elite'; else history.pushState(null, '', location.pathname + location.search), route(); });
+q('#o-modes').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; mode = b.dataset.mode;
+  document.querySelectorAll('#o-modes button').forEach(x => x.classList.toggle('on', x === b)); oBoard(); });
+q('#o-season').addEventListener('change', e => { season = e.target.value; oBoard(); });
+q('#own').addEventListener('click', e => { if (e.target.closest('[data-back]')) { location.hash = 'elite'; return; }
+  const p = e.target.closest('.pn'); if (p && p.dataset.steam) location.hash = 'elite:' + p.dataset.steam; });
+q('#lang').addEventListener('click', () => setTimeout(() => { oLang(); if (view === 'elite') route(); }, 0));
+window.addEventListener('hashchange', route);
+oLang(); route();
+})();
 </script>
 </body>
 </html>

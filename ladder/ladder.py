@@ -1154,6 +1154,9 @@ except Exception:
 # a vanilla room showed Ordo Malleus players with the Brother-Captain's icon - they were orks; 6 and 7 never come from vanilla,
 # see elite_sure)
 VAN_RACE_ID = {0: 'chaos_marines', 1: 'eldar', 2: 'imperial_guard', 3: 'orks', 4: 'space_marines', 5: 'tyranids'}
+def own_race_key(rc, modname):                         # own_match_players.race (the game's race number) -> the asset key
+    try: return (VAN_RACE_ID.get(int(rc)) if str(modname or '').lower() == 'dow2' else RACE_KEYS[int(rc)]) if rc is not None and 0 <= int(rc) < 9 else None
+    except Exception: return None
 
 def _slot_head_at(raw, p):
     # a slot record starts with: profile id, 3 ints (-1 -1 -1 when empty / 0 join-order 0), team, hero, race, a byte, -1
@@ -2061,6 +2064,15 @@ class H(BaseHTTPRequestHandler):
                 if uid:
                     r = fb_thread(uid); fb_admin_seen(uid); return self.send(200, r, cache=0)
                 return self.send(200, fb_admin_list(), cache=0)
+            if u.path == '/ladder/api/own':                       # own rating (test, 10.11.2026): the table of a mode/season
+                mode = qs.get('mode', ['1v1'])[0]
+                if mode not in MODES: mode = '1v1'
+                season = (qs.get('season', [''])[0] or current_season())[:9]
+                return self.send(200, own_matches.site_board(mode, season), cache=60)
+            if u.path == '/ladder/api/own/player':                # own rating: a player's own matches
+                steam = qs.get('steam', [''])[0]
+                if not re.fullmatch(r'\d{5,20}', steam): return self.send(400, {'error': 'steam'})
+                return self.send(200, own_matches.site_player(steam, own_race_key), cache=60)
             if u.path == '/ladder/api/board':
                 season = (qs.get('season', [current_season()])[0])[:9]
                 mode = qs.get('mode', ['1v1'])[0]
