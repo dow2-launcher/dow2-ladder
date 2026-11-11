@@ -1914,6 +1914,19 @@ def fb_magic_mint(ttl=2592000):
         d[k] = int(time.time()) + int(ttl)
         _fb_magic_save(d)
     return k
+FB_LOGIN_PAGE = """<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<meta name=robots content=noindex><title>Elite dev</title>
+<body style="font:16px sans-serif;background:#0d0b09;color:#e6dccb;padding:40px">
+<p id=m>\u0412\u0445\u043e\u0434\u2026</p>
+<script>
+(function(){var k='__K__',m=document.getElementById('m');
+function bad(){m.textContent='\u0421\u0441\u044b\u043b\u043a\u0430 \u043d\u0435\u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0442\u0435\u043b\u044c\u043d\u0430 \u0438\u043b\u0438 \u0443\u0436\u0435 \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u043d\u0430.';}
+if(!k)return bad();
+fetch('/ladder/api/fb/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({k:k})})
+.then(function(r){return r.json()}).then(function(d){
+if(d&&d.ok&&d.token)location.replace('/ladder/fb-admin#token='+encodeURIComponent(d.token));else bad();}).catch(bad);})();
+</script>"""
+
 def fb_magic_consume(k):
     if not k or not re.fullmatch(r'[0-9a-f]{48}', k): return None
     with FB_LOCK:
@@ -2050,12 +2063,11 @@ class H(BaseHTTPRequestHandler):
                 self.send_response(200); self.send_header('Content-Type', 'image/' + fn.rsplit('.', 1)[1].replace('jpg', 'jpeg'))
                 self.send_header('Content-Length', str(len(b))); self.send_header('Cache-Control', 'private, max-age=86400'); self.end_headers(); self.wfile.write(b); return
             if u.path == '/ladder/fb-login':
-                tok = fb_magic_consume(qs.get('k', [''])[0])
-                if not tok:
-                    return self.send_html('<meta charset=utf-8><body style="font:16px sans-serif;background:#0d0b09;color:#e6dccb;padding:40px">\u0421\u0441\u044b\u043b\u043a\u0430 \u043d\u0435\u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0442\u0435\u043b\u044c\u043d\u0430 \u0438\u043b\u0438 \u0443\u0436\u0435 \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u043d\u0430.</body>', cache=0)
-                self.send_response(302)
-                self.send_header('Location', '/ladder/fb-admin#token=' + urllib.parse.quote(tok, safe=''))
-                self.send_header('Cache-Control', 'no-store'); self.end_headers(); return
+                # 11.11.2026: a GET never spends the link. Telegram's preview bot opened the first link before the owner did,
+                # and a pasted link came with a "`" stuck to its end. The page spends it from JS (bots run none), and the
+                # key is cut to its 48 hex chars.
+                m = re.match(r'[0-9a-f]{48}', (qs.get('k', [''])[0] or '').strip().lower())
+                return self.send_html(FB_LOGIN_PAGE.replace('__K__', m.group(0) if m else ''), cache=0)
             if u.path == '/ladder/api/fb/magic':
                 if not _fb_token_ok(qs.get('token', [''])[0]): return self.send(403, {'error': 'token'}, cache=0)
                 return self.send(200, {'ok': True, 'url': '/ladder/fb-login?k=' + fb_magic_mint()}, cache=0)
@@ -2103,6 +2115,11 @@ class H(BaseHTTPRequestHandler):
                 if u.path == '/ladder/api/fb/send': return self.send(200, fb_send(d), cache=0)
                 if not _fb_token_ok(d.get('token')): return self.send(403, {'error': 'token'}, cache=0)
                 d['name'] = 'Elite dev'; return self.send(200, fb_send(d, 'dev'), cache=0)
+            if u.path == '/ladder/api/fb/login':
+                d = self._body()
+                m = re.match(r'[0-9a-f]{48}', str(d.get('k') or '').strip().lower())
+                tok = fb_magic_consume(m.group(0)) if m else None
+                return self.send(200, {'ok': True, 'token': tok} if tok else {'ok': False}, cache=0)
             if u.path == '/ladder/api/fb/mod':
                 d = self._body()
                 if not _fb_token_ok(d.get('token')): return self.send(403, {'error': 'token'}, cache=0)
