@@ -345,6 +345,14 @@ def report(path):
         if ld: why.append('потери в концовке: ' + ', '.join(f"команда {k}: {v}" for k, v in sorted(ld.items())))
         L.append(f"\n**Гипотеза о победителе (уверенность {conf}):** команда {wt} — {winners}. " +
                  ('Признаки: ' + '; '.join(why) + '.' if why else ''))
+    # чат матча — последним разделом (to_en в app.py переводит только подписи, сами реплики как есть)
+    chat = meta.get('chat') or []
+    if chat:
+        TO = {'all': 'всем', 'team': 'союзникам', 'obs': 'наблюдатель'}
+        clean = lambda x: ' '.join(str(x).split()).replace('`', "'").replace('*', '∗')
+        L.append("\n## Чат\n")
+        for c in chat:
+            L.append(f"- `{ts(c['tick'])}` **{clean(c['name']) or '?'}** ({TO.get(c['to'], c['to'])}): {clean(c['text'])}")
     caption = (f"{mapname} · {races} · {ts(dur_ticks)} · тиры: " +
                ', '.join(f"{pname(pid)}:{maxtier.get(pid,'Т1').replace('tier_','Т') or 'Т1'}" for pid in pids) +
                (f" · вероятный победитель: {winners} ({conf})" if wt is not None else ''))
@@ -358,6 +366,7 @@ def report(path):
               'tiers': [f"{ts(t)} {pname(pid)}: {nm}" for pid, v in tiers.items() for t, nm in v],
               'losses': [f"{ts(l)} {pname(pid)}: {sqn(pid, s)}" for l, pid, s in sorted(deaths)],
               'abilities_by_phase': {pname(pid): dict(Counter(ph(t) for t, q, at, a in actions if q == pid and at in (0x32, 0x35, 0x46))) for pid in pids},
+              'chat': [f"{ts(c['tick'])} {c['name']} ({c['to']}): {c['text']}" for c in (meta.get('chat') or [])[:150]],
               'enemy_half_share': {pname(pid): [(lambda v: round(v) if v is not None else None)(enemy_half_share(pid, a_, b_)) for a_, b_ in ((0, dur_ticks/3), (dur_ticks/3, 2*dur_ticks/3), (2*dur_ticks/3, dur_ticks))] for pid in pids}}
         json.dump(dg, open(os.environ['DIGEST'], 'w'), ensure_ascii=False, indent=1)
     return '\n'.join(L), caption

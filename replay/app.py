@@ -182,8 +182,13 @@ EN = [
  ('в (', 'at ('),
 ]
 DIRS = {'СЗ': 'NW', 'СВ': 'NE', 'ЮЗ': 'SW', 'ЮВ': 'SE', 'С': 'N', 'Ю': 'S', 'З': 'W', 'В': 'E', 'центр': 'centre'}
+CHAT_EN = [('## Чат', '## Chat'), ('** (всем):', '** (to all):'), ('** (союзникам):', '** (to allies):'), ('** (наблюдатель):', '** (observer):')]
 def to_en(t):
     if not t: return t
+    head, sep, chat = t.partition('\n## Чат\n')   # реплики игроков не переводим: замены фраз отчёта ломали бы их текст
+    if sep:
+        chat = '\n'.join(next((l.replace(a, b, 1) for a, b in CHAT_EN[1:] if a in l), l) for l in chat.split('\n'))
+        return to_en(head) + '\n## Chat\n' + chat
     t = re.sub(r'(VP|энергоузел|реквизиция|база)-(СЗ|СВ|ЮЗ|ЮВ|центр|С|Ю|З|В)\b', lambda m: m.group(1) + '-' + DIRS[m.group(2)], t)
     for a, b in EN: t = t.replace(a, b)
     t = re.sub(r'(\d+)\s*с\b', r'\1 s', t)

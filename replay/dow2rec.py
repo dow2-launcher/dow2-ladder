@@ -133,26 +133,32 @@ def parse(path):
     ticks = 0
     last_tick = 0
     chat = []
+    chat_tick = 0
     actions = []          # (tick, player_nibble, action_type, raw)
     while r.o + 8 <= len(d):
         rectype = r.u32()
         reclen = r.u32()
         recend = r.o + reclen
-        if rectype == 1:                                  # chat / broadcast msg
-            rr = Reader(d, r.o)
-            rr.skip(8)
-            rr.skip(16)
+        if rectype == 1:                                  # chat line
+            # u32 1, u32 size of the rest, u32 n + UTF-16 sender name, u32 sender (1000 + pid; 0 = observer),
+            # u32 1 = observer, u32 1 = to allies (observers: to observers) / 0 = to all, u32 n + UTF-16 text
             try:
-                n = u32(d, rr.o)
-                if 0 < n < 200:
-                    chat.append({'tick': last_tick, 'text': utf16(d, rr.o + 4, n)})
-            except Exception:
+                n = u32(d, r.o + 8)
+                o = r.o + 12 + n * 2
+                sid, obs, team, tn = struct.unpack_from('<IIII', d, o)
+                if n < 200 and tn < 2000 and o + 16 + tn * 2 <= recend:
+                    chat.append({'tick': chat_tick, 'name': utf16(d, r.o + 12, n),
+                                 'pid': sid - 1000 if sid >= 1000 else None,
+                                 'to': 'obs' if obs else ('team' if team else 'all'),
+                                 'text': utf16(d, o + 16, tn)})
+            except struct.error:
                 pass
         elif rectype == 0:                                # action tick
             rr = Reader(d, r.o)
             rr.skip(1)                                    # 0x20
             tick = rr.u32()
             last_tick = tick
+            chat_tick = max(chat_tick, tick)              # a few records carry tick 0 mid-game
             ticks += 1
             rr.skip(8)                                    # counter + varying dword
             nbundles = rr.u32()
@@ -190,7 +196,7 @@ if __name__ == '__main__':
                      ensure_ascii=False, indent=2))
     print('\nchat/broadcast messages:', len(meta['chat']))
     for c in meta['chat'][:20]:
-        print('  tick %6d  %s' % (c['tick'], c['text']))
+        print('  %d:%02d  %-4s %s: %s' % (c['tick'] // 600, c['tick'] // 10 % 60, c['to'], c['name'], c['text']))
     print('\ntotal actions:', len(actions))
     from collections import Counter
     by_player = Counter(a[1] for a in actions)
