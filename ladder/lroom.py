@@ -22,12 +22,17 @@
 # match as a watcher (an observer never blocks or calls off the start). Invitations (verb invite -> "lroom_invite" on the
 # invited player's stream) and pings (verb ping: the owner's ready check to who is not ready, a player's call of the owner
 # when all are ready -> "lroom_ping"). The list's summary carries the seats and the observers (the launcher draws the teams).
+# 1.5.8 (owner 12.11.2026): a player calls the owner as soon as every OTHER seat is taken and ready; the room's view carries the
+# ping ("ping": who called whom, when the 30 s pause ends, the answers - every player's button shows the pause, the pinged
+# player's answer shows next to his name); verb ping_answer (yes / no); the owner's Start marks him ready; a kick keeps nobody
+# out (KICK_BAN) and an invitation into a room can be sent again once the player came in or left it.
 import json, random, re, secrets, string, threading, time
 
 L = None                    # the ladder module (ladder.py sets it right after the import)
 ROOMS = {}                  # id -> room
 BY = {}                     # steam -> room id (one room per player)
-KICKED = {}                 # (room id, steam) -> until when he can't come back
+KICKED = {}                 # (room id, steam) -> until when he can't come back (KICK_BAN s after a kick; 0 = never kept out)
+KICK_BAN = 0                # 1.5.8 (owner 12.11.2026): a removed player may come back at once - a kick by mistake is fixed by Join or an invitation
 INVITED = {}                # (room id, steam) -> until when he is not invited into that room again
 INVITE_GAP = 30             # s between two invitations of one player into one room
 INVITE_MAX = 10             # invitations one player may send in a minute (into any rooms)
@@ -207,10 +212,20 @@ def view(r):
             'maps': [{'key': k, 'name': (cat.get(k) or {}).get('name') or k} for k in r['maps']], 'opts': dict(r['opts']),
             'state': r['state'], 'cd_end': int(r['cd'] * 1000) if r['state'] == 'countdown' else 0, 'now': int(now * 1000),
             'slots': slots, 'obs': obs, 'obs_cap': _obs_cap(r), 'net': _net(r), 'note': r.get('note'), 'seq': r['seq'],
-            'hs': bool(r.get('hs')), 'all_ready': _all_ready(r, now),
+            'hs': bool(r.get('hs')), 'all_ready': _all_ready(r, now), 'ping': _ping_view(r, now),
             'launch': {'t': int(la.get('t', 0)), 'deadline': int(la.get('deadline', 0)), 'host': la.get('host'), 'relay': la.get('relay'),
                        'match': la.get('match'), 'room': la.get('room'), 'map': la.get('map'),
                        'map_name': (cat.get(la.get('map')) or {}).get('name') or la.get('map')} if la else None}
+
+
+def _ping_view(r, now):
+    """1.5.8: the room's pings for the launchers (times in ms): who called whom, the pause's end, the answers. Kept 60 s."""
+    out = {}
+    for k, p in (r.get('ping') or {}).items():
+        if now - p['t'] > 60: continue
+        out[k] = {'t': int(p['t'] * 1000), 'until': int(p['until'] * 1000), 'ttl': PING_TTL, 'from': p['from'], 'from_name': _name(p['from']),
+                  'to': list(p['to']), 'ans': {s: {'a': a['a'], 't': int(a['t'] * 1000)} for s, a in p['ans'].items()}}
+    return out or None
 
 
 def summary(r):
@@ -248,6 +263,11 @@ def _unready(r, k=None, who=()):
 
 def _all_ready(r, now):
     return all(r['slots']) and all(s['ready'] and now - s['seen'] < HERE_GONE for s in r['slots'])
+
+
+def _others_ready(r, now):
+    """1.5.8: every seat taken, every player but the owner ready and here - a player may call the owner"""
+    return all(r['slots']) and all((s['ready'] and now - s['seen'] < HERE_GONE) for s in r['slots'] if s['steam'] != r['owner'])
 
 
 def _check_ready(r, now):
@@ -503,6 +523,7 @@ def _leave(r, steam):
         if s and s['steam'] == steam: r['slots'][i] = None
     r['obs'] = [o for o in r.setdefault('obs', []) if o['steam'] != steam]
     r['pings'].pop(steam, None)
+    INVITED.pop((r['id'], steam), None)                                   # 1.5.8: left or removed - he can be invited again at once
     if BY.get(steam) == r['id']: BY.pop(steam, None)
     if r['owner'] == steam and _members(r): r['owner'] = _members(r)[0]
     if r['state'] == 'countdown': r['state'] = 'lobby'
@@ -563,16 +584,16 @@ def api(verb, steam, d):
         if not t: return {'ok': False, 'error': 'no_room'}
         if r is t: (_slot(t, steam) or _obs(t, steam))['seen'] = now; return {'ok': True, 'room': view(t)}
         if r and r['state'] not in ('lobby', 'countdown'): return {'ok': False, 'error': 'busy'}
-        if KICKED.get((t['id'], steam), 0) > now: return {'ok': False, 'error': 'kicked'}
+        if KICKED.get((t['id'], steam), 0) > now: return {'ok': False, 'error': 'kicked', 'left': int(KICKED[(t['id'], steam)] - now)}
         if t['state'] not in ('lobby', 'countdown'): return {'ok': False, 'error': 'state'}
         if d.get('as') == 'obs':
             if len(t.setdefault('obs', [])) >= _obs_cap(t): return {'ok': False, 'error': 'obs_full'}
             if r: _leave(r, steam); _note(r, 'left', [steam]); (_pub(r) if _members(r) else _close(r, 'empty'))
-            t['obs'].append({'steam': steam, 'seen': now, 'gst': ''}); BY[steam] = t['id']; _note(t, 'joined_obs', [steam])
+            t['obs'].append({'steam': steam, 'seen': now, 'gst': ''}); BY[steam] = t['id']; _note(t, 'joined_obs', [steam]); INVITED.pop((t['id'], steam), None)
             _pub(t); return {'ok': True, 'room': view(t)}
         if all(t['slots']): return {'ok': False, 'error': 'full'}
         if r: _leave(r, steam); _note(r, 'left', [steam]); (_pub(r) if _members(r) else _close(r, 'empty'))
-        _seat(t, steam); _unready(t, 'joined', [steam]); _note(t, 'joined', [steam])
+        _seat(t, steam); _unready(t, 'joined', [steam]); _note(t, 'joined', [steam]); INVITED.pop((t['id'], steam), None)
         _pub(t); return {'ok': True, 'room': view(t)}
     if not r: return {'ok': False, 'error': 'no_room'}
     me = _slot(r, steam); ob = None if me else _obs(r, steam)
@@ -653,17 +674,25 @@ def api(verb, steam, d):
             to = [s['steam'] for s in r['slots'] if s and s['steam'] != steam and not s['ready']]
         elif kind == 'start':
             if not me or steam == r['owner']: return {'ok': False, 'error': 'bad'}
-            if not (r.get('hs') and _all_ready(r, now)): return {'ok': False, 'error': 'not_ready'}
+            if not (r.get('hs') and _others_ready(r, now)): return {'ok': False, 'error': 'not_ready'}   # 1.5.8: the owner's own tick does not matter
             to = [r['owner']]
         else: return {'ok': False, 'error': 'bad'}
         if not to: return {'ok': False, 'error': 'bad'}
-        pg = r.setdefault('pinged', {})
-        if pg.get(kind, 0) > now: return {'ok': False, 'error': 'too_soon'}
-        pg[kind] = now + PING_GAP
+        pg = r.setdefault('ping', {})
+        if (pg.get(kind) or {}).get('until', 0) > now: return {'ok': False, 'error': 'too_soon', 'room': view(r)}   # another player was first
+        pg[kind] = {'t': now, 'until': now + PING_GAP, 'from': steam, 'to': to, 'ans': {}}
         for t in to:
             try: L.stream.publish('lroom_ping', {'kind': kind, 'id': r['id'], 'name': r['name'], 'from': steam, 'from_name': _name(steam), 'ttl': PING_TTL}, to=t)
             except Exception as e: log('ping %s -> %s: %r' % (r['id'], t, e))
-        log('room %s: %s pings %s (%s)' % (r['id'], steam, ','.join(to), kind)); return {'ok': True, 'n': len(to)}
+        log('room %s: %s pings %s (%s)' % (r['id'], steam, ','.join(to), kind))
+        _pub(r); return {'ok': True, 'n': len(to), 'room': view(r)}
+    if verb == 'ping_answer':                                               # 1.5.8: the pinged player's yes / no, shown to the room
+        kind, ans = d.get('kind'), d.get('ans')
+        p = (r.get('ping') or {}).get(kind)
+        if ans not in ('yes', 'no') or not p or steam not in p['to'] or now - p['t'] > PING_TTL + 5: return {'ok': False, 'error': 'bad'}
+        if steam in p['ans']: return {'ok': True}
+        p['ans'][steam] = {'a': ans, 't': now}
+        log('room %s: %s answers %s (%s)' % (r['id'], steam, ans, kind)); _pub(r); return {'ok': True}
     if ob and verb in ('cancel', 'ready', 'army'): return {'ok': False, 'error': 'obs'}   # an observer has no army and no say in the start
     if verb == 'cancel':                                                    # stop the launch (any player, as Cancel on the game's countdown)
         if r['state'] == 'countdown': me['ready'] = False; r['state'] = 'lobby'; _note(r, 'unready', [steam])
@@ -700,6 +729,7 @@ def api(verb, steam, d):
     if steam != r['owner']: return {'ok': False, 'error': 'owner'}
     if verb == 'start':                                                     # the owner's Play: everybody ready - the countdown
         if r['state'] == 'countdown': return {'ok': True, 'room': view(r)}
+        if _others_ready(r, now): me['ready'] = True                       # 1.5.8: his Start is his "ready" too
         if not _all_ready(r, now): return {'ok': False, 'error': 'not_ready'}
         r['state'] = 'countdown'; r['cd'] = now + CD; r['note'] = None; log('room %s: countdown (owner)' % r['id'])
         _pub(r); return {'ok': True, 'room': view(r)}
@@ -710,10 +740,11 @@ def api(verb, steam, d):
         t = str(d.get('steam') or '')
         if t == steam or not (_slot(r, t) or _obs(r, t)): return {'ok': False, 'error': 'bad'}
         was_obs = not _slot(r, t)
-        _leave(r, t); KICKED[(r['id'], t)] = now + 120
+        _leave(r, t)
+        if KICK_BAN > 0: KICKED[(r['id'], t)] = now + KICK_BAN
         if not was_obs: _unready(r)
         _note(r, 'kicked', [t])
-        try: L.stream.publish('lroom_kicked', {'id': r['id'], 'steam': t}, to=t)
+        try: L.stream.publish('lroom_kicked', {'id': r['id'], 'steam': t, 'name': r['name'], 'left': KICK_BAN}, to=t)
         except Exception: pass
         _pub(r); return {'ok': True, 'room': view(r)}
     if verb == 'conf':

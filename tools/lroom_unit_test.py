@@ -1,5 +1,6 @@
 """lroom_unit_test.py - the launcher rooms without a server: the owner starts / stops the countdown of a 1.5+ room, the version
-change, an older room counting down by itself; 10.11: observers, invitations, pings, the observer's ticket and watch search.
+change, an older room counting down by itself; 10.11: observers, invitations, pings, the observer's ticket and watch search;
+12.11: the call of the owner when the others are ready, the room's ping and the answers, a kick without a ban, invitations again.
 python3 tools/lroom_unit_test.py (from the repo root)."""
 import sys, types, time
 sys.path.insert(0, __import__("os").path.join(__import__("os").path.dirname(__import__("os").path.abspath(__file__)), "..", "ladder"))
@@ -44,7 +45,8 @@ sm = next(x for x in lroom.listing()['rooms'] if x['id'] == rid)
 ok(len(sm['slots']) == 4 and sm['slots'][0]['steam'] == 'h' and sm['obs'] == [{'steam': 'w1', 'name': 'Pw1'}], 'the list has the seats and the observers')
 del pub[:]
 r = lroom.api('ping', 'h', {'kind': 'ready'})
-ok(r['ok'] and [(e, t) for e, d, t in pub] == [('lroom_ping', 'p2')] and pub[0][1]['kind'] == 'ready' and pub[0][1]['ttl'] == 30, 'the owner\'s ready check goes to who is not ready')
+pp = [(e, d, t) for e, d, t in pub if e == 'lroom_ping']
+ok(r['ok'] and [(e, t) for e, d, t in pp] == [('lroom_ping', 'p2')] and pp[0][1]['kind'] == 'ready' and pp[0][1]['ttl'] == 30, 'the owner\'s ready check goes to who is not ready')
 ok(lroom.api('ping', 'h', {'kind': 'ready'})['error'] == 'too_soon', 'a second ready check within 30 s: no')
 ok(lroom.api('ping', 'p2', {'kind': 'ready'})['error'] == 'owner', 'only the owner checks who is ready')
 ok(lroom.api('ping', 'p2', {'kind': 'start'})['error'] == 'not_ready', 'calling the owner needs everybody ready')
@@ -78,7 +80,7 @@ ok(L.MM_MATCHES['m1']['watchers'] == [] and R['state'] == 'launching', 'an obser
 v = lroom.api('create', 's1', {'game': 'elite', 'ver': '3.2', 'mode': '1v1', 'name': 'go', 'start': 'host'})['room']
 lroom.api('join', 's2', {'id': v['id']}); lroom.api('ready', 's1', {'on': True}); lroom.api('ready', 's2', {'on': True}); del pub[:]
 r = lroom.api('ping', 's2', {'kind': 'start'})
-ok(r['ok'] and [(e, t, d['kind']) for e, d, t in pub] == [('lroom_ping', 's1', 'start')], 'all ready: a player calls the owner to start')
+ok(r['ok'] and [(e, t, d['kind']) for e, d, t in pub if e == 'lroom_ping'] == [('lroom_ping', 's1', 'start')], 'all ready: a player calls the owner to start')
 ok(lroom.api('ping', 's1', {'kind': 'start'})['error'] == 'bad', 'the owner does not call himself')
 ok(lroom.api('invite', 'h', {'steam': 'not-a-steam-id'})['error'] == 'bad', 'an invitation only to a SteamID')
 res = [lroom.api('invite', 's1', {'steam': str(76561198000000100 + i)}).get('error') for i in range(12)]
@@ -92,5 +94,34 @@ ok(R2['state'] == 'launching' and 'o3' not in L.MM, 'an observer\'s search gone:
 L.MM_MATCHES['m2'] = {'id': 'm2', 'lroom': rid2, 'state': 'creating', 'watchers': ['o4'], 'players': {'o4': {}}}; R2['launch']['match'] = 'm2'
 lroom.on_match_failed(L.MM_MATCHES['m2'], ['o4'], 'not in the room')
 ok(R2['state'] == 'launching' and L.MM_MATCHES['m2']['watchers'] == [], 'only an observer not in the match: he is out, the players go on')
+
+# ---------- 12.11.2026 (launcher 1.5.8): the call of the owner, the room's ping, the answers, kicks, invitations ----------
+v = lroom.api('create', 'H', {'game': 'elite', 'ver': '3.2', 'mode': '2v2', 'name': 'r3', 'start': 'host'})['room']; rid3 = v['id']
+for p in ('X', 'Y', 'Z'): lroom.api('join', p, {'id': rid3})
+for p in ('X', 'Y', 'Z'): v = lroom.api('ready', p, {'on': True})['room']
+ok(not v['all_ready'], 'all but the owner ready: not all ready')
+del pub[:]
+r = lroom.api('ping', 'X', {'kind': 'start'})
+ok(r['ok'] and [(e, t) for e, d, t in pub if e == 'lroom_ping'] == [('lroom_ping', 'H')], 'a player calls the owner when every OTHER player is ready')
+pv = r['room']['ping']['start']
+ok(pv['from'] == 'X' and pv['to'] == ['H'] and pv['until'] - pv['t'] == 30000 and pv['ans'] == {}, 'the room\'s view carries the ping: who, whom, the pause')
+r = lroom.api('ping', 'Y', {'kind': 'start'})
+ok(r['error'] == 'too_soon' and r['room']['ping']['start']['from'] == 'X', 'a second player a moment later: too soon, with the room (who was first)')
+ok(lroom.api('ping_answer', 'Y', {'kind': 'start', 'ans': 'no'})['error'] == 'bad', 'only the pinged player answers')
+ok(lroom.api('ping_answer', 'H', {'kind': 'start', 'ans': 'no'})['ok'], 'the owner answers no')
+v = lroom.api('get', 'X', {})['room']
+ok(v['ping']['start']['ans']['H']['a'] == 'no', 'the answer is in the room\'s view')
+v = lroom.api('start', 'H', {})['room']
+ok(v['state'] == 'countdown' and next(s for s in v['slots'] if s['steam'] == 'H')['ready'], 'the owner\'s Start marks him ready and counts down')
+lroom.api('stop', 'H', {})
+del pub[:]
+lroom.api('kick', 'H', {'steam': 'Z'})
+ok(pub and pub[-1][0] == 'lroom' or any(e == 'lroom_kicked' and d.get('left') == 0 for e, d, t in pub), 'a kick tells the removed player, no ban')
+ok(lroom.api('join', 'Z', {'id': rid3}).get('ok'), 'a removed player can come back at once (KICK_BAN 0)')
+lroom.api('leave', 'Z', {})
+del pub[:]
+lroom.api('invite', 'X', {'steam': '76561198000000077'}); lroom.api('join', '76561198000000077', {'id': rid3}); lroom.api('leave', '76561198000000077', {})
+lroom.api('invite', 'X', {'steam': '76561198000000077'})
+ok(len([1 for e, d, t in pub if e == 'lroom_invite']) == 2, 'a player who came in and left can be invited again at once')
 print('FAILED %d' % fails if fails else 'all ok')
 sys.exit(1 if fails else 0)
