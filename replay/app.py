@@ -238,6 +238,7 @@ class H(BaseHTTPRequestHandler):
                                                              g('version')[:40], g('players')[:2], g('author')[:64]), ensure_ascii=False), 'application/json')
             except ValueError: return self.out(400, '{}', 'application/json')
         if p == '/replay/api/versions': return self.out(200, json.dumps(version_list(), ensure_ascii=False), 'application/json')
+        if p == '/replay/api/vtable': return self.out(200, json.dumps({h: v['version'] for h, v in versions().items()}), 'application/json')   # the launcher names its own files' versions
         m = re.match(r'^/replay/api/by_lobby/([\w.\-]{1,80})$', p)
         if m:
             with idb() as c: r = c.execute('SELECT rid FROM replays WHERE lobby = ? ORDER BY ticks DESC LIMIT 1', (m.group(1),)).fetchone()
