@@ -67,7 +67,8 @@ def init_db():  # once at start, not on every connection (siritos); the owner's 
         have = {r[1] for r in c.execute('PRAGMA table_info(msg)')}
         # one common stream, three language views: all = original, ru/en = translated copies (t_ru/t_en hold the full text in
         # that language, the original itself when it is already in it); cid - the launcher's id against duplicates
-        for col in ('lang TEXT', 't_ru TEXT', 't_en TEXT', 'cid TEXT'):
+        # reply_to (13.11.2026): the id of the message this one answers (the launcher's Reply), NULL for a plain one
+        for col in ('lang TEXT', 't_ru TEXT', 't_en TEXT', 'cid TEXT', 'reply_to INTEGER'):
             if col.split()[0] not in have: c.execute('ALTER TABLE msg ADD COLUMN ' + col)
         c.execute('CREATE UNIQUE INDEX IF NOT EXISTS msg_cid ON msg(steam, cid) WHERE cid IS NOT NULL')
     users.DB = DB
@@ -248,7 +249,7 @@ def hello(d):
     if steam:
         with LOCK: PRESENCE[steam] = {'seen': time.time(), 'state': state}
         users.launcher_seen(steam, state)
-    return {'ok': True, 'signed_in': bool(steam), 'online': online()}
+    return {'ok': True, 'signed_in': bool(steam), 'online': online(), 'features': FEATURES}
 
 def online():
     now = time.time()
@@ -268,7 +269,11 @@ def online():
 # a translated tab stops at the first message still being translated (at most TR_WAIT), the stream sends msg_tr when it is in.
 TR_WAIT = 30
 BUDGET = 30                                          # s: a retry with the same cid waits this long for the first one
-COLS = 'id, room, steam, text, ts, lang, t_ru, t_en, cid'
+COLS = 'id, room, steam, text, ts, lang, t_ru, t_en, cid, reply_to'
+# what this server can do, for the launcher to show only what works (hello and msgs carry it): reply - a message may answer
+# another one (say's reply_to), every message carries the quote of the one it answers (reply)
+FEATURES = ['reply']
+QUOTE = 140                                          # characters of the original in a reply's quote
 
 def _int(v):
     try: return max(0, int(v))
@@ -281,21 +286,43 @@ def _s(v):
     if isinstance(v, (bytes, bytearray, memoryview)): return bytes(v).decode('utf-8', 'replace')
     return str(v)
 
-def _msg(r, room=None):
+def _quotes(ids):
+    # the messages some replies answer: id -> {id, steam, name, text, ru, en} (the start of each), or {id, deleted} for one the
+    # moderation took away (or never there). One query for a page of messages.
+    ids = sorted({i for i in ids if isinstance(i, int) and i > 0})
+    if not ids: return {}
+    with db() as c:
+        rows = c.execute('SELECT id, steam, text, t_ru, t_en, deleted FROM msg WHERE id IN (%s)' % ','.join('?' * len(ids)), ids).fetchall()
+    cut = lambda v: (_s(v) or '')[:QUOTE] or None
+    out = {i: {'id': i, 'deleted': True} for i in ids}
+    for r in rows:
+        if r[5]: continue
+        u = users.get(_s(r[1]))
+        out[r[0]] = {'id': r[0], 'steam': _s(r[1]), 'name': u['name'], 'text': cut(r[2]) or '', 'ru': cut(r[3]), 'en': cut(r[4])}
+    return out
+
+def _msg(r, room=None, quotes=None):
     # room: the asked tab (it picks text; old launchers show text as is); None = a stream event (the launcher picks by orig/ru/en)
+    # quotes: the replies' originals of this page (_quotes); None - looked up for this one message
     u = users.get(r[2]); orig = _s(r[3]) or ''; ru = _s(r[6]) or None; en = _s(r[7]) or None
     text = (ru or orig) if room == 'ru' else (en or orig) if room == 'en' else orig
-    return {'id': r[0], 'room': room or _s(r[1]), 'steam': _s(r[2]), 'name': u['name'], 'avatar': u['avatar'], 'text': text,
-            'ts': r[4] if isinstance(r[4], int) else _int(r[4]), 'cid': _s(r[8]), 'lang': _s(r[5]) or '', 'orig': orig, 'ru': ru, 'en': en}
+    m = {'id': r[0], 'room': room or _s(r[1]), 'steam': _s(r[2]), 'name': u['name'], 'avatar': u['avatar'], 'text': text,
+         'ts': r[4] if isinstance(r[4], int) else _int(r[4]), 'cid': _s(r[8]), 'lang': _s(r[5]) or '', 'orig': orig, 'ru': ru, 'en': en}
+    rt = r[9] if len(r) > 9 and isinstance(r[9], int) and r[9] > 0 else None
+    if rt:   # a reply: the quote of its original (old launchers ignore the field and show the text alone)
+        m['reply'] = (quotes if quotes is not None else _quotes([rt])).get(rt, {'id': rt, 'deleted': True})
+    return m
 
 BAD_LOGGED = {}                                     # message id -> when its failure was last written (once in 10 min, not per request)
 def _built(rows, room=None):
     # the messages of rows; one that cannot be built (or put into JSON) is left out and written to the service output once,
     # the others go as usual
     out = []
+    try: quotes = _quotes([r[9] for r in rows if len(r) > 9])
+    except Exception: quotes = None                   # each looks its own up (and a broken one is skipped below)
     for r in rows:
         try:
-            m = _msg(r, room); json.dumps(m, ensure_ascii=False); out.append(m)
+            m = _msg(r, room, quotes); json.dumps(m, ensure_ascii=False); out.append(m)
         except Exception:
             mid = r[0] if r else None; now = time.time()
             if now - BAD_LOGGED.get(mid, 0) > 600:
@@ -319,7 +346,7 @@ def msgs(room, after, limit=None, before=None):
         elif before > 0: rows = c.execute(q + ' AND id<? ORDER BY id DESC LIMIT ?', (before, limit)).fetchall()[::-1]
         else: rows = c.execute(q + ' ORDER BY id DESC LIMIT ?', (limit,)).fetchall()[::-1]   # the whole history at once (owner, 29.10)
         dead = [r[0] for r in c.execute('SELECT id FROM msg WHERE deleted=1 AND id>? ORDER BY id DESC LIMIT 50', (max(0, after - 500),))]
-    return {'room': room, 'msgs': _built(_cut(rows, room), room), 'deleted': dead}
+    return {'room': room, 'msgs': _built(_cut(rows, room), room), 'deleted': dead, 'features': FEATURES}
 
 def missed(after):
     # for the stream: after = "all:123,ru:45,en:67" (the last ids the launcher has). One common stream: from the smallest of
@@ -352,6 +379,10 @@ def say(d):
     if not text: return {'ok': False, 'error': 'empty'}
     cid = str(d.get('cid') or '')
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,40}', cid): cid = None   # optional: old launchers send none
+    reply_to = _int(d.get('reply_to')) or None                     # optional: the message this one answers
+    if reply_to:
+        with db() as c:
+            if not c.execute('SELECT 1 FROM msg WHERE id=? AND deleted=0', (reply_to,)).fetchone(): reply_to = None   # gone: a plain message
     mine = None
     if cid:
         # the same message again (a retry): the stored one, or wait for the first try still in moderation
@@ -382,8 +413,8 @@ def say(d):
         later = flags.get('translate', True)                          # 31.10.2026: no waiting for the translation - stored at once
         try:
             with db() as c:
-                cur = c.execute('INSERT INTO msg(room, steam, text, ts, lang, t_ru, t_en, cid) VALUES(?,?,?,?,?,?,?,?)',
-                                (room, steam, text, int(now), None, None if later else text, None if later else text, cid))
+                cur = c.execute('INSERT INTO msg(room, steam, text, ts, lang, t_ru, t_en, cid, reply_to) VALUES(?,?,?,?,?,?,?,?,?)',
+                                (room, steam, text, int(now), None, None if later else text, None if later else text, cid, reply_to))
                 r = c.execute('SELECT %s FROM msg WHERE id=?' % COLS, (cur.lastrowid,)).fetchone()
         except sqlite3.IntegrityError:              # the same cid stored a moment ago
             r = _by_cid(steam, cid); return {'ok': True, 'id': r[0], 'msg': _msg(r, room)}

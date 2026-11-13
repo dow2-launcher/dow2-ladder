@@ -53,9 +53,9 @@ if hasattr(community, '_built'):
         for i in range(3): c.execute("INSERT INTO msg(room,steam,text,ts,lang,t_ru,t_en) VALUES('all',?,?,?,'ru','x','x')", (U, 'm%d' % i, int(time.time())))
     ids = [r[0] for r in community.db().execute('SELECT id FROM msg ORDER BY id')]
     orig = community._msg
-    def bad(r, room=None):
+    def bad(r, room=None, *a):                               # 13.11.2026: _msg takes the page's quotes too
         if r[0] == ids[1]: raise TypeError('forced for the test')
-        return orig(r, room)
+        return orig(r, room, *a)
     community._msg = bad
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
