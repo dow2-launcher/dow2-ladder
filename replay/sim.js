@@ -134,10 +134,24 @@
     (D.chat || []).forEach(c => ev.push({ k: 'chat', t: c[0], c }));
     ev.sort((a, b) => a.t - b.t);
     S.ev = ev;
+    if (D.pown) {   // points held per team per second from the game's owners (the same numbers the map shows)
+      const own = new Array(D.pown.pts.length).fill(-1), ser = {}; S.teams.forEach(tm => { ser[tm] = new Array(D.dur).fill(0); });
+      const ev = D.pown.ev; let j = 0;
+      for (let s = 0; s < D.dur; s++) {
+        while (j < ev.length && ev[j][0] <= s) { own[ev[j][1]] = ev[j][2]; j++; }
+        own.forEach(o => { if (ser[o]) ser[o][s]++; });
+      }
+      D.points = ser;
+    }
     S.alive = {};   // squads on the field per team per second
     D.frames.forEach((fr, s) => { for (let i = 0; i < fr.length; i += 6) { const sq = D.squads[fr[i]], p = sq && S.P[sq[0]]; if (!p || fr[i + 4] <= 0 || fr[i + 3] <= 0) continue; (S.alive[p.team] || (S.alive[p.team] = new Array(D.dur).fill(0)))[s]++; } });
   }
 
+  function pointsAt(t) {   // [owner team, capturing team (-1 none, 2 both)] per point at time t
+    const P = S.D.pown, st = P.pts.map(() => [-1, -1]);
+    for (const [s, i, o, cp] of P.ev) { if (s > t) break; st[i] = [o, cp]; }
+    return st;
+  }
   function squadAt(t) {   // interpolated squads at time t (s, float)
     const D = S.D, s = Math.min(D.dur - 1, Math.max(0, Math.floor(t))), f = t - s;
     const fr = D.frames[s] || [], nx = D.frames[s + 1], ni = S.idx[s + 1];
@@ -301,8 +315,29 @@
       for (let i = 0; i < hm.length; i++) { if (!hm[i]) continue; c.globalAlpha = Math.min(0.85, 0.08 + 0.8 * Math.sqrt(hm[i] / mx)); c.fillRect((i % g) * w / g, Math.floor(i / g) * h / g, w / g + .5, h / g + .5); }
       c.globalAlpha = 1;
     }
-    // map points
-    for (const [kd, x, z] of D.mpoints || []) {
+    // map points: with the game's own owners (pown) - filled with the owner's team colour, a capture as a pulsing ring
+    if (D.pown) {
+      const st = pointsAt(t), ph = (performance.now() / 700) % 1;
+      D.pown.pts.forEach(([kd, x, z], i) => {
+        const [px, py] = W2P(x, z), [own, cap] = st[i], vp = kd === 'vp', r = (vp ? 8 : 6) * k;
+        const col = own >= 0 ? TEAMC[Math.max(0, S.teams.indexOf(own)) % 2] : 'rgba(150,150,150,.85)';
+        if (cap >= 0 && cap !== 2 && cap !== own || cap === 2) {
+          const cc = cap === 2 ? '#fff' : TEAMC[Math.max(0, S.teams.indexOf(cap)) % 2];
+          c.beginPath(); c.arc(px, py, r + (4 + 9 * ph) * k, 0, 7); c.strokeStyle = cc; c.globalAlpha = 1 - ph; c.lineWidth = 2.5; c.stroke(); c.globalAlpha = 1;
+        }
+        c.save(); c.translate(px, py);
+        if (vp) { c.rotate(Math.PI / 4); c.beginPath(); c.rect(-r * .8, -r * .8, r * 1.6, r * 1.6); }
+        else if (kd === 'req') { c.beginPath(); c.arc(0, 0, r, 0, 7); }
+        else { c.beginPath(); for (let a = 0; a < 6; a++) { const an = Math.PI / 6 + a * Math.PI / 3; c[a ? 'lineTo' : 'moveTo'](Math.cos(an) * r, Math.sin(an) * r); } c.closePath(); }
+        if (vp) { c.fillStyle = col; c.fill(); c.lineWidth = 2.4; c.strokeStyle = '#ffd75e'; c.stroke(); }
+        else {   // a point = a hollow ring in the owner's colour (squads are filled), a dark core with a light dot
+          c.fillStyle = 'rgba(8,9,10,.78)'; c.fill(); c.lineWidth = 3.2 * k; c.strokeStyle = col; c.stroke();
+          c.beginPath(); c.arc(0, 0, 1.6 * k, 0, 7); c.fillStyle = 'rgba(255,255,255,.85)'; c.fill();
+        }
+        c.restore();
+      });
+    }
+    for (const [kd, x, z] of D.pown ? [] : D.mpoints || []) {
       const [px, py] = W2P(x, z);
       if (kd === 'vp') { c.save(); c.translate(px, py); c.rotate(Math.PI / 4); c.fillStyle = 'rgba(230,195,92,.9)'; c.strokeStyle = '#000'; c.lineWidth = 1.5; c.fillRect(-5 * k, -5 * k, 10 * k, 10 * k); c.strokeRect(-5 * k, -5 * k, 10 * k, 10 * k); c.restore(); }
       else if (kd === 'cp' || kd === 'pw') { c.beginPath(); c.arc(px, py, 5 * k, 0, 7); c.strokeStyle = 'rgba(255,255,255,.75)'; c.lineWidth = 2; c.stroke(); }
@@ -450,7 +485,7 @@
     if (S.playing) { S.t += dt * S.speed; if (S.t >= S.D.dur - 1) { S.t = S.D.dur - 1; S.playing = false; } }
     draw();
     if (now - uiTick > 220) { uiTick = now; ui(); if (S.drag == null) charts(); }
-    S.raf = (S.playing || (S.D.fights || []).some(f => S.t >= f.t0 - 1 && S.t <= f.t1 + 3)) ? requestAnimationFrame(loop) : 0;
+    S.raf = (S.playing || (S.D.fights || []).some(f => S.t >= f.t0 - 1 && S.t <= f.t1 + 3) || (S.D.pown && pointsAt(S.t).some(([o, cp]) => cp >= 0 && cp !== o))) ? requestAnimationFrame(loop) : 0;
     if (!S.raf) ui();
   }
 

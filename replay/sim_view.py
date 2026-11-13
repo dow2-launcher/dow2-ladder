@@ -224,13 +224,31 @@ def build(rid, assets):
     except Exception: mpts = []
     KIND = {'victory_point_02': 'vp', 'capture_point': 'cp', 'requisition_point': 'cp', 'power_point': 'pw', 'starting_point': 'base'}
     mpoints = [[KIND.get(p['kind'], 'cp'), p['x'], p['y']] for p in mpts if p.get('kind') in KIND]
+    # strategic points from the game itself (extract's <rid>.points.csv.gz, 13.11): owner and capturers on every change
+    pown = None
+    pf = f'{SIM}/{rid}.points.csv.gz'
+    if os.path.exists(pf):
+        pidx, plist, pev = {}, [], []
+        side = lambda pid: pinfo.get(pid, {}).get('team', -1)
+        for r in csv.DictReader(gzip.open(pf, 'rt')):
+            try: eid = int(r['point']); t = float(r['t']); owner = int(r['owner'])
+            except (ValueError, KeyError): continue
+            if eid not in pidx:
+                bp = r.get('bp') or ''
+                kd = 'vp' if r.get('vp') == '1' or 'victory' in bp else ('req' if 'requisition' in bp else 'pw' if 'power' in bp else 'sp')
+                pidx[eid] = len(plist); plist.append([kd, float(r['x']), float(r['z'])])
+            caps = {side(int(c)) for c in (r.get('capturer') or '').split('+') if c.strip().lstrip('-').isdigit()}
+            caps.discard(-1)
+            capt = (caps.pop() if len(caps) == 1 else 2) if caps else -1
+            pev.append([round(max(0.0, t - t0), 1), pidx[eid], side(owner) if owner >= 0 else -1, capt])
+        if plist: pown = {'pts': plist, 'ev': pev}
     return {'v': 1, 'rid': rid, 'map': mapk, 'w': W, 'h': H, 't0': t0, 'dur': nsec, 'states': STATES,
             'players': players, 'matched_by_hero': matched, 'squads': {str(k): v for k, v in squads.items()},
             'frames': frames, 'deaths': deaths, 'fights': out_f,
             'heat': {str(k): v for k, v in heat.items()}, 'grid': G,
             'eco': {str(k): v for k, v in eco.items()}, 'points': pts,
             'army': {str(k): [int(x) for x in v] for k, v in army.items()}, 'army_team': {k: [int(x) for x in v] for k, v in teams_army.items()},
-            'chat': chat, 'mpoints': mpoints}
+            'chat': chat, 'mpoints': mpoints, 'pown': pown}
 
 
 def main(rids):
