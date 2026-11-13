@@ -3,7 +3,7 @@
 Загрузка .rec (сырые байты из браузера) → make_report.py → страница результатов с постоянной ссылкой.
 По кнопке — история матча (Claude по выжимке фактов), с суточным лимитом.
 Слушает 127.0.0.1:8215, nginx проксирует /replay/."""
-import hashlib, html, json, os, re, sqlite3, subprocess, sys, threading, time, urllib.parse
+import gzip, hashlib, html, json, os, re, sqlite3, subprocess, sys, threading, time, urllib.parse
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 APP = os.path.dirname(os.path.abspath(__file__))            # /srv/replayweb/app — код и парсер, только чтение
 ROOT = os.path.dirname(APP); STORE = ROOT + '/data'; QUEUE = ROOT + '/queue'; PORT = int(os.environ.get('PORT', 8215))
@@ -124,7 +124,8 @@ def item(r, steam=None):
             'races': sorted({race_key(p.get('race')) for p in pl}), 'duration': (ticks or 0) // 10, 'recorded': rec, 'uploaded': up,
             'uploads': ups, 'vhash': vh, 'version': vname(vh), 'author': author, 'descr': descr,
             'source': source or ('ladder' if (lobby or '').startswith('MM-') else 'site'), 'src_link': link,
-            'mine': bool(steam and a_steam == steam), 'caption': open(cap).read() if os.path.exists(cap) else None}
+            'mine': bool(steam and a_steam == steam), 'caption': open(cap).read() if os.path.exists(cap) else None,
+            'sim': os.path.exists(f'{STORE}/{rid}/sim.json.gz')}
 def replay_list(q='', mapk='', race='', mode='', page=0, n=30, version='', players='', author='', steam=None, mine=False):
     with idb() as c:
         if mine: rows = c.execute(f'SELECT {COLS} FROM replays WHERE author_steam = ? ORDER BY uploaded DESC', (steam or '-',)).fetchall()
@@ -265,6 +266,17 @@ class H(BaseHTTPRequestHandler):
                 'story_running': story_running(m.group(1)), 'meta': replay_meta(m.group(1))}, ensure_ascii=False), 'application/json')
         m = re.match(r'^/replay/r/([0-9a-f]{16})$', p)
         if m: return self.out(200, PAGE)
+        if p == '/replay/sim.js':   # the match player (sim_view.py data); read per request so a deploy needs no restart
+            return self.out(200, open(APP + '/sim.js', encoding='utf-8').read(), 'application/javascript; charset=utf-8')
+        m = re.match(r'^/replay/api/r/([0-9a-f]{16})/sim\.json$', p)
+        if m and os.path.exists(f'{STORE}/{m.group(1)}/sim.json.gz'):
+            b = open(f'{STORE}/{m.group(1)}/sim.json.gz', 'rb').read()
+            if 'gzip' not in (self.headers.get('Accept-Encoding') or ''): b = gzip.decompress(b); enc = None
+            else: enc = 'gzip'
+            self.send_response(200); self.send_header('Content-Type', 'application/json'); self.send_header('Content-Length', str(len(b)))
+            self.send_header('Cache-Control', 'public, max-age=3600')
+            if enc: self.send_header('Content-Encoding', enc)
+            self.end_headers(); self.wfile.write(b); return
         m = re.match(r'^/replay/api/r/([0-9a-f]{16})/report(_en)?\.md$', p)
         if m and os.path.exists(f'{STORE}/{m.group(1)}/report.md'):
             t = open(f'{STORE}/{m.group(1)}/report.md').read()
