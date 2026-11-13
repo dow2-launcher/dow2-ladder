@@ -6,7 +6,7 @@
     en: { title: 'The match, second by second', badge: 'game engine', sub: 'Every squad of the match as the game itself simulated it: positions, health and orders each second. Press play or click any moment.',
       play: 'Play', pause: 'Pause', trails: 'Trails', heat: 'Heat map', heatNone: 'off', army: 'Army strength (total HP of the squads on the field)',
       pts: 'Strategic points held', req: 'Squads on the field', moments: 'Key moments', all: 'All', fights: 'Fights', heroes: 'Heroes', deaths: 'Losses', chat: 'Chat',
-      team: n => 'Team ' + n, fight: 'Fight', near: d => d === 'C' ? 'in the centre' : 'in the ' + TX.en.dirs[d], won: t => 'won by ' + t, even: 'even trade', lostHp: 'HP lost', wiped: 'squads wiped',
+      team: n => 'Team ' + n, sides: ['Blue', 'Red'], fight: 'Fight', near: d => d === 'C' ? 'in the centre' : 'in the ' + TX.en.dirs[d], won: t => 'won by ' + t, even: 'even trade', lostHp: 'HP lost', wiped: 'squads wiped',
       heroDown: (h, p) => `${h} (${p}) is down`, squadLost: (s, p) => `${s} (${p}) wiped out`, alive: 'squads', bank: 'req', power: 'power', waaagh: 'Waaagh',
       dirs: { N: 'north', NE: 'north-east', E: 'east', SE: 'south-east', S: 'south', SW: 'south-west', W: 'west', NW: 'north-west', C: 'centre' },
       st: ['idle', 'moving', 'attack-move', 'in combat', 'melee', 'retreating', 'capturing', 'ability', 'dug in', 'jumping', 'building'],
@@ -14,13 +14,14 @@
     ru: { title: 'Матч посекундно', badge: 'движок игры', sub: 'Все отряды матча так, как их просчитала сама игра: где стоят, сколько здоровья и что делают — каждую секунду. Жмите «Смотреть» или кликайте в любой момент.',
       play: 'Смотреть', pause: 'Пауза', trails: 'Следы', heat: 'Тепловая карта', heatNone: 'выкл', army: 'Сила армий (сумма HP отрядов на поле)',
       pts: 'Стратегические точки под контролем', req: 'Отрядов на поле', moments: 'Ключевые моменты', all: 'Все', fights: 'Бои', heroes: 'Герои', deaths: 'Потери', chat: 'Чат',
-      team: n => 'Команда ' + n, fight: 'Бой', near: d => d === 'C' ? 'в центре' : 'на ' + TX.ru.dirs[d], won: t => t + ' выиграла', even: 'размен на равных', lostHp: 'потеряно HP', wiped: 'отрядов уничтожено',
+      team: n => 'Команда ' + n, sides: ['Синие', 'Красные'], fight: 'Бой', near: d => d === 'C' ? 'в центре' : 'на ' + TX.ru.dirs[d], won: t => t + ' выиграли', even: 'размен на равных', lostHp: 'потеряно HP', wiped: 'отрядов уничтожено',
       heroDown: (h, p) => `${h} (${p}) пал`, squadLost: (s, p) => `${s} (${p}) уничтожен`, alive: 'отрядов', bank: 'рек.', power: 'энергия', waaagh: 'Waaagh',
       dirs: { N: 'севере', NE: 'северо-востоке', E: 'востоке', SE: 'юго-востоке', S: 'юге', SW: 'юго-западе', W: 'западе', NW: 'северо-западе', C: 'центре' },
       st: ['стоит', 'идёт', 'атака с ходу', 'в бою', 'рукопашная', 'отступает', 'захватывает', 'способность', 'окопался', 'прыжок', 'строит'],
       hp: 'HP', sec: 'с', models: 'моделей', end: 'Точки в конце', loading: 'Загружаю матч…', fail: 'Не удалось загрузить данные матча', start: '▶ Смотреть матч' } };
   const tx = k => (TX[L] || TX.en)[k];
-  const TEAMC = ['#4aa3ff', '#ff5a4f'];
+  const tname = tm => { const i = S.teams.indexOf(tm); return i >= 0 && i < 2 ? tx('sides')[i] : tx('team')(tm + 1); };
+  const TEAMC = ['#2f8bff', '#ff3b30'];   // by side: the first team blue, the second red
   const SPEEDS = [1, 4, 8, 16, 32];
   let S = null;
 
@@ -34,6 +35,14 @@
 .sim-mapw canvas { display: block; width: 100%; cursor: crosshair; }
 .sim-clock { position: absolute; left: 10px; top: 8px; font: 700 20px/1.2 ui-monospace, Menlo, Consolas, monospace; color: #fff; text-shadow: 0 1px 4px #000; pointer-events: none; }
 .sim-score { position: absolute; right: 10px; top: 8px; font: 700 16px/1.2 system-ui, sans-serif; color: #fff; text-shadow: 0 1px 4px #000; pointer-events: none; }
+.sim-leg { position: absolute; left: 10px; top: 38px; display: flex; flex-direction: column; gap: 2px; pointer-events: auto; line-height: 1.25; }
+.sim-leg div { display: flex; align-items: center; gap: 5px; background: rgba(0,0,0,.55); color: #fff; padding: 1px 7px 1px 5px; border-radius: 5px; font-size: 12px; cursor: pointer; max-width: 170px; }
+.sim-leg div span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sim-leg div.on { background: rgba(0,0,0,.85); outline: 1px solid #fff; }
+.sim-sh { width: 11px; height: 11px; flex: none; border: 2px solid; box-sizing: border-box; }
+.sim-sh.c0 { border-radius: 50%; }
+.sim-p.on { background: rgba(230,195,92,.12); border-radius: 6px; }
+.sim-p { cursor: pointer; }
 .sim-chatbox { position: absolute; left: 10px; right: 10px; bottom: 10px; display: flex; flex-direction: column; gap: 3px; align-items: flex-start; pointer-events: none; line-height: 1.35; }
 .sim-chatbox div { background: rgba(0,0,0,.62); color: #fff; padding: 3px 8px; border-radius: 6px; font-size: 13px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: opacity .4s; }
 .sim-chatbox b { font-weight: 700; }
@@ -46,7 +55,7 @@
 .sim-p { padding: 4px 0; border-top: 1px solid var(--line); }
 .sim-p:first-of-type { border-top: 0; }
 .sim-pn { display: flex; align-items: center; gap: 5px; min-width: 0; }
-.sim-pn i { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.sim-pn i { flex: none; }
 .sim-pn img { width: 20px; height: 20px; border-radius: 4px; flex: none; }
 .sim-pn span { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sim-ps { color: var(--muted); font-size: 12px; display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; font-variant-numeric: tabular-nums; }
@@ -99,6 +108,7 @@
     S = { rid, D, t: 0, playing: false, speed: 8, trails: true, heat: '', last: 0, evf: 'all', mapKey: mapKey || D.map, hover: null };
     prep();
     build(card);
+    if (location.hash === '#sim') setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);   // opened from the launcher
   }
   function hide() { stop(); const c = document.getElementById('sim'); if (c) c.hidden = true; S = null; }
   function stop() { if (S && S.raf) cancelAnimationFrame(S.raf); if (S) S.raf = 0; }
@@ -107,8 +117,13 @@
   function prep() {
     const D = S.D;
     S.P = {}; D.players.forEach(p => { S.P[p.pid] = p; });
-    S.idx = D.frames.map(fr => { const m = new Map(); for (let i = 0; i < fr.length; i += 6) m.set(fr[i], i); return m; });
     S.teams = [...new Set(D.players.map(p => p.team))].sort();
+    // a team = a shape (blue circles / red squares) and a hue family; a player = his own shade inside it
+    const FILL = [['#4da3ff', '#35e0d0', '#b18cff', '#9fd8ff'], ['#ff5c4d', '#ffa43a', '#ff70c8', '#ffe066']];
+    const seen = {};
+    D.players.forEach(p => { const side = Math.max(0, S.teams.indexOf(p.team)) % 2, n = seen[side] = (seen[side] || 0) + 1; p.side = side; p.color = FILL[side][(n - 1) % 4]; });
+    S.focus = null; S.focusLock = null;
+    S.idx = D.frames.map(fr => { const m = new Map(); for (let i = 0; i < fr.length; i += 6) m.set(fr[i], i); return m; });
     const ax = Object.values(D.army || {}).flat(); S.armyMax = Math.max(1, ...ax);
     // events
     const ev = [];
@@ -143,7 +158,7 @@
       <div class="sim-sub" id="simSub"></div>
       <div class="sim-main">
         <div class="sim-mapw" id="simW"><canvas id="simMap"></canvas><div class="sim-clock" id="simClock"></div><div class="sim-score" id="simScore"></div>
-          <div class="sim-chatbox" id="simChat"></div><div class="sim-tip" id="simTip"></div><div class="sim-big" id="simBig"><button id="simStart"></button></div></div>
+          <div class="sim-leg" id="simLeg"></div><div class="sim-chatbox" id="simChat"></div><div class="sim-tip" id="simTip"></div><div class="sim-big" id="simBig"><button id="simStart"></button></div></div>
         <div class="sim-side" id="simSide"></div>
       </div>
       <div class="sim-ctl">
@@ -205,12 +220,18 @@
   function side(full) {
     const D = S.D, s = Math.min(D.dur - 1, Math.floor(S.t));
     if (full) {
-      S.el.side.innerHTML = S.teams.map(tm => `<div class="sim-team"><h4><span style="color:${TEAMC[tm % 2]}">${tx('team')(tm + 1)}</span><span id="simTP${tm}"></span></h4>` +
+      S.el.side.innerHTML = S.teams.map(tm => `<div class="sim-team"><h4><span style="color:${TEAMC[S.teams.indexOf(tm) % 2]}">${tname(tm)}</span><span id="simTP${tm}"></span></h4>` +
         D.players.filter(p => p.team === tm).map(p => {
           const r = AS.races[rk(p.race)] || {}, h = r.heroes && r.heroes[p.hero];
-          return `<div class="sim-p"><div class="sim-pn"><i style="background:${p.color}"></i>${r.icon ? `<img src="${A + r.icon}" alt="">` : ''}${h ? `<img src="${A + h.icon}" alt="" title="${esc(h.name)}">` : ''}<span title="${esc(p.name)}">${esc(p.name)}</span></div>` +
+          return `<div class="sim-p" data-pid="${p.pid}"><div class="sim-pn"><i class="sim-sh c${p.side}" style="background:${p.color};border-color:${TEAMC[p.side]}"></i>${r.icon ? `<img src="${A + r.icon}" alt="">` : ''}${h ? `<img src="${A + h.icon}" alt="" title="${esc(h.name)}">` : ''}<span title="${esc(p.name)}">${esc(p.name)}</span></div>` +
             `<div class="sim-ps" id="simPS${p.pid}"></div><div class="sim-bar"><i id="simPB${p.pid}" style="background:${p.color}"></i></div></div>`;
         }).join('') + '</div>').join('');
+      document.getElementById('simLeg').innerHTML = D.players.map(p => `<div data-pid="${p.pid}"><i class="sim-sh c${p.side}" style="background:${p.color};border-color:${TEAMC[p.side]}"></i><span>${esc(p.name)}</span></div>`).join('');
+      for (const box of [S.el.side, document.getElementById('simLeg')]) {
+        box.onmouseover = e => { const r = e.target.closest('[data-pid]'); if (r) setFocus(+r.dataset.pid); };
+        box.onmouseleave = () => setFocus(null);
+        box.onclick = e => { const r = e.target.closest('[data-pid]'); if (!r) return; S.focusLock = S.focusLock === +r.dataset.pid ? null : +r.dataset.pid; setFocus(null); };
+      }
     }
     // live values
     const alive = {}; const fr = D.frames[s] || [];
@@ -225,6 +246,11 @@
     S.teams.forEach(tm => { const pt = (D.points || {})[tm] || [], x = document.getElementById('simTP' + tm); if (x) x.textContent = pt[s] != null ? '⚑ ' + pt[s] : ''; });
   }
 
+  function setFocus(pid) {
+    S.focus = pid != null ? pid : S.focusLock;
+    document.querySelectorAll('#sim [data-pid]').forEach(x => x.classList.toggle('on', +x.dataset.pid === S.focus));
+    draw();
+  }
   function events() {
     const D = S.D;
     const pn = pid => (S.P[pid] || {}).name || '?';
@@ -232,9 +258,9 @@
       let ic = '', x = '', d = '';
       if (e.k === 'fights') {
         const f = e.f, ts = Object.keys(f.loss).sort();
-        ic = '⚔'; const w = f.win != null ? tx('won')(`<b style="color:${TEAMC[f.win % 2]}">${tx('team')(+f.win + 1)}</b>`) : tx('even');
+        ic = '⚔'; const w = f.win != null ? tx('won')(`<b style="color:${TEAMC[S.teams.indexOf(+f.win) % 2]}">${tname(+f.win)}</b>`) : tx('even');
         x = `${tx('fight')} ${tx('near')(S.dir(f.x, f.z))} · ${f.t1 - f.t0} ${tx('sec')} — ${w}`;
-        d = ts.map(k => `<span style="color:${TEAMC[k % 2]}">${tx('team')(+k + 1)}</span>: −${nf(f.loss[k])} ${tx('hp')}` + ((f.killed[k] || []).length ? `, ${tx('wiped')} ${(f.killed[k] || []).length}` : '')).join(' · ');
+        d = ts.map(k => `<span style="color:${TEAMC[S.teams.indexOf(+k) % 2]}">${tname(+k)}</span>: −${nf(f.loss[k])} ${tx('hp')}` + ((f.killed[k] || []).length ? `, ${tx('wiped')} ${(f.killed[k] || []).length}` : '')).join(' · ');
       } else if (e.k === 'heroes') { ic = '☠'; x = tx('heroDown')(esc((S.P[e.sq[0]] || {}).hero_name || e.sq[1]), esc(pn(e.sq[0]))); }
       else if (e.k === 'deaths') { ic = '✖'; x = tx('squadLost')(esc(e.sq[1]), esc(pn(e.sq[0]))); }
       else { const c = e.c; const p = D.players.find(q => q.name === c[1]); ic = '💬'; x = `<b style="color:${p ? p.color : 'var(--muted)'}">${esc(c[1])}</b>: ${esc(c[3])}`; }
@@ -289,7 +315,7 @@
       for (let s = s0; s <= s1; s++) { const fr = D.frames[s]; for (let i = 0; i < fr.length; i += 6) { if (fr[i + 4] <= 0) continue; let a = paths.get(fr[i]); if (!a) paths.set(fr[i], a = []); a.push(fr[i + 1], fr[i + 2]); } }
       for (const [id, a] of paths) {
         if (a.length < 4) continue; const sq = D.squads[id], p = S.P[sq[0]]; if (!p) continue;
-        c.strokeStyle = p.color; c.globalAlpha = 0.35; c.beginPath();
+        c.strokeStyle = p.color; c.globalAlpha = S.focus != null && sq[0] !== S.focus ? 0.06 : 0.4; c.beginPath();
         for (let i = 0; i < a.length; i += 2) { const [px, py] = W2P(a[i], a[i + 1]); if (i && Math.abs(a[i] - a[i - 2]) + Math.abs(a[i + 1] - a[i - 1]) > 40) c.moveTo(px, py); else if (i) c.lineTo(px, py); else c.moveTo(px, py); }
         c.stroke();
       }
@@ -322,14 +348,16 @@
       const r = (hero ? 6.5 : 3.4 + Math.min(q.n, 8) * 0.42) * k;
       if (S.hover) { const dd = Math.hypot(S.hover[0] - px, S.hover[1] - py); if (dd < Math.max(10, r + 4) && dd < hd) { hd = dd; hov = { q, sq, p, px, py }; } }
       if (down) { c.globalAlpha = 0.8; c.strokeStyle = '#ccc'; c.lineWidth = 2; c.beginPath(); c.moveTo(px - r, py - r); c.lineTo(px + r, py + r); c.moveTo(px + r, py - r); c.lineTo(px - r, py + r); c.stroke(); c.globalAlpha = 1; continue; }
-      const st = q.st, retreat = st === 5, fight = st === 3 || st === 4;
-      if (fight && blink) { c.beginPath(); c.arc(px, py, r + 4 * k, 0, 7); c.fillStyle = 'rgba(255,140,40,.45)'; c.fill(); }
-      c.beginPath();
-      if (hero) { c.moveTo(px, py - r * 1.25); c.lineTo(px + r, py); c.lineTo(px, py + r * 1.25); c.lineTo(px - r, py); c.closePath(); }
-      else c.arc(px, py, r, 0, 7);
-      c.fillStyle = p.color; c.globalAlpha = retreat ? 0.45 : 1; c.fill(); c.globalAlpha = 1;
-      c.lineWidth = hero ? 2 : 1.2; c.strokeStyle = hero ? '#ffe9a8' : 'rgba(0,0,0,.85)'; if (retreat) { c.setLineDash([3, 2]); c.strokeStyle = '#fff'; } c.stroke(); c.setLineDash([]);
-      if (q.hp < 99) { c.beginPath(); c.arc(px, py, r + 2.3 * k, -Math.PI / 2, -Math.PI / 2 + 2 * Math.PI * q.hp / 100); c.strokeStyle = q.hp > 50 ? '#7dff8a' : q.hp > 25 ? '#ffd23f' : '#ff4d4d'; c.lineWidth = 1.8 * k; c.stroke(); }
+      const st = q.st, retreat = st === 5, fight = st === 3 || st === 4, dim = S.focus != null && sq[0] !== S.focus;
+      c.globalAlpha = dim ? 0.16 : 1;
+      if (fight && blink && !dim) { c.beginPath(); c.arc(px, py, r + 4.5 * k, 0, 7); c.fillStyle = 'rgba(255,150,40,.5)'; c.fill(); }
+      const shape = rr => { c.beginPath(); if (p.side) { c.rect(px - rr, py - rr, 2 * rr, 2 * rr); } else c.arc(px, py, rr * 1.08, 0, 7); };
+      if (hero) { shape(r + 2.6 * k); c.fillStyle = '#ffd75e'; c.fill(); }
+      shape(r);
+      c.fillStyle = p.color; if (retreat) c.globalAlpha *= 0.5; c.fill(); c.globalAlpha = dim ? 0.16 : 1;
+      c.lineWidth = 2 * k; c.strokeStyle = TEAMC[p.side]; if (retreat) { c.setLineDash([3, 2]); c.strokeStyle = '#fff'; c.lineWidth = 1.4; } c.stroke(); c.setLineDash([]);
+      if (q.hp < 99) { const bw = Math.max(8, 2 * r), by = py + r + 3 * k; c.fillStyle = 'rgba(0,0,0,.7)'; c.fillRect(px - bw / 2 - 1, by - 1, bw + 2, 4); c.fillStyle = q.hp > 50 ? '#6dff7a' : q.hp > 25 ? '#ffd23f' : '#ff4d4d'; c.fillRect(px - bw / 2, by, bw * q.hp / 100, 2); }
+      c.globalAlpha = 1;
     }
     // tooltip
     const tip = S.el.tip;
@@ -342,7 +370,7 @@
     // clock + score + chat
     S.el.clock.textContent = fmt(t);
     const s = Math.min(D.dur - 1, Math.floor(t));
-    S.el.score.innerHTML = S.teams.map(tm => { const v = ((D.points || {})[tm] || [])[s]; return v != null ? `<span style="color:${TEAMC[tm % 2]}">⚑ ${v}</span>` : ''; }).join(' &nbsp;');
+    S.el.score.innerHTML = S.teams.map(tm => { const v = ((D.points || {})[tm] || [])[s]; return v != null ? `<span style="color:${TEAMC[S.teams.indexOf(tm) % 2]}">⚑ ${v}</span>` : ''; }).join(' &nbsp;');
     const cl = (D.chat || []).filter(x => x[0] <= t && t - x[0] < 9).slice(-3);
     const ck = cl.map(x => x[0] + x[1] + x[3]).join('|');
     if (ck !== S.chatKey) {
@@ -371,9 +399,9 @@
   function charts() {
     if (!S || !S.el) return;
     const D = S.D;
-    chart(S.el.army, S.teams.map(tm => ({ c: TEAMC[tm % 2], v: (D.army_team || {})[tm] || [], w: 2.2 })), { fights: true });
-    chart(S.el.pts, S.teams.map(tm => ({ c: TEAMC[tm % 2], v: (D.points || {})[tm] || [], w: 2.2 })), {});
-    chart(S.el.req, S.teams.map(tm => ({ c: TEAMC[tm % 2], v: S.alive[tm] || [], w: 2.2 })), {});
+    chart(S.el.army, S.teams.map(tm => ({ c: TEAMC[S.teams.indexOf(tm) % 2], v: (D.army_team || {})[tm] || [], w: 2.2 })), { fights: true });
+    chart(S.el.pts, S.teams.map(tm => ({ c: TEAMC[S.teams.indexOf(tm) % 2], v: (D.points || {})[tm] || [], w: 2.2 })), {});
+    chart(S.el.req, S.teams.map(tm => ({ c: TEAMC[S.teams.indexOf(tm) % 2], v: S.alive[tm] || [], w: 2.2 })), {});
     timeline();
   }
   function timeline() {
@@ -385,10 +413,10 @@
     const a0 = (D.army_team || {})[S.teams[0]] || [], a1 = (D.army_team || {})[S.teams[1]] || [];
     if (a1.length) {
       const mx = Math.max(1, ...a0.map((v, i) => Math.abs(v - (a1[i] || 0))));
-      for (let px = 0; px < w - 16; px += 2) { const i = Math.floor(px / (w - 16) * (n - 1)), d = (a0[i] || 0) - (a1[i] || 0); c.fillStyle = d >= 0 ? TEAMC[S.teams[0] % 2] : TEAMC[S.teams[1] % 2]; c.globalAlpha = 0.18 + 0.5 * Math.abs(d) / mx; c.fillRect(8 + px, 22, 2, 10); }
+      for (let px = 0; px < w - 16; px += 2) { const i = Math.floor(px / (w - 16) * (n - 1)), d = (a0[i] || 0) - (a1[i] || 0); c.fillStyle = d >= 0 ? TEAMC[0] : TEAMC[1]; c.globalAlpha = 0.18 + 0.5 * Math.abs(d) / mx; c.fillRect(8 + px, 22, 2, 10); }
       c.globalAlpha = 1;
     }
-    for (const f of D.fights || []) { c.fillStyle = f.win != null ? TEAMC[f.win % 2] : '#bbb'; c.fillRect(X(f.t0), 8, Math.max(3, X(f.t1) - X(f.t0)), 9); }
+    for (const f of D.fights || []) { c.fillStyle = f.win != null ? TEAMC[S.teams.indexOf(+f.win) % 2] : '#bbb'; c.fillRect(X(f.t0), 8, Math.max(3, X(f.t1) - X(f.t0)), 9); }
     for (const d of D.deaths || []) { const sq = D.squads[d[1]], p = sq && S.P[sq[0]]; c.fillStyle = p ? p.color : '#fff'; if (sq && sq[2]) { const x = X(d[0]); c.beginPath(); c.moveTo(x, 44); c.lineTo(x - 4, 52); c.lineTo(x + 4, 52); c.fill(); } else c.fillRect(X(d[0]) - 1, 36, 2, 7); }
     for (const ch of D.chat || []) { c.fillStyle = 'rgba(255,255,255,.75)'; c.beginPath(); c.arc(X(ch[0]), 4, 1.8, 0, 7); c.fill(); }
     const x = X(Math.min(n - 1, S.t)); c.fillStyle = 'rgba(230,195,92,.25)'; c.fillRect(8, 0, x - 8, h); c.strokeStyle = '#e6c35c'; c.lineWidth = 2; c.beginPath(); c.moveTo(x, 0); c.lineTo(x, h); c.stroke();
