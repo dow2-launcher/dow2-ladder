@@ -1,0 +1,187 @@
+{
+ "96fd10ca": {
+  "version": "2.9.8.4",
+  "confidence": "high",
+  "note": "Discord text \"2.9.8.4\", Mar-May 2023"
+ },
+ "e0faccfc": {
+  "version": "2.9.9",
+  "confidence": "medium",
+  "note": "2.9.9 public beta 2023-04-14 / release 2023-05-13"
+ },
+ "742eeabb": {
+  "version": "2.9.9.1",
+  "confidence": "high",
+  "note": "between 2.9.9.1 (2023-07-08) and 2.9.9.2 (2024-03-26)"
+ },
+ "c93d0284": {
+  "version": "2.9.10",
+  "confidence": "low",
+  "note": "one replay recorded 2024-04-05: 2.9.10 (04-02) or 2.9.11 (04-05)"
+ },
+ "5def3c6d": {
+  "version": "2.9.11",
+  "confidence": "high",
+  "note": "2024-04-06 .. 2024-09-13, before 2.9.12"
+ },
+ "e2acbd6f": {
+  "version": "2.9.12",
+  "confidence": "high",
+  "note": "2024-09-13..15, 2.9.12 released 09-09"
+ },
+ "6aacd02b": {
+  "version": "2.9.13",
+  "confidence": "high",
+  "note": "2024-09-22..27, 2.9.13 released 09-16"
+ },
+ "4be4b4c8": {
+  "version": "2.9.14",
+  "confidence": "high",
+  "note": "2024-10-12 .. 2025-02-22, 2.9.14 released 10-10"
+ },
+ "d0190051": {
+  "version": "2.10",
+  "confidence": "high",
+  "note": "2025-02-24 .. 03-04, 2.10 released 02-23"
+ },
+ "465da119": {
+  "version": "2.10.1",
+  "confidence": "medium",
+  "note": "one replay 2025-04-12, 2.10.2 came out 04-13"
+ },
+ "0f61b204": {
+  "version": "2.10.2",
+  "confidence": "high",
+  "note": "2025-04-25 .. 05-25"
+ },
+ "e84cab16": {
+  "version": "2.11",
+  "confidence": "high",
+  "note": "2025-07-08..19, 2.11 released 06-07, 2.11.1 on 07-27"
+ },
+ "e3d20620": {
+  "version": "2.11.1",
+  "confidence": "high",
+  "note": "2025-08 .. 2026-02, Discord text \"regular patch\""
+ },
+ "680b947d": {
+  "version": "2.11.1+tau_tb_1.0",
+  "confidence": "medium",
+  "note": "race z_tau, one replay 2025-11-30 21:58 (TB 1.0 on 11-23, 1.1 on 11-30 = afbb2852)"
+ },
+ "afbb2852": {
+  "version": "2.11.1+tau_tb_1.1",
+  "confidence": "high",
+  "note": "Discord text \"tau build 1.1\", race z_tau"
+ },
+ "b3d1c135": {
+  "version": "2.11.1+tau_tb_1.2",
+  "confidence": "high",
+  "note": "race z_tau, 2025-12-24 .. 2026-01-10 (TB 1.2 on 12-14)"
+ },
+ "8dabdebe": {
+  "version": "2.11.1+tau_tb_1.3",
+  "confidence": "high",
+  "note": "race z_tau, 2026-01-22 .. 02-21 (TB 1.3 on 01-11)"
+ },
+ "feb1cfb6": {
+  "version": "unknown_2026-01",
+  "confidence": "none",
+  "note": "8 games of one player on 2026-01-24 (G1..G8), no Tau; neither 2.11.1 nor TB 1.3 hash"
+ },
+ "09e19378": {
+  "version": "unknown_2026-05-01_tourney",
+  "confidence": "none",
+  "note": "8 games of a 2v2 tournament on 2026-05-01 (archive by chuzar, WellplayedTV), no Tau; not 2.12 nor TB 1.6 hash, maybe a 2.13 pre-release"
+ },
+ "a2e98eb2": {
+  "version": "2.12+tau_tb_1.4",
+  "confidence": "high",
+  "note": "race z_tau, 2026-02-23 .. 03-05 (2.12 + TB 1.4 on 02-21)"
+ },
+ "abeb68c5": {
+  "version": "2.12",
+  "confidence": "high",
+  "note": "2026-02-26 .. 05-04, Discord text \"not on Tau patch\""
+ },
+ "45e0ca56": {
+  "version": "2.12+tau_tb_1.5",
+  "confidence": "high",
+  "note": "race z_tau, 2026-03-08..10 (TB 1.5 on 03-07)"
+ },
+ "76385e0d": {
+  "version": "2.12+tau_tb_1.5.1",
+  "confidence": "high",
+  "note": "Discord text \"tau 1.5.1\", 2026-03-11 .. 04-21"
+ },
+ "969b1945": {
+  "version": "2.12+tau_tb_1.6",
+  "confidence": "high",
+  "note": "race z_tau, 2026-04-29 .. 05-01 (TB 1.6 on 04-27)"
+ },
+ "f0558dfa": {
+  "version": "2.13",
+  "confidence": "high",
+  "note": "2026-05-05, 2.13 released 05-04"
+ },
+ "f22e739f": {
+  "version": "2.13.1+tau_tb_1.6",
+  "confidence": "medium",
+  "note": "Discord text \"Tau, latest patch\", 2026-05-07..15"
+ },
+ "bdf96faf": {
+  "version": "2.13.1",
+  "confidence": "high",
+  "note": "2026-05-08..18, 2.13.1 released 05-06"
+ },
+ "5307208b": {
+  "version": "2.13.2",
+  "confidence": "high",
+  "note": "2026-05-20 .. 06-28, hotfix on 05-19"
+ },
+ "967b0a92": {
+  "version": "2.13.2+tau_tb_1.6",
+  "confidence": "medium",
+  "note": "race z_tau, 2026-05-21 .. 06-11"
+ },
+ "0ae83a95": {
+  "version": "2.13.2+tau_tb_1.7.1",
+  "confidence": "high",
+  "note": "race renamed z_tau -> t_tau in TB 1.7.1 (06-15)"
+ },
+ "4a84605d": {
+  "version": "3.0",
+  "confidence": "high",
+  "note": "our own Elite 3.0 install (gdrive/dow2retri_plus_elite3.0), 2026-07-05 .. 08-09"
+ },
+ "f7c1d0fc": {
+  "version": "3.1",
+  "confidence": "high",
+  "note": "2026-08-17 .. 10-24, 3.1 released 08-10"
+ },
+ "18604bfa": {
+  "version": "3.2_ptb",
+  "confidence": "medium",
+  "note": "one replay 2026-10-08, 3.2 public test build 10-07"
+ },
+ "d6805b7d": {
+  "version": "3.2",
+  "confidence": "high",
+  "note": "Discord text \"new 3.2 patch\", 2026-10-29 .. 11-03"
+ },
+ "819567f8": {
+  "version": "3.2.1",
+  "confidence": "high",
+  "note": "our launcher player replay 2026-11-11 on 3.2.1"
+ },
+ "161d19dd": {
+  "version": "vanilla",
+  "confidence": "high",
+  "note": "same value 2023..2026 across Elite releases; WellplayedTV authors label these \"Ванила\""
+ },
+ "1a3cfb31": {
+  "version": "2.9.8.1",
+  "confidence": "medium",
+  "note": "ESL replay name ends with [2.9.8.1]"
+ }
+}

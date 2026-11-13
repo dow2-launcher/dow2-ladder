@@ -6,9 +6,9 @@
 import hashlib, html, json, os, re, sqlite3, subprocess, sys, threading, time, urllib.parse
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 APP = os.path.dirname(os.path.abspath(__file__))            # /srv/replayweb/app — код и парсер, только чтение
-ROOT = os.path.dirname(APP); STORE = ROOT + '/data'; QUEUE = ROOT + '/queue'; PORT = 8215
+ROOT = os.path.dirname(APP); STORE = ROOT + '/data'; QUEUE = ROOT + '/queue'; PORT = int(os.environ.get('PORT', 8215))
 STORY_LIMIT = int(os.environ.get('STORY_LIMIT', 20)); story_today = {'day': '', 'n': 0}; running = set()
-UPLOADS_PER_HOUR = 20; STORE_MAX = 3 * 1024**3; ip_hits = {}   # с одного адреса 20 загрузок в час; хранилище до 3 ГБ
+UPLOADS_PER_HOUR = 20; STORE_MAX = 12 * 1024**3; ip_hits = {}   # с одного адреса 20 загрузок в час; хранилище до 12 ГБ (13.11: пул реплеев лаунчера)
 def client_ip(h): return h.headers.get('CF-Connecting-IP') or h.headers.get('X-Real-IP') or h.client_address[0]
 def allow_upload(ip):
     now = time.time(); hits = [t for t in ip_hits.get(ip, []) if now - t < 3600]
@@ -28,7 +28,32 @@ def idb():
 with idb() as c:
     c.executescript('''CREATE TABLE IF NOT EXISTS replays (rid TEXT PRIMARY KEY, mkey TEXT UNIQUE, name TEXT, lobby TEXT, map TEXT,
         players TEXT, ticks INTEGER, recorded TEXT, uploaded INTEGER, size INTEGER, uploads INTEGER DEFAULT 1);
-        CREATE INDEX IF NOT EXISTS replays_up ON replays (uploaded DESC); CREATE INDEX IF NOT EXISTS replays_lobby ON replays (lobby);''')
+        CREATE INDEX IF NOT EXISTS replays_up ON replays (uploaded DESC); CREATE INDEX IF NOT EXISTS replays_lobby ON replays (lobby);
+        CREATE TABLE IF NOT EXISTS aliases (sha TEXT PRIMARY KEY, rid TEXT);''')
+    # the replay pool of the launcher (13.11.2026): the game version, who put the replay in, their description, where it came from
+    have = {r[1] for r in c.execute('PRAGMA table_info(replays)')}
+    for col, typ in (('vhash', 'TEXT'), ('author', 'TEXT'), ('author_steam', 'TEXT'), ('descr', 'TEXT'), ('source', 'TEXT'), ('src_link', 'TEXT')):
+        if col not in have: c.execute(f'ALTER TABLE replays ADD COLUMN {col} {typ}')
+    c.execute('CREATE INDEX IF NOT EXISTS replays_author ON replays (author_steam)')
+
+# The game version a replay was recorded on: bytes 4..7 of the file are a checksum of the game data (one per Elite release,
+# one per Tau test build, one for vanilla). The table is elite_versions.json next to this file; a value missing there = a new
+# version nobody has named yet ("unknown"). Read again when the file changes, no restart.
+VFILE = APP + '/elite_versions.json'; _vers = {'mt': 0, 'map': {}}
+def versions():
+    try:
+        mt = os.path.getmtime(VFILE)
+        if mt != _vers['mt']: _vers.update(mt=mt, map=json.load(open(VFILE, encoding='utf-8')))
+    except Exception: pass
+    return _vers['map']
+def vname(vh):
+    if not vh: return None
+    v = versions().get(vh)
+    return v['version'] if v else 'unknown'
+def vhash_of(path):
+    with open(path, 'rb') as f: b = f.read(8)
+    return '%08x' % int.from_bytes(b[4:8], 'little') if len(b) == 8 else None
+
 def rec_meta(path):
     meta, acts = dow2rec.parse(path)
     pl = [{'name': p.get('name'), 'team': p.get('team'), 'race': p.get('race'), 'hero': p.get('hero'), 'pid': p.get('profile_id'),
@@ -36,12 +61,14 @@ def rec_meta(path):
     mp = (meta.get('map') or '').replace('/', '\\').split('\\')[-1].lower()
     h = hashlib.sha256((mp + '|' + ','.join(str(x) for x in sorted(p['pid'] or 0 for p in pl))).encode())
     for a in acts[:200]: h.update(a[3])
-    return {'map': mp, 'players': pl, 'ticks': meta.get('ticks') or 0, 'recorded': meta.get('recorded'), 'mkey': h.hexdigest()[:32] if acts else None}
-def index_add(rid, meta, name, lobby, size):
+    return {'map': mp, 'players': pl, 'ticks': meta.get('ticks') or 0, 'recorded': meta.get('recorded'), 'mkey': h.hexdigest()[:32] if acts else None,
+            'vhash': vhash_of(path)}
+def index_add(rid, meta, name, lobby, size, author=None, author_steam=None, descr=None, source=None, src_link=None):
     with _ilock, idb() as c:
-        c.execute('INSERT OR IGNORE INTO replays (rid, mkey, name, lobby, map, players, ticks, recorded, uploaded, size) VALUES (?,?,?,?,?,?,?,?,?,?)',
+        c.execute('INSERT OR IGNORE INTO replays (rid, mkey, name, lobby, map, players, ticks, recorded, uploaded, size, vhash, author, author_steam, descr, source, src_link)'
+                  ' VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                   (rid, meta['mkey'], name, lobby or None, meta['map'], json.dumps(meta['players'], ensure_ascii=False), meta['ticks'],
-                   meta['recorded'], int(time.time()), size))
+                   meta['recorded'], int(time.time()), size, meta.get('vhash'), author, author_steam, descr, source, src_link))
 def backfill():
     with idb() as c: known = {r[0] for r in c.execute('SELECT rid FROM replays')}
     for rid in os.listdir(STORE):
@@ -53,30 +80,82 @@ def backfill():
             index_add(rid, meta, nm, None, os.path.getsize(f))
             with _ilock, idb() as c: c.execute('UPDATE replays SET uploaded = ? WHERE rid = ?', (int(os.path.getmtime(f)), rid))
         except Exception: pass
+    with idb() as c: nov = [r[0] for r in c.execute('SELECT rid FROM replays WHERE vhash IS NULL')]
+    for rid in nov:                       # the versions of the replays stored before the column existed
+        try: vh = vhash_of(f'{STORE}/{rid}/replay.rec')
+        except OSError: continue
+        with _ilock, idb() as c: c.execute('UPDATE replays SET vhash = ? WHERE rid = ?', (vh, rid))
 backfill()
-RACES = ['chaos_space_marines', 'eldar', 'imperial_guard', 'ordo_malleus', 'orks', 'space_marines', 'tau', 'tyranids', 'necron']
-def replay_list(q='', mapk='', race='', mode='', page=0, n=30):
+
+# Who is uploading: the launcher sends the session token of its Steam sign-in (X-Token / "token"); the ladder knows whose it is.
+# This service reaches only localhost, the ladder answers there. A token seen is remembered for 10 minutes.
+LADDER = os.environ.get('LADDER_URL', 'http://127.0.0.1:8217'); _who = {}
+def who(token):
+    token = str(token or '')[:80]
+    if not re.fullmatch(r'[\w\-.]{16,80}', token): return None
+    hit = _who.get(token)
+    if hit and time.time() - hit[0] < 600: return hit[1]
+    import urllib.request
+    try:
+        req = urllib.request.Request(LADDER + '/ladder/api/c/me', data=json.dumps({'token': token}).encode(), headers={'Content-Type': 'application/json'})
+        d = json.loads(urllib.request.urlopen(req, timeout=8).read())
+    except Exception: return None
+    u = {'steam': str(d['steam']), 'name': (d.get('name') or 'Player')[:64]} if d.get('signed_in') and d.get('steam') else None
+    if len(_who) > 5000: _who.clear()
+    _who[token] = (time.time(), u)
+    return u
+
+# race filter: one key per army, whatever spelling the version uses (chaos_marines, z_tau of the Tau test builds, t_tau of 3.x)
+RACE_KEYS = {'chaos': ('chaos',), 'eldar': ('eldar',), 'imperial_guard': ('imperial_guard',), 'ordo_malleus': ('ordo_malleus',),
+             'orks': ('ork',), 'space_marines': ('space_marines',), 'tau': ('tau',), 'tyranids': ('tyranid',)}
+def race_key(r):
+    r = (r or '').lower()
+    for k, subs in RACE_KEYS.items():
+        if any(s in r for s in subs): return k
+    return r
+def mode_of(pl):
+    teams = {p.get('team') for p in pl}; per = max(1, len(pl) // max(1, len(teams)))
+    return '%dv%d' % (per, per) if len(teams) == 2 else ('ffa' if len(teams) > 2 else '?')
+COLS = 'rid, name, lobby, map, players, ticks, recorded, uploaded, uploads, vhash, author, author_steam, descr, source, src_link'
+def item(r, steam=None):
+    rid, name, lobby, mp, pl, ticks, rec, up, ups, vh, author, a_steam, descr, source, link = r
+    pl = json.loads(pl or '[]'); cap = f'{STORE}/{rid}/caption.txt'
+    return {'id': rid, 'name': name, 'lobby': lobby, 'map': mp, 'mode': mode_of(pl), 'nplayers': len(pl), 'players': pl,
+            'races': sorted({race_key(p.get('race')) for p in pl}), 'duration': (ticks or 0) // 10, 'recorded': rec, 'uploaded': up,
+            'uploads': ups, 'vhash': vh, 'version': vname(vh), 'author': author, 'descr': descr,
+            'source': source or ('ladder' if (lobby or '').startswith('MM-') else 'site'), 'src_link': link,
+            'mine': bool(steam and a_steam == steam), 'caption': open(cap).read() if os.path.exists(cap) else None}
+def replay_list(q='', mapk='', race='', mode='', page=0, n=30, version='', players='', author='', steam=None, mine=False):
     with idb() as c:
-        rows = c.execute('SELECT rid, name, lobby, map, players, ticks, recorded, uploaded, uploads FROM replays ORDER BY uploaded DESC LIMIT 5000').fetchall()
-    q = (q or '').strip().lower(); out = []
-    for rid, name, lobby, mp, pl, ticks, rec, up, ups in rows:
-        pl = json.loads(pl or '[]'); teams = {p.get('team') for p in pl}; per = max(1, len(pl) // max(1, len(teams)))
-        md = '%dv%d' % (per, per) if len(teams) == 2 else ('ffa' if len(teams) > 2 else '?')
-        if mapk and mp != mapk.lower(): continue
-        if race and not any(race in (p.get('race') or '') for p in pl): continue
-        if mode and md != mode: continue
-        if q and q not in ' '.join([name or '', lobby or '', mp or ''] + [p.get('name') or '' for p in pl]).lower(): continue
-        cap = f'{STORE}/{rid}/caption.txt'
-        out.append({'id': rid, 'name': name, 'lobby': lobby, 'map': mp, 'mode': md, 'players': pl, 'duration': (ticks or 0) // 10,
-                    'recorded': rec, 'uploaded': up, 'uploads': ups, 'caption': open(cap).read() if os.path.exists(cap) else None})
+        if mine: rows = c.execute(f'SELECT {COLS} FROM replays WHERE author_steam = ? ORDER BY uploaded DESC', (steam or '-',)).fetchall()
+        else: rows = c.execute(f'SELECT {COLS} FROM replays ORDER BY uploaded DESC LIMIT 20000').fetchall()
+    q = (q or '').strip().lower(); author = (author or '').strip().lower()
+    want = [race_key(x) for x in (race or '').split(',') if x.strip()]          # every race asked for has to be in the match
+    out = []
+    for r in rows:
+        it = item(r, steam)
+        if mapk and it['map'] != mapk.lower(): continue
+        if want and not all(w in it['races'] for w in want): continue
+        if mode and it['mode'] != mode: continue
+        if players and str(it['nplayers']) != str(players): continue
+        if version and it['version'] != version: continue
+        if author and author not in (it['author'] or '').lower(): continue
+        if q and q not in ' '.join([it['name'] or '', it['lobby'] or '', it['map'] or '', it['author'] or '', it['descr'] or '']
+                                   + [p.get('name') or '' for p in it['players']]).lower(): continue
+        out.append(it)
     page = max(0, int(page or 0)); n = max(1, min(100, int(n or 30)))
     return {'total': len(out), 'page': page, 'items': out[page * n:(page + 1) * n], 'maps': sorted({i['map'] for i in out if i['map']})}
+def version_list():
+    with idb() as c: rows = c.execute('SELECT vhash, COUNT(*), MAX(uploaded) FROM replays GROUP BY vhash').fetchall()
+    agg = {}
+    for vh, n, last in rows:
+        v = vname(vh) or 'unknown'; a = agg.setdefault(v, {'version': v, 'count': 0, 'last': 0}); a['count'] += n; a['last'] = max(a['last'], last or 0)
+    return sorted(agg.values(), key=lambda a: -a['last'])
 
-def replay_meta(rid):
-    with idb() as c:
-        r = c.execute('SELECT lobby, map, players, ticks, recorded, uploaded, uploads FROM replays WHERE rid = ?', (rid,)).fetchone()
+def replay_meta(rid, steam=None):
+    with idb() as c: r = c.execute(f'SELECT {COLS} FROM replays WHERE rid = ?', (rid,)).fetchone()
     if not r: return None
-    return {'lobby': r[0], 'map': r[1], 'players': json.loads(r[2] or '[]'), 'duration': (r[3] or 0) // 10, 'recorded': r[4], 'uploaded': r[5], 'uploads': r[6]}
+    it = item(r, steam); it.pop('caption', None); return it
 
 PAGE = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'page.html'), encoding='utf-8').read()
 
@@ -155,8 +234,10 @@ class H(BaseHTTPRequestHandler):
         if p == '/replay/api/recent': return self.out(200, json.dumps(recent(), ensure_ascii=False), 'application/json')
         if p == '/replay/api/list':
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query); g = lambda k: qs.get(k, [''])[0]
-            try: return self.out(200, json.dumps(replay_list(g('q')[:64], g('map')[:64], g('race')[:32], g('mode')[:8], g('page') or 0, g('n') or 30), ensure_ascii=False), 'application/json')
+            try: return self.out(200, json.dumps(replay_list(g('q')[:64], g('map')[:64], g('race')[:120], g('mode')[:8], g('page') or 0, g('n') or 30,
+                                                             g('version')[:40], g('players')[:2], g('author')[:64]), ensure_ascii=False), 'application/json')
             except ValueError: return self.out(400, '{}', 'application/json')
+        if p == '/replay/api/versions': return self.out(200, json.dumps(version_list(), ensure_ascii=False), 'application/json')
         m = re.match(r'^/replay/api/by_lobby/([\w.\-]{1,80})$', p)
         if m:
             with idb() as c: r = c.execute('SELECT rid FROM replays WHERE lobby = ? ORDER BY ticks DESC LIMIT 1', (m.group(1),)).fetchone()
@@ -183,8 +264,41 @@ class H(BaseHTTPRequestHandler):
             t = open(f'{STORE}/{m.group(1)}/report.md').read()
             return self.out(200, to_en(t) if m.group(2) else t, 'text/markdown; charset=utf-8')
         self.out(404, 'not found', 'text/plain')
+    def body(self, limit=64 * 1024):
+        n = int(self.headers.get('Content-Length', 0) or 0)
+        if n <= 0 or n > limit: return {}
+        try: d = json.loads(self.rfile.read(n))
+        except Exception: return {}
+        return d if isinstance(d, dict) else {}
     def do_POST(self):
         p = urllib.parse.urlparse(self.path).path
+        J = lambda code, v: self.out(code, json.dumps(v, ensure_ascii=False), 'application/json')
+        # ---- the launcher's Replays tab ----
+        if p == '/replay/api/list':                   # the list with "mine" marked (and "only mine") for a signed-in player
+            d = self.body(); u = who(d.get('token')); g = lambda k, n: str(d.get(k) or '')[:n]
+            try: return J(200, replay_list(g('q', 64), g('map', 64), g('race', 120), g('mode', 8), d.get('page') or 0, d.get('n') or 30,
+                                           g('version', 40), g('players', 2), g('author', 64), u and u['steam'], bool(d.get('mine')) and bool(u)))
+            except (ValueError, TypeError): return J(400, {})
+        if p == '/replay/api/have':                   # which of the player's files are in the pool: sha256[:16] of a file -> its replay
+            ids = [x for x in (self.body().get('ids') or [])[:2000] if isinstance(x, str) and re.fullmatch(r'[0-9a-f]{16}', x)]
+            out = {}
+            with idb() as c:
+                for i in range(0, len(ids), 500):
+                    part = ids[i:i + 500]; qm = ','.join('?' * len(part))
+                    for rid, in c.execute(f'SELECT rid FROM replays WHERE rid IN ({qm})', part): out[rid] = rid
+                    for sha, rid in c.execute(f'SELECT sha, rid FROM aliases WHERE sha IN ({qm})', part): out.setdefault(sha, rid)
+            return J(200, out)
+        m = re.match(r'^/replay/api/r/([0-9a-f]{16})/describe$', p)
+        if m:                                         # the description: only the one who put the replay in the pool
+            d = self.body(); u = who(d.get('token'))
+            if not u: return J(401, {'error': 'sign_in'})
+            text = re.sub(r'[\x00-\x08\x0b-\x1f\x7f]', '', str(d.get('text') or '')).strip()[:1000]
+            with _ilock, idb() as c:
+                r = c.execute('SELECT author_steam FROM replays WHERE rid = ?', (m.group(1),)).fetchone()
+                if not r: return J(404, {'error': 'not_found'})
+                if r[0] != u['steam']: return J(403, {'error': 'not_yours'})
+                c.execute('UPDATE replays SET descr = ? WHERE rid = ?', (text or None, m.group(1)))
+            return J(200, {'ok': True, 'meta': replay_meta(m.group(1), u['steam'])})
         if p == '/replay/api/upload':
             n = int(self.headers.get('Content-Length', 0))
             if n <= 0 or n > 30 * 1024 * 1024: return self.out(413, json.dumps({'error': 'file is empty or larger than 30 MB'}), 'application/json')
@@ -196,6 +310,8 @@ class H(BaseHTTPRequestHandler):
             rid = hashlib.sha256(data).hexdigest()[:16]; d = f'{STORE}/{rid}'
             name = re.sub(r'[^\w.\-\[\] ]', '_', urllib.parse.unquote(self.headers.get('X-Filename', 'replay.rec')))[:120]
             lobby = re.sub(r'[^\w.\-]', '', self.headers.get('X-Lobby', ''))[:80]
+            u = who(self.headers.get('X-Token'))         # the launcher's "put into the pool": the signed-in player is the author
+            src = 'launcher' if self.headers.get('X-Token') else None
             tmp = f'{STORE}/.up_{rid}.rec'; open(tmp, 'wb').write(data)
             try: meta = rec_meta(tmp)
             except Exception: meta = None
@@ -203,13 +319,19 @@ class H(BaseHTTPRequestHandler):
             with _ilock, idb() as c:                  # проверка и запись в индекс — одним шагом: двое шлют один матч одновременно
                 old = c.execute('SELECT rid, ticks, lobby FROM replays WHERE mkey = ?', (meta['mkey'],)).fetchone()
                 if not old:
-                    c.execute('INSERT OR IGNORE INTO replays (rid, mkey, name, lobby, map, players, ticks, recorded, uploaded, size) VALUES (?,?,?,?,?,?,?,?,?,?)',
+                    c.execute('INSERT OR IGNORE INTO replays (rid, mkey, name, lobby, map, players, ticks, recorded, uploaded, size, vhash, author, author_steam, source)'
+                              ' VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                               (rid, meta['mkey'], name, lobby or None, meta['map'], json.dumps(meta['players'], ensure_ascii=False), meta['ticks'],
-                               meta['recorded'], int(time.time()), len(data)))
+                               meta['recorded'], int(time.time()), len(data), vhash_of(tmp), u and u['name'], u and u['steam'], src))
+                c.execute('INSERT OR REPLACE INTO aliases (sha, rid) VALUES (?, ?)', (rid, old[0] if old else rid))
             if old:                                   # этот матч уже есть: копию не храним, более полную запись — подменяем
                 rid0, t0, lb0 = old; d0 = f'{STORE}/{rid0}'
                 with _ilock, idb() as c:
                     c.execute('UPDATE replays SET uploads = uploads + 1, lobby = COALESCE(lobby, ?) WHERE rid = ?', (lobby or None, rid0))
+                    if u:                             # the match came in from the ladder or the site with nobody's name: the player claims it
+                        c.execute('UPDATE replays SET author = ?, author_steam = ?, source = COALESCE(source, ?) WHERE rid = ? AND author_steam IS NULL',
+                                  (u['name'], u['steam'], src, rid0))
+                    mine = bool(u) and (c.execute('SELECT author_steam FROM replays WHERE rid = ?', (rid0,)).fetchone() or [None])[0] == u['steam']
                     if meta['ticks'] > (t0 or 0): c.execute('UPDATE replays SET ticks = ?, size = ? WHERE rid = ?', (meta['ticks'], len(data), rid0))
                 if meta['ticks'] > (t0 or 0):
                     os.replace(tmp, f'{d0}/replay.rec')
@@ -217,12 +339,12 @@ class H(BaseHTTPRequestHandler):
                         if os.path.exists(f'{d0}/{f}'): os.remove(f'{d0}/{f}')
                     analyse(rid0)
                 else: os.remove(tmp)
-                return self.out(200, json.dumps({'id': rid0, 'duplicate': True}), 'application/json')
+                return self.out(200, json.dumps({'id': rid0, 'duplicate': True, 'mine': mine}), 'application/json')
             if not os.path.exists(f'{d}/report.md'):
                 os.makedirs(d, exist_ok=True); os.replace(tmp, f'{d}/replay.rec'); open(f'{d}/name.txt', 'w').write(name)
                 analyse(rid)
             elif os.path.exists(tmp): os.remove(tmp)
-            return self.out(200, json.dumps({'id': rid}), 'application/json')
+            return self.out(200, json.dumps({'id': rid, 'mine': bool(u)}), 'application/json')
         m = re.match(r'^/replay/api/r/([0-9a-f]{16})/story/(ru|en)$', p)
         if m:
             rid, lang = m.groups(); d = f'{STORE}/{rid}'
