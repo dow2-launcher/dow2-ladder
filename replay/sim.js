@@ -51,6 +51,7 @@
 .sim { padding: 16px 16px 18px; overflow: visible; }
 .sim-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .sim-badge { font-size: 11px; letter-spacing: .6px; text-transform: uppercase; color: #111; background: var(--gold); border-radius: 6px; padding: 2px 7px; font-weight: 700; }
+.sim-views { color: var(--muted); font-size: 14px; margin-left: auto; }
 .sim-sub { color: var(--muted); font-size: 14px; margin: 4px 0 12px; }
 .sim-main { display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 14px; align-items: start; }
 .sim-mapw { position: relative; border-radius: 10px; overflow: hidden; background: #08090a; border: 1px solid var(--line); line-height: 0; }
@@ -172,7 +173,7 @@
     S.el.final.innerHTML = `${tx('resTitle')}<br>${resParts(S.res).head}`;
   }
 
-  async function show(rid, mapKey) {
+  async function show(rid, mapKey, views) {
     let card = document.getElementById('sim');
     if (S && S.rid === rid && card) { relabel(); return; }
     stop();
@@ -182,7 +183,7 @@
     let D;
     try { D = await (await fetch('/replay/api/r/' + rid + '/sim.json?v=2')).json(); } catch (e) { card.innerHTML = `<div class="sim-sub">${tx('fail')}</div>`; return; }
     await assetsReady;
-    S = { rid, D, t: 0, playing: false, speed: 8, trails: true, heat: '', last: 0, evf: 'all', mapKey: mapKey || D.map, hover: null };
+    S = { rid, D, views: views || 0, t: 0, playing: false, speed: 8, trails: true, heat: '', last: 0, evf: 'all', mapKey: mapKey || D.map, hover: null };
     prep();
     S.res = verdict(D, D.players, window.RESCTX && window.RESCTX.guess, 0);
     window.SIMD = { rid, D, res: S.res };
@@ -286,7 +287,7 @@
   function build(card) {
     const D = S.D;
     card.innerHTML = `
-      <div class="sim-h"><span class="cap" id="simT"></span><span class="sim-badge" id="simB"></span></div>
+      <div class="sim-h"><span class="cap" id="simT"></span><span class="sim-badge" id="simB"></span><span class="sim-views" id="simViews"></span></div>
       <div class="sim-sub" id="simSub"></div>
       <div class="sim-main">
         <div class="sim-mapw" id="simW"><canvas id="simMap"></canvas><div class="sim-clock" id="simClock"></div><div class="sim-score" id="simScore"></div>
@@ -334,7 +335,7 @@
     S.el.evl.onclick = e => { const r = e.target.closest('.sim-e'); if (r) { seek(Math.max(0, +r.dataset.t - 4)); if (!S.playing) toggle(true); } };
     if (!S.ro) { S.ro = new ResizeObserver(() => { if (S) { sizeAll(); draw(); charts(); } }); }
     S.ro.disconnect(); S.ro.observe(card);
-    relabel();
+    relabel(); viewsLabel();
     sizeAll(); draw(); charts();
   }
 
@@ -686,8 +687,16 @@
     }
   }
   function seek(t) { S.t = Math.max(0, Math.min(S.D.dur - 1, t)); if (S.el.big) { S.el.big.remove(); S.el.big = null; } draw(); charts(); ui(); }
+  // 14.11.2026 (owner): the views of the detailed analysis - counted when the match is actually played (once per page; the server
+  // counts a viewer once a day)
+  function countView() {
+    if (S.viewed) return; S.viewed = true;
+    fetch('/replay/api/r/' + S.rid + '/view', { method: 'POST' }).then(r => r.json()).then(j => { S.views = j.views; viewsLabel(); }).catch(() => {});
+  }
+  function viewsLabel() { const e = document.getElementById('simViews'); if (e) e.textContent = S.views ? '👁 ' + S.views : ''; }
   function toggle(on) {
     S.playing = on != null ? on : !S.playing;
+    if (S.playing) countView();
     if (S.playing && S.t >= S.D.dur - 1.01) S.t = 0;
     S.last = performance.now(); ui();
     if (S.playing && !S.raf) S.raf = requestAnimationFrame(loop);

@@ -34,9 +34,12 @@ with idb() as c:
     # the replay pool of the launcher (13.11.2026): the game version, who put the replay in, their description, where it came from
     have = {r[1] for r in c.execute('PRAGMA table_info(replays)')}
     for col, typ in (('vhash', 'TEXT'), ('author', 'TEXT'), ('author_steam', 'TEXT'), ('descr', 'TEXT'), ('source', 'TEXT'), ('src_link', 'TEXT'),
-                     ('hidden', 'TEXT')):
+                     ('hidden', 'TEXT'), ('views', 'INTEGER DEFAULT 0')):
         if col not in have: c.execute(f'ALTER TABLE replays ADD COLUMN {col} {typ}')
     c.execute('CREATE INDEX IF NOT EXISTS replays_author ON replays (author_steam)')
+    # 14.11.2026 (owner): views of the match player (the detailed analysis), one per viewer per day; a viewer = a daily hash of
+    # the address, the address itself is not kept
+    c.execute('CREATE TABLE IF NOT EXISTS views_seen (rid TEXT, who TEXT, day TEXT, PRIMARY KEY (rid, who, day))')
     hide_backfill = 'hidden' not in have
 
 # The game version a replay was recorded on: bytes 4..7 of the file are a checksum of the game data (one per Elite release,
@@ -143,9 +146,9 @@ def race_key(r):
 def mode_of(pl):
     teams = {p.get('team') for p in pl}; per = max(1, len(pl) // max(1, len(teams)))
     return '%dv%d' % (per, per) if len(teams) == 2 else ('ffa' if len(teams) > 2 else '?')
-COLS = 'rid, name, lobby, map, players, ticks, recorded, uploaded, uploads, vhash, author, author_steam, descr, source, src_link, hidden'
+COLS = 'rid, name, lobby, map, players, ticks, recorded, uploaded, uploads, vhash, author, author_steam, descr, source, src_link, hidden, views'
 def item(r, steam=None):
-    rid, name, lobby, mp, pl, ticks, rec, up, ups, vh, author, a_steam, descr, source, link, hidden = r
+    rid, name, lobby, mp, pl, ticks, rec, up, ups, vh, author, a_steam, descr, source, link, hidden, views = r
     ai = bot_match(pl); pl = json.loads(pl or '[]'); cap = f'{STORE}/{rid}/caption.txt'
     return {'id': rid, 'name': name, 'lobby': lobby, 'map': mp, 'mode': mode_of(pl), 'nplayers': len(pl), 'players': pl,
             'races': sorted({race_key(p.get('race')) for p in pl}), 'duration': (ticks or 0) // 10, 'recorded': rec, 'uploaded': up,
@@ -153,7 +156,7 @@ def item(r, steam=None):
             'source': source or ('ladder' if (lobby or '').startswith('MM-') else 'site'), 'src_link': link,
             'mine': bool(steam and a_steam == steam), 'caption': open(cap).read() if os.path.exists(cap) else None,
             'sim': os.path.exists(f'{STORE}/{rid}/sim.json.gz'), 'sim_ok': vh in SIM_VERSIONS and (ticks or 0) >= 300 and not ai,
-            'ai': ai, 'hidden': bool(hidden)}
+            'ai': ai, 'hidden': bool(hidden), 'views': views or 0}
 def ai_mode(v):   # the lists' "ai": '' (default: no hidden ones) / 'all' (true, 1) / 'none' (false, 0: no match with a computer at all)
     if v is None or v == '': return ''
     if v is True or str(v).lower() in ('all', '1', 'true', 'yes'): return 'all'
@@ -398,6 +401,21 @@ def sim_builder():
         except Exception as e: print('sim_builder', repr(e), flush=True)
         time.sleep(5)
 
+def _view_salt():
+    f = f'{STORE}/.view_salt'
+    if not os.path.exists(f): open(f, 'w').write(hashlib.sha256(os.urandom(32)).hexdigest())
+    return open(f).read().strip()
+def add_view(rid, ip):
+    """One view of the match player per viewer per day (viewer = sha256(salt, day, address)[:16]); returns the count."""
+    day = time.strftime('%F')
+    who = hashlib.sha256(f'{_view_salt()}|{day}|{ip}'.encode()).hexdigest()[:16]
+    with _ilock, idb() as c:
+        if c.execute('INSERT OR IGNORE INTO views_seen (rid, who, day) VALUES (?, ?, ?)', (rid, who, day)).rowcount:
+            c.execute('UPDATE replays SET views = COALESCE(views, 0) + 1 WHERE rid = ?', (rid,))
+        c.execute('DELETE FROM views_seen WHERE day < ?', (time.strftime('%F', time.localtime(time.time() - 3 * 86400)),))
+        r = c.execute('SELECT views FROM replays WHERE rid = ?', (rid,)).fetchone()
+    return (r and r[0]) or 0
+
 def queue_story(rid, lang):
     # историю пишет отдельный процесс (replay_story_worker от root, Claude без инструментов): у этого сервиса
     # нет доступа ни к логину Claude, ни к ключам. Заявка — файл в очереди, результат — story_<lang>.md в папке разбора.
@@ -565,6 +583,10 @@ class H(BaseHTTPRequestHandler):
                 analyse(rid)
             elif os.path.exists(tmp): os.remove(tmp)
             return self.out(200, json.dumps({'id': rid, 'mine': bool(u)}), 'application/json')
+        m = re.match(r'^/replay/api/r/([0-9a-f]{16})/view$', p)
+        if m:                                         # the match player was started (counted once per viewer per day)
+            if not os.path.exists(f'{STORE}/{m.group(1)}/sim.json.gz'): return J(404, {'error': 'not_found'})
+            return J(200, {'views': add_view(m.group(1), client_ip(self))})
         m = re.match(r'^/replay/api/r/([0-9a-f]{16})/sim$', p)
         if m:                                         # ask for the detailed analysis (the game's own simulation)
             if not os.path.exists(f'{STORE}/{m.group(1)}/replay.rec'): return J(404, {'error': 'not_found'})
