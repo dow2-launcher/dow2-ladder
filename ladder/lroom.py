@@ -659,7 +659,10 @@ def api(verb, steam, d):
                 return {'ok': True, 'ticket': {'room': r['id'], 'game': r['game'], 'ver': r['ver'], 'mode': r['mode'], 'watch': True, 'pre': True,
                                                'go_at': go_at, 'go_in_ms': go_in, 'ttl': ttl}}
             races = _races(r['game']); hero = _heroes(r).get(steam, -1)
+            # the room's options and observer seats for every player: the host is not known yet, only the host's game writes them
+            # (MMFind: the options of the AUTOMATCH room it hosts), and the match is often made before the final ticket arrives
             return {'ok': True, 'ticket': {'room': r['id'], 'game': r['game'], 'ver': r['ver'], 'mode': r['mode'], 'pre': True, 'go_at': go_at, 'go_in_ms': go_in,
+                                           'opts': _opt_values(r), 'obs': min(len(r.get('obs') or []), _obs_cap(r)) if _obs_native() else 0,
                                            'race': me['race'], 'race_ui': -1 if me['race'] == 'random' else races.get(me['race'], {}).get('ui', -1),
                                            'hero': hero, 'ttl': ttl}}
         if r['state'] != 'launching' or not la: return {'ok': False, 'error': 'state'}
