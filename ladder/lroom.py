@@ -41,6 +41,7 @@ PING_GAP = 30               # s between two pings of one kind in one room
 PING_TTL = 30               # s the pinged player has to answer (the launcher's window)
 INVITE_TTL = 180            # s an invitation stays on the invited player's screen
 CD = 10                     # s of the countdown once everybody is ready (as the game's lobby)
+GO_EARLY = float(__import__('os').environ.get('LROOM_GO_EARLY', '1.5'))   # s: a game's search this much before the countdown's end launches the room (go_at)
 HERE_GONE = 45              # s without a heartbeat from his launcher: out of the room (only while it is in its lobby)
 LAUNCH_WAIT = int(__import__('os').environ.get('LROOM_LAUNCH_WAIT', '150'))   # s from the end of the countdown to every game in the search
 PLAY_KEEP = 3 * 3600        # s a room stays "playing" without a word of the match's end
@@ -49,6 +50,11 @@ SPOIL_KINDS = ('late', 'version', 'race', 'left_search', 'game_failed', 'match',
 NAME_MAX = 48
 ELITE_ORDER = ['space_marines', 'chaos_marines', 'eldar', 'orks', 'tyranids', 'imperial_guard', 't_tau', 'ordo_malleus']
 VAN_RACES = ['chaos_marines', 'eldar', 'imperial_guard', 'orks', 'space_marines', 'tyranids']   # the vanilla drop-down order (its UI index)
+# 14.11.2026 (siritos fb 1062): a room's observers through the native automatch (MMFind 0.51 RoomObservers=1): the observer's game
+# searches as a player does (mm/native "watch"), joins the room's match as a watcher of team = number of teams, the host's MMFind
+# opens observer seats ("obs" in the host's ticket). Not verified with 2-3 accounts: only with this file (default: off).
+OBS_NATIVE_FLAG = __import__('os').path.join(__import__('os').path.dirname(__import__('os').path.dirname(__import__('os').path.abspath(__file__))), 'data', 'lroom_obs_native.on')
+def _obs_native(): return __import__('os').path.exists(OBS_NATIVE_FLAG)
 
 
 def log(*a): print('lroom:', *a, flush=True)
@@ -295,17 +301,28 @@ def _launch(r, now):
         return c if c is not None else 99999
     order = _members(r)
     host = min(order, key=lambda s: (cost(s), s != r['owner'], order.index(s)))
-    races = _races(r['game']); heroes = {}
-    for s in r['slots']:
-        if s['race'] == 'random': heroes[s['steam']] = -1                      # the game rolls race and hero (Random on Find a Game)
-        elif s['hero'] is None or s['hero'] < 0: heroes[s['steam']] = random.randrange(max(1, races.get(s['race'], {}).get('heroes', 3)))
-        else: heroes[s['steam']] = s['hero']
+    heroes = _heroes(r)
     mp = random.choice(r['maps']) if r['maps'] else r['map']                  # one of the room's maps, at random
     r['launch'] = {'t': now, 'deadline': now + LAUNCH_WAIT, 'relay': pick, 'host': host, 'heroes': heroes, 'map': mp,
                    'teams': [[s['steam'] for s in r['slots'][:n]], [s['steam'] for s in r['slots'][n:]]], 'match': None, 'room': None}
     r['state'] = 'launching'; r['note'] = None
     for s in r['slots'] + r.setdefault('obs', []): s['gst'] = 'starting'; s['gst_t'] = now
     log('room %s: launch - %s %s (of %s), host %s, relay %r (worst %s ms), teams %s' % (r['id'], r['mode'], mp, r['maps'], host, pick, net['worst'], r['launch']['teams']))
+
+
+def _heroes(r):
+    """the heroes of the launch: a seat's own, a random one rolled once per countdown (14.11.2026: the pre-ticket of the countdown
+    already names it, so the game's walk during the countdown takes the hero the match gets)"""
+    pre = r.get('pre') or {}
+    if pre.get('cd') == r.get('cd') and set(pre.get('heroes') or {}) == {s['steam'] for s in r['slots'] if s}: return dict(pre['heroes'])
+    races = _races(r['game']); heroes = {}
+    for s in r['slots']:
+        if not s: continue
+        if s['race'] == 'random': heroes[s['steam']] = -1                      # the game rolls race and hero (Random on Find a Game)
+        elif s['hero'] is None or s['hero'] < 0: heroes[s['steam']] = random.randrange(max(1, races.get(s['race'], {}).get('heroes', 3)))
+        else: heroes[s['steam']] = s['hero']
+    r['pre'] = {'cd': r.get('cd'), 'heroes': dict(heroes)}
+    return heroes
 
 
 def _cancel_launch(r, k, who=(), **kw):
@@ -333,6 +350,8 @@ def _cancel_launch(r, k, who=(), **kw):
 def on_nm_join(steam, p, hint, d):
     """a native search came in (own_lobby nm/join): a player of a room that launches goes into that room's pool. True = taken"""
     r = ROOMS.get(BY.get(steam) or '')
+    if r and _obs(r, steam) and (hint or {}).get('watch') and str((hint or {}).get('room') or '') == r['id']:
+        return _nm_watch_join(r, steam, p)                                   # 14.11.2026: an observer's native search (MMFind 0.51)
     if not r or r['state'] != 'launching' or (r.get('launch') or {}).get('match'): return False
     hr = str((hint or {}).get('room') or '')
     if hr and hr != r['id']: return False                                    # MMFind searches for another room: not this one
@@ -362,6 +381,27 @@ def on_nm_join(steam, p, hint, d):
     log('room %s: %s is in the search (%s)' % (r['id'], steam, p['pool']))
     _assemble(r)
     _pub(r)
+    return True
+
+
+def _nm_watch_join(r, steam, p):
+    """an observer's game searches natively for this room ("watch" in its mm/native): with lroom_obs_native.on he waits in the room's
+    pool and goes into its match as a watcher (team = number of teams, ladder _nm_view); without it, or too late, his search ends
+    (MMFind tells the launcher). He never blocks or calls off the players' start."""
+    now = time.time(); la = r.get('launch') or {}; m = L.MM_MATCHES.get(la.get('match')) if la.get('match') else None
+    why = None
+    if not _obs_native(): why = 'launcher room: observers through the automatch are off on the server'
+    elif r['state'] != 'launching': why = 'launcher room: not starting a match now'
+    elif la.get('match') and (not m or m.get('state') == 'playing'): why = 'launcher room: the match started without this observer'
+    if why:
+        L.MM.pop(steam, None)
+        L.MM_CANCELLED[steam] = {'by': why, 'match': 'lroom-' + r['id'], 't': now, 'again': False, 'native': True}
+        log('room %s: observer %s searched natively - %s' % (r['id'], steam, why))
+        return True
+    p.update(lroom=r['id'], pool='lroom-watch:%s|%s' % (r['id'], p.get('pool') or ''), party='', party_of=[], nm_watch=True)
+    o = _obs(r, steam); o['gst'] = 'searching'; o['gst_t'] = now
+    log('room %s: observer %s is in the search (native, as a watcher)' % (r['id'], steam))
+    _watch_in(r); _pub(r)
     return True
 
 
@@ -399,7 +439,7 @@ def _watch_in(r):
     if not m or m.get('state') == 'playing': return
     for o in r.setdefault('obs', []):
         p = L.MM.get(o['steam'])
-        if not p or p.get('lroom') != r['id'] or p['state'] != 'searching' or p['mode'] != L.WATCH: continue
+        if not p or p.get('lroom') != r['id'] or p['state'] != 'searching' or (p['mode'] != L.WATCH and not p.get('nm_watch')): continue
         if len(m['watchers']) >= _obs_cap(r): break
         m['watchers'].append(o['steam']); p.update(state='matched', match=mid, role='watcher')
         m['players'][o['steam']] = {'name': p.get('name') or 'Player', 'watcher': True}
@@ -413,6 +453,9 @@ def on_watch_join(steam, p, d):
     rid = str((d or {}).get('lroom') or '')
     if not rid: return False
     r = ROOMS.get(BY.get(steam) or '')
+    if r and r['id'] == rid and r['state'] == 'countdown' and time.time() >= r['cd'] - GO_EARLY and _all_ready(r, time.time()):
+        log('room %s: an observer searches %.2f s before the countdown ends - the launch now' % (r['id'], r['cd'] - time.time()))
+        _launch(r, time.time())                                               # 14.11.2026: go_at by the observer's own clock, a little early
     if not r or r['id'] != rid or not _obs(r, steam) or r['state'] != 'launching':
         L.MM.pop(steam, None)
         L.MM_CANCELLED[steam] = {'by': 'launcher room: not starting a match with this observer', 'match': 'lroom-' + rid, 't': time.time(), 'again': False}
@@ -605,6 +648,18 @@ def api(verb, steam, d):
     if verb == 'get': return {'ok': True, 'room': view(r)}
     if verb == 'ticket':                                                    # what MMFind needs, only for the player himself
         la = r.get('launch')
+        if r['state'] == 'countdown':
+            # 14.11.2026 (siritos fb 1062, MMFind 0.51 "go_at"): the pre-ticket of the countdown - the launcher gives it to MMFind at the
+            # countdown's start, the game walks to Find a Game meanwhile and presses Start Searching at go_at (= the countdown's end).
+            # No host / options / map yet (the launch decides them): the launcher sends the full ticket again after the countdown.
+            go_at = int(r['cd'] * 1000); ttl = LAUNCH_WAIT; go_in = max(0, int((r['cd'] - now) * 1000))   # go_in_ms: for the launcher's own clock
+            if ob:
+                return {'ok': True, 'ticket': {'room': r['id'], 'game': r['game'], 'ver': r['ver'], 'mode': r['mode'], 'watch': True, 'pre': True,
+                                               'go_at': go_at, 'go_in_ms': go_in, 'ttl': ttl}}
+            races = _races(r['game']); hero = _heroes(r).get(steam, -1)
+            return {'ok': True, 'ticket': {'room': r['id'], 'game': r['game'], 'ver': r['ver'], 'mode': r['mode'], 'pre': True, 'go_at': go_at, 'go_in_ms': go_in,
+                                           'race': me['race'], 'race_ui': -1 if me['race'] == 'random' else races.get(me['race'], {}).get('ui', -1),
+                                           'hero': hero, 'ttl': ttl}}
         if r['state'] != 'launching' or not la: return {'ok': False, 'error': 'state'}
         if ob:                                                              # an observer: MMFind's Watch with the room's id
             return {'ok': True, 'ticket': {'room': r['id'], 'game': r['game'], 'ver': r['ver'], 'mode': r['mode'], 'map': la.get('map') or r['map'],
@@ -614,7 +669,9 @@ def api(verb, steam, d):
                                        'opts': _opt_values(r) if la['host'] == steam else {},
                                        'race': me['race'], 'race_ui': -1 if me['race'] == 'random' else races.get(me['race'], {}).get('ui', -1),
                                        'hero': hero, 'host': la['host'] == steam, 'deadline': int(la['deadline']), 'relay': la.get('relay') or '',
-                                       'ttl': max(0, int(la['deadline'] - now))}}     # 0.48: how long the game may still take to search
+                                       'ttl': max(0, int(la['deadline'] - now)),      # 0.48: how long the game may still take to search
+                                       # 14.11.2026: the host's observer seats (MMFind 0.51 RoomObservers=1), only with the native observers on
+                                       'obs': min(len(r.get('obs') or []), _obs_cap(r)) if la['host'] == steam and _obs_native() else 0}}
     if verb == 'game':                                                      # what his game does now (the launcher hears it from MMFind)
         ev = _clean(d.get('ev'), 24) or ''
         if ob:                                                              # an observer's game: told, never calls the start off
@@ -799,6 +856,11 @@ def launching_member(room, steam, watch=False):
     """MMFind asks before it searches for a room (mm/native with "room"): is that room starting a match with him in it now.
     An observer only for a watch search ("watch": true - an older MMFind would search as a player with his ticket)"""
     r = ROOMS.get(str(room))
+    # 14.11.2026 (MMFind 0.51 go_at): the games press Start Searching at the countdown's end by their own clock - a game a little
+    # early (its clock, the ladder's 0.5 s tick) launches the room now, if the countdown ends within GO_EARLY s; never earlier
+    if r and r['state'] == 'countdown' and time.time() >= r['cd'] - GO_EARLY and _all_ready(r, time.time()):
+        log('room %s: a game searches %.2f s before the countdown ends - the launch now' % (r['id'], r['cd'] - time.time()))
+        _launch(r, time.time()); _pub(r)
     if not r or r['state'] != 'launching': return False
     if watch: return bool(_obs(r, steam))
     return steam in _members(r) and not (r.get('launch') or {}).get('match')

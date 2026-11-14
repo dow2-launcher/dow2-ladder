@@ -1604,6 +1604,15 @@ def _nm_view(p):  # under MM_LOCK: what own_lobby needs to answer the game
     if 'relay' not in m:                                 # once per match, by the players' pings (MMFind's hint); '' = own_lobby picks
         m['relay'] = _best_relay(order, chain=True)
         print('mm: native match %s relay %r (pings %s)' % (m['id'], m['relay'], [(MM.get(s_) or {}).get('ping') for s_ in order]), flush=True)
+    if p.get('role') == 'watcher' and p.get('nm_watch'):  # 14.11.2026: a launcher room's observer through the native automatch (lroom.py):
+        # the game joins the host's room as a participant of the team after the last one (the host's MMFind 0.51 built observer seats
+        # of that team); his own list has him (the host never sees it - the host's list stays the players')
+        players = [(MM.get(s) or {}).get('pid') or 0 for s in order]
+        return {'state': 'matched', 'match': m['id'], 'mode': m['mode'], 'host_steam': m['host_steam'], 'role': 'watcher',
+                'host_pid': (MM.get(m['host_steam']) or {}).get('pid') or 0, 'team': 2, 'teams': 2, 'size': TEAM_N[m['mode']],
+                'map': m.get('map') or '', 'steams': order, 'pids': players + [p.get('pid') or 0], 'relay': m.get('relay') or '',
+                'room': m.get('room'), 'joined': sorted(m.get('joined') or []), 'unrated': bool(m.get('unrated')), 'lroom': m.get('lroom') or '',
+                'watchers': list(m.get('watchers') or [])}
     return {'state': 'matched', 'match': m['id'], 'mode': m['mode'], 'host_steam': m['host_steam'],
             'host_pid': (MM.get(m['host_steam']) or {}).get('pid') or 0, 'team': 0 if p['steam'] in m['host'] else 1,
             'teams': 2, 'size': TEAM_N[m['mode']], 'map': m.get('map') or '', 'steams': order,
@@ -1719,7 +1728,7 @@ def nm_sync(d):
                 continue
             c = MM_CANCELLED.get(steam)
             if c and now - c['t'] < 300: out[steam] = {'state': 'cancelled', 'match': c['match'], 'by': c['by'], 'again': bool(c.get('again'))}; continue
-            m = next((m for m in MM_PLAYING.values() if steam in m['host'] + m['guest']), None)
+            m = next((m for m in MM_PLAYING.values() if steam in m['host'] + m['guest'] + m.get('watchers', [])), None)   # a watcher too (14.11)
             out[steam] = {'state': 'playing', 'match': m['id']} if m else {'state': 'idle'}
     return out
 
@@ -1748,6 +1757,8 @@ def nm_started(d):
         try: _history_add(m)
         except Exception as e: print('mm: history of %s: %r' % (m['id'], e), flush=True)
         for s in m['host'] + m['guest']: MM.pop(s, None)
+        for s in m.get('watchers', []):                  # 14.11.2026: a native watcher's search is over too (MMFind 0.50's own watch keeps its poll)
+            if (MM.get(s) or {}).get('nm_watch'): MM.pop(s, None)
         MM_MATCHES.pop(m['id'], None)
         if m.get('lroom'): lroom.on_match_started(m)
         try: live.register(m)
@@ -1773,7 +1784,12 @@ def nm_fail(d):  # own_lobby knows better (a join refused, the host's game left 
     with MM_LOCK:
         m = MM_MATCHES.get(str(d.get('match') or '')) or _nm_by_room(d.get('room'))
         if not m or not m.get('native'): return {'ok': False}
-        culprits = [str(s) for s in (d.get('culprits') or []) if str(s) in m['host'] + m['guest']]
+        given = [str(s) for s in (d.get('culprits') or [])]
+        culprits = [s for s in given if s in m['host'] + m['guest']]
+        watchers = [s for s in given if s in m.get('watchers', [])]
+        if given and not culprits:                       # 14.11.2026: only observers failed (a join refused, ...): only they are out
+            if watchers and m.get('lroom'): lroom.on_match_failed(m, watchers, _clean(d.get('why'), 60) or 'failed')
+            return {'ok': True, 'ignored': not watchers}
         _nm_fail(m, culprits, _clean(d.get('why'), 60) or 'failed')
         return {'ok': True}
 
