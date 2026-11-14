@@ -55,6 +55,8 @@ VAN_RACES = ['chaos_marines', 'eldar', 'imperial_guard', 'orks', 'space_marines'
 # opens observer seats ("obs" in the host's ticket). Not verified with 2-3 accounts: only with this file (default: off).
 OBS_NATIVE_FLAG = __import__('os').path.join(__import__('os').path.dirname(__import__('os').path.dirname(__import__('os').path.abspath(__file__))), 'data', 'lroom_obs_native.on')
 def _obs_native(): return __import__('os').path.exists(OBS_NATIVE_FLAG)
+GO_EARLY_OFF = OBS_NATIVE_FLAG.replace('lroom_obs_native.on', 'lroom_go_early.off')   # data/lroom_go_early.off: no early launch (go_at)
+def _go_early(r, now): return r['state'] == 'countdown' and now >= r['cd'] - GO_EARLY and _all_ready(r, now) and not __import__('os').path.exists(GO_EARLY_OFF)
 
 
 def log(*a): print('lroom:', *a, flush=True)
@@ -453,7 +455,7 @@ def on_watch_join(steam, p, d):
     rid = str((d or {}).get('lroom') or '')
     if not rid: return False
     r = ROOMS.get(BY.get(steam) or '')
-    if r and r['id'] == rid and r['state'] == 'countdown' and time.time() >= r['cd'] - GO_EARLY and _all_ready(r, time.time()):
+    if r and r['id'] == rid and _go_early(r, time.time()):
         log('room %s: an observer searches %.2f s before the countdown ends - the launch now' % (r['id'], r['cd'] - time.time()))
         _launch(r, time.time())                                               # 14.11.2026: go_at by the observer's own clock, a little early
     if not r or r['id'] != rid or not _obs(r, steam) or r['state'] != 'launching':
@@ -858,7 +860,7 @@ def launching_member(room, steam, watch=False):
     r = ROOMS.get(str(room))
     # 14.11.2026 (MMFind 0.51 go_at): the games press Start Searching at the countdown's end by their own clock - a game a little
     # early (its clock, the ladder's 0.5 s tick) launches the room now, if the countdown ends within GO_EARLY s; never earlier
-    if r and r['state'] == 'countdown' and time.time() >= r['cd'] - GO_EARLY and _all_ready(r, time.time()):
+    if r and _go_early(r, time.time()):
         log('room %s: a game searches %.2f s before the countdown ends - the launch now' % (r['id'], r['cd'] - time.time()))
         _launch(r, time.time()); _pub(r)
     if not r or r['state'] != 'launching': return False
