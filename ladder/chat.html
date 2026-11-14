@@ -78,6 +78,34 @@ header .back { margin-left:auto; font:700 13px Cinzel,serif; letter-spacing:.05e
   color:#f3d9b7; padding:10px 16px; border-radius:6px; max-width:90%; text-align:center; opacity:0; transition:opacity .2s; pointer-events:none; z-index:10; }
 .toast.on { opacity:1; }
 .toast.ok { border-color:var(--green); }
+/* Reply (13.11.2026, as in the launcher 1.6.3, variant A): the arrow after the name and the time, seen on hover of a message; the
+   quote of the original over a reply's text; "Ответ <name>: ..." over the input */
+.m .h { display:flex; align-items:center; flex-wrap:wrap; }
+.m .h b { margin-right:4px; }
+.m .rpl { display:inline-grid; place-items:center; height:20px; padding:0 4px; margin-left:6px; border:0; background:none; color:var(--muted);
+  cursor:pointer; opacity:0; transition:opacity .12s, color .12s, filter .12s; }
+.m .rpl svg, .rbar svg { width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+.m:hover .rpl, .m .rpl:focus-visible { opacity:1; }
+.m .rpl:hover, .m .rpl:focus-visible { color:var(--gold2); filter:drop-shadow(0 0 4px rgba(217,178,95,.7)); outline:none; }
+@media (hover:none) { .m .rpl { opacity:.6; } }
+.m .rq { display:flex; flex-direction:column; gap:1px; max-width:100%; margin:3px 0 2px; padding:2px 8px; border-left:2px solid var(--gold);
+  background:rgba(217,178,95,.07); cursor:pointer; font-size:13px; line-height:1.35; }
+.m .rq b { color:var(--gold2); font-weight:600; }
+.m .rq i { font-style:normal; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.m .rq:hover, .m .rq:focus-visible { background:rgba(217,178,95,.14); outline:none; }
+.m .rq.del { cursor:default; border-left-color:var(--line); }
+.m .rq.del i { font-style:italic; }
+.m.tome { box-shadow:inset 2px 0 0 var(--gold); background:rgba(217,178,95,.05); padding-left:8px; }
+.m.flash { animation:chflash 1.4s ease; }
+@keyframes chflash { 0%,40% { background:rgba(217,178,95,.22); } 100% { background:transparent; } }
+@media (prefers-reduced-motion:reduce) { .m.flash { animation:none; } }
+.rbar { display:flex; align-items:center; gap:8px; padding:5px 10px; border:1px solid #5a4a2e; border-bottom:0; border-radius:5px 5px 0 0;
+  background:var(--panel2); font-size:14px; }
+.rbar svg { flex:none; stroke:var(--gold); width:15px; height:15px; }
+.rbar .rb-t { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--muted); }
+.rbar .rb-t b { color:var(--gold2); font-weight:600; }
+.rbar button { border:0; background:none; color:var(--muted); font-size:18px; line-height:1; cursor:pointer; padding:0 2px; }
+.rbar button:hover { color:var(--text); }
 </style>
 </head>
 <body>
@@ -108,6 +136,7 @@ header .back { margin-left:auto; font:700 13px Cinzel,serif; letter-spacing:.05e
         Войти через Steam
       </button>
     </div>
+    <div id="rbar" class="rbar" role="status" style="display:none"></div>
     <div id="composer" class="send" style="display:none">
       <textarea id="txt" rows="2" maxlength="500" placeholder="Сообщение… (Enter — отправить, Shift+Enter — перенос)"></textarea>
       <button id="sendBtn">Отправить</button>
@@ -125,7 +154,7 @@ let toastT;
 function toast(msg, ok) { const t = $('toast'); t.textContent = msg; t.className = 'toast on' + (ok ? ' ok' : ''); clearTimeout(toastT); toastT = setTimeout(() => t.className = 'toast', 3500); }
 
 const PAGE = 20;   // last 20 on first load; older pulled in on scroll-up
-const CH = { room: 'all', me: null, last: {}, first: {}, lists: {}, noMore: {}, busy: {} };
+const CH = { room: 'all', me: null, last: {}, first: {}, lists: {}, noMore: {}, busy: {}, features: [], replyTo: null };
 try { CH.room = localStorage.getItem('chRoom') || 'all'; } catch (e) {}
 
 function avatar(src) { return src ? `<img src="${esc(src)}" alt="" loading="lazy">` : `<img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E" alt="">`; }
@@ -133,8 +162,46 @@ function when(ts) { const d = new Date(ts * 1000); const now = new Date(); const
   return d.toDateString() === now.toDateString() ? t : d.toLocaleDateString('ru', { day: '2-digit', month: '2-digit' }) + ' ' + t; }
 function body(text) { return esc(text).replace(/(^|\s)(@[^\s@]{1,32})/g, (m, s, a) => s + '<span class="at">' + a + '</span>'); }
 
+// Reply: only on a server that says it can (msgs: features ["reply"]) and only signed in, like sending. The message goes with
+// reply_to and comes back with the quote of its original (reply: {id, steam, name, text, ru, en} or {id, deleted}); a click on
+// the quote scrolls to the original (older pages pulled in for it, up to 5) and lights it up.
+const ARROW = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5A5.5 5.5 0 0 1 20 14.5v0A5.5 5.5 0 0 1 14.5 20H12"/></svg>';
+const replyOn = () => (CH.features || []).includes('reply') && !!(CH.me && CH.me.signed_in);
+const quoteText = q => (CH.room === 'ru' ? q.ru : CH.room === 'en' ? q.en : null) || q.text || '';
+function setFeatures(f) {
+  if (!Array.isArray(f)) return;
+  const was = replyOn(); CH.features = f;
+  if (was !== replyOn()) { if (!replyOn()) CH.replyTo = null; renderReplyBar(); renderMsgs(); }
+}
+function renderReplyBar() {
+  const b = $('rbar'), r = replyOn() ? CH.replyTo : null;
+  b.style.display = r ? 'flex' : 'none';
+  if (!r) { b.innerHTML = ''; return; }
+  b.innerHTML = `${ARROW}<span class="rb-t">Ответ <b>${esc(r.name)}</b>: <span>${esc(r.text)}</span></span>`
+    + `<button type="button" id="rbarX" title="Отменить ответ (Esc)" aria-label="Отменить ответ (Esc)">×</button>`;
+  $('rbarX').onclick = () => { CH.replyTo = null; renderReplyBar(); $('txt').focus(); };
+}
+function replyStart(id) {
+  if (!replyOn()) { toast('Войдите, чтобы писать'); return; }
+  const m = (CH.lists[CH.room] || []).find(x => String(x.id) === String(id)); if (!m) return;
+  CH.replyTo = { id: m.id, name: m.name || 'Player', text: String(m.text || '').slice(0, 140) };
+  renderReplyBar(); $('txt').focus();
+}
+async function gotoMsg(id) {
+  const box = $('msgs'), r = CH.room;
+  for (let i = 0; i < 6; i++) {
+    const el = box.querySelector(`.m[data-id="${CSS.escape(String(id))}"]`);
+    if (el) { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); return; }
+    const list = CH.lists[r] || [];
+    if (CH.noMore[r] || !list.length || list[0].id < id || r !== CH.room) return;   // not in the history any more
+    await loadOlder(r);
+  }
+}
+
 function renderMe() {
   const m = CH.me && CH.me.signed_in ? CH.me : null;
+  if (!m) CH.replyTo = null;
+  renderReplyBar();
   $('meBox').style.display = m ? 'flex' : 'none';
   $('signin').style.display = m ? 'none' : 'block';
   $('composer').style.display = m ? 'flex' : 'none';
@@ -176,9 +243,16 @@ function renderMsgs(opts) {
   const atEnd = box.scrollTop + box.clientHeight > box.scrollHeight - 40;
   const prevH = box.scrollHeight, prevTop = box.scrollTop;
   const top = CH.noMore[CH.room] || !list.length ? '' : '<div class="older" id="older">↑ прокрутите вверх — больше истории</div>';
-  box.innerHTML = list.length ? top + list.map(x =>
-    `<div class="m">${avatar(x.avatar)}<div class="b"><div class="h"><b class="nk" data-nm="${esc(x.name || 'Player')}">${esc(x.name || 'Player')}</b> · ${when(x.ts)}</div><div class="t">${body(x.text)}</div></div></div>`
-  ).join('') : `<div class="empty">Пока никто не писал. Будьте первым.</div>`;
+  const mine = CH.me && CH.me.signed_in ? String(CH.me.steam || '') : '', rOn = replyOn();
+  const quote = q => !q ? '' : q.deleted ? `<div class="rq del"><i>Сообщение удалено</i></div>`
+    : `<div class="rq" data-goto="${esc(String(q.id))}" role="button" tabindex="0" title="Показать сообщение"><b>${esc(q.name || 'Player')}</b><i>${esc(quoteText(q))}</i></div>`;
+  box.innerHTML = list.length ? top + list.map(x => {
+    const own = mine && String(x.steam) === mine;
+    const toMe = mine && !own && x.reply && !x.reply.deleted && String(x.reply.steam) === mine;   // a reply to me: lit like a mention
+    const rpl = rOn && x.id && !own ? `<button class="rpl" data-reply="${esc(String(x.id))}" title="Ответить" aria-label="Ответить">${ARROW}</button>` : '';
+    return `<div class="m${toMe ? ' tome' : ''}" data-id="${esc(String(x.id))}">${avatar(x.avatar)}<div class="b"><div class="h"><b class="nk" data-nm="${esc(x.name || 'Player')}">${esc(x.name || 'Player')}</b> · ${when(x.ts)}${rpl}</div>`
+      + quote(x.reply) + `<div class="t">${body(x.text)}</div></div></div>`;
+  }).join('') : `<div class="empty">Пока никто не писал. Будьте первым.</div>`;
   if (opts.keepTop) box.scrollTop = box.scrollHeight - prevH + prevTop;   // prepended older: hold the view steady
   else if (opts.toEnd || atEnd) box.scrollTop = box.scrollHeight;
 }
@@ -198,6 +272,7 @@ async function load(room) {
     CH.first[r] = CH.first[r] ? Math.min(CH.first[r], m.id) : m.id;
   });
   if (firstLoad && d.msgs.length < PAGE) CH.noMore[r] = true;   // whole history already fits in the first page
+  setFeatures(d.features);   // Reply only where the server can do it
   if (added && r === CH.room) renderMsgs();
 }
 
@@ -222,9 +297,10 @@ async function send() {
   const el = $('txt'), text = el.value.trim();
   if (!text) return;
   $('sendBtn').disabled = true; el.value = '';
+  const rt = replyOn() && CH.replyTo ? CH.replyTo.id : 0;
   try {
-    const r = await api('say', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ room: CH.room, text }) });
-    if (r && r.ok) { await load(CH.room); $('msgs').scrollTop = $('msgs').scrollHeight; }
+    const r = await api('say', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ room: CH.room, text }, rt ? { reply_to: rt } : {})) });
+    if (r && r.ok) { if (CH.replyTo && CH.replyTo.id === rt) { CH.replyTo = null; renderReplyBar(); } await load(CH.room); $('msgs').scrollTop = $('msgs').scrollHeight; }
     else { el.value = text; toast((r && r.error) || 'Не отправлено'); }
   } catch (e) { el.value = text; toast('Сеть недоступна'); }
   $('sendBtn').disabled = false; el.focus();
@@ -252,7 +328,10 @@ document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', 
 
 $('steamBtn').onclick = signIn;
 $('sendBtn').onclick = send;
-$('txt').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
+$('txt').onkeydown = e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  else if (e.key === 'Escape' && CH.replyTo) { e.preventDefault(); CH.replyTo = null; renderReplyBar(); }
+};
 function mention(nm) {
   if (!(CH.me && CH.me.signed_in)) { toast('Войдите, чтобы писать'); return; }
   const el = $('txt'), tag = '@' + nm + ' ';
@@ -263,8 +342,17 @@ function mention(nm) {
   el.focus();
 }
 document.addEventListener('click', e => {
+  const rp = e.target.closest && e.target.closest('[data-reply]');
+  if (rp) { e.preventDefault(); replyStart(rp.getAttribute('data-reply')); return; }
+  const go = e.target.closest && e.target.closest('[data-goto]');
+  if (go) { e.preventDefault(); gotoMsg(Number(go.getAttribute('data-goto'))); return; }
   const t = e.target.closest && e.target.closest('[data-nm]');
   if (t) { e.preventDefault(); mention(t.getAttribute('data-nm')); }
+});
+
+$('msgs').addEventListener('keydown', e => {
+  const go = (e.key === 'Enter' || e.key === ' ') && e.target.closest && e.target.closest('[data-goto]');
+  if (go) { e.preventDefault(); gotoMsg(Number(go.getAttribute('data-goto'))); }
 });
 
 async function showVer() {   // актуальная версия лаунчера: тянем из updater.json (обновляется каждый релиз)
