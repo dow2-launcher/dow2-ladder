@@ -3,7 +3,8 @@
 Загрузка .rec (сырые байты из браузера) → make_report.py → страница результатов с постоянной ссылкой.
 По кнопке — история матча (Claude по выжимке фактов), с суточным лимитом.
 Слушает 127.0.0.1:8215, nginx проксирует /replay/."""
-import gzip, hashlib, html, json, os, re, sqlite3, subprocess, sys, threading, time, urllib.parse
+import gzip, hashlib, html, json, os, re, sqlite3, subprocess, sys, threading, time, unicodedata, urllib.parse, urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 APP = os.path.dirname(os.path.abspath(__file__))            # /srv/replayweb/app — код и парсер, только чтение
 ROOT = os.path.dirname(APP); STORE = ROOT + '/data'; QUEUE = ROOT + '/queue'; PORT = int(os.environ.get('PORT', 8215))
@@ -186,10 +187,100 @@ def version_list():
         v = vname(vh) or 'unknown'; a = agg.setdefault(v, {'version': v, 'count': 0, 'last': 0}); a['count'] += n; a['last'] = max(a['last'], last or 0)
     return sorted(agg.values(), key=lambda a: -a['last'])
 
+# ---------- player ratings on the page (14.11.2026, fb 1088) ----------
+# 1) rating AT MATCH TIME: matches played through our ladder keep every player's rating in mm_history (/ladder/api/history, key = replay id)
+# 2) otherwise the CURRENT Relic rating by profile id (relicstats /stats/api/lobby, name -> line with the profile id; a namesake with another id is dropped)
+# Every player gets 'rating' + 'rating_kind' ('match' | 'now'); nothing when unknown. The lookups never hold the page for long (RATING_WAIT).
+LADDER_API = 'http://127.0.0.1:8217/ladder/api/history'
+RELIC_API = 'http://127.0.0.1:8216/stats/api/lobby'
+RATING_WAIT = 2.0
+_ladder = {'t': 0, 'by': {}}; _now = {}; _now_lock = threading.Lock(); _pool = ThreadPoolExecutor(4)
+def _ladder_refresh():
+    by = {}
+    for off in range(0, 1000, 100):
+        with urllib.request.urlopen(f'{LADDER_API}?n=100&off={off}', timeout=5) as r: d = json.load(r)
+        for it in d.get('items', []):
+            if it.get('replay'): by[it['replay']] = {p.get('pid'): p.get('rating') for p in it.get('players', []) if p.get('rating')}
+        if off + 100 >= d.get('total', 0): break
+    _ladder['by'] = by
+def _ladder_safe():
+    try: _ladder_refresh()
+    except Exception: pass
+def ladder_ratings(rid):
+    if time.time() - _ladder['t'] > 120:
+        first = not _ladder['t']; _ladder['t'] = time.time()      # one refresher at a time; later refreshes run in the background
+        if first: _ladder_safe()
+        else: threading.Thread(target=_ladder_safe, daemon=True).start()
+    return _ladder['by'].get(rid) or {}
+def _relic_fetch(names):
+    qs = '&'.join('n=' + urllib.parse.quote(n[:64]) for n in names)
+    try:
+        with urllib.request.urlopen(f'{RELIC_API}?{qs}', timeout=6) as r: lines = r.read().decode('utf-8', 'replace').splitlines()
+    except Exception: return
+    got = {}
+    for ln in lines:
+        f = ln.split('\t')
+        if len(f) >= 6 and f[1].isdigit() and f[5].isdigit(): got[(f[0], int(f[5]))] = int(f[1])
+    with _now_lock:
+        for n, pid in names.items():
+            _now[pid] = (time.time(), got.get((n, pid)))
+def relic_now(pl):
+    need = {}
+    with _now_lock:
+        for p in pl:
+            pid = p.get('pid')
+            if not p.get('name') or not pid or pid >= 4294967295: continue
+            c = _now.get(pid)
+            if not c or time.time() - c[0] > (3600 if c[1] else 900): need[p['name']] = pid
+    if need:
+        fut = [_pool.submit(_relic_fetch, dict(list(need.items())[i:i + 12])) for i in range(0, len(need), 12)]
+        end = time.time() + RATING_WAIT
+        for f in fut:
+            try: f.result(timeout=max(0.05, end - time.time()))
+            except Exception: pass
+    with _now_lock: return {p['pid']: _now[p['pid']][1] for p in pl if p.get('pid') in _now and _now[p['pid']][1]}
+def add_ratings(it):
+    pl = it.get('players') or []
+    try:
+        at = ladder_ratings(it['id']); rest = [p for p in pl if not at.get(p.get('pid'))]
+        now = relic_now(rest) if rest else {}
+        for p in pl:
+            if at.get(p.get('pid')): p['rating'] = int(at[p['pid']]); p['rating_kind'] = 'match'
+            elif now.get(p.get('pid')): p['rating'] = now[p['pid']]; p['rating_kind'] = 'now'
+    except Exception: pass
+    return it
+
 def replay_meta(rid, steam=None):
     with idb() as c: r = c.execute(f'SELECT {COLS} FROM replays WHERE rid = ?', (rid,)).fetchone()
     if not r: return None
-    it = item(r, steam); it.pop('caption', None); return it
+    it = item(r, steam); it.pop('caption', None); return add_ratings(it)
+
+# ---------- download name (fb 1088): date, players with races per team, map, winner (only when the page's verdict names one: ?w=<team>) ----------
+RACE_TAG = (('imperial_guard', 'IG'), ('space_marines', 'SM'), ('chaos', 'CSM'), ('ordo_malleus', 'OM'), ('ork', 'Orks'), ('eldar', 'Eldar'),
+            ('tau', 'Tau'), ('tyranid', 'Tyr'), ('necron', 'Necrons'))
+def race_tag(r):
+    r = (r or '').lower()
+    for k, t in RACE_TAG:
+        if k in r: return t
+    return re.sub(r'[^A-Za-z0-9]', '', r)[:6]
+def fn_clean(t): return re.sub(r'\s+', ' ', re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f]', '', t or '')).strip(' .')
+def rec_filename(it, win=None, limit=150):
+    pl = [p for p in it.get('players') or [] if p.get('name')]
+    m = re.match(r'(\d+)\.(\d+)\.(\d{4})', it.get('recorded') or '')
+    date = f'{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}' if m else time.strftime('%Y-%m-%d', time.gmtime(it.get('uploaded') or time.time()))
+    teams = sorted({p.get('team') for p in pl}, key=lambda t: (t is None, t))
+    mp = re.sub(r'[^\w\-]+', '_', fn_clean(it.get('map') or 'map')).strip('_') or 'map'
+    wtag = ''
+    if win is not None and len(teams) == 2 and win in teams: wtag = '_win-' + ('Blue', 'Red')[teams.index(win)]
+    for nl in (24, 18, 14, 11, 9, 7, 5, 3):
+        side = lambda t: '+'.join('%s(%s)' % (fn_clean(p['name'])[:nl] or 'player', race_tag(p.get('race'))) for p in pl if p.get('team') == t)
+        mid = '_vs_'.join(side(t) for t in teams) if teams else 'replay'
+        base = f"{date}_{len(pl)}p_{mp}_{mid}" if not re.match(r'\d+p_', mp) else f"{date}_{mp}_{mid}"
+        base += wtag
+        if len(base) <= limit: break
+    return base[:limit].rstrip(' .') + '.rec'
+def disposition(fn):      # ASCII fallback + RFC 5987 name with the real (Unicode) nicks
+    return 'attachment; filename="%s"; filename*=UTF-8\'\'%s' % (re.sub(r'[^A-Za-z0-9._()+\-]', '_', fn), urllib.parse.quote(fn, safe="()+-._"))
 
 PAGE = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'page.html'), encoding='utf-8').read()
 
@@ -349,8 +440,13 @@ class H(BaseHTTPRequestHandler):
         if m and os.path.exists(f'{STORE}/{m.group(1)}/replay.rec'):
             nm = open(f'{STORE}/{m.group(1)}/name.txt').read() if os.path.exists(f'{STORE}/{m.group(1)}/name.txt') else 'replay.rec'
             b = open(f'{STORE}/{m.group(1)}/replay.rec', 'rb').read()
+            try:
+                w = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get('w', [''])[0]
+                with idb() as c: r = c.execute(f'SELECT {COLS} FROM replays WHERE rid = ?', (m.group(1),)).fetchone()
+                fn = rec_filename(item(r), int(w) if re.fullmatch(r'\d{1,3}', w) else None)
+            except Exception: fn = re.sub(r'[^\w.\-\[\]]', '_', nm)
             self.send_response(200); self.send_header('Content-Type', 'application/octet-stream'); self.send_header('Content-Length', str(len(b)))
-            self.send_header('Content-Disposition', 'attachment; filename="%s"' % re.sub(r'[^\w.\-\[\]]', '_', nm)); self.end_headers(); self.wfile.write(b); return
+            self.send_header('Content-Disposition', disposition(fn)); self.end_headers(); self.wfile.write(b); return
         m = re.match(r'^/replay/api/r/([0-9a-f]{16})$', p)
         if m:
             d = f'{STORE}/{m.group(1)}'

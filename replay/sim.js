@@ -36,6 +36,13 @@
   const tx = k => (TX[L] || TX.en)[k];
   const tnm = (teams, tm) => { const i = teams.indexOf(tm); return i >= 0 && i < 2 ? tx('sides')[i] : tx('team')(tm + 1); };
   const tname = tm => tnm(S.teams, tm);
+  // player rating (page's players block data: at match time or current), by name
+  const ratingOf = name => {
+    const q = window.RESCTX && window.RESCTX.players.find(x => x.name === name);
+    if (!q || !q.rating) return '';
+    const now = q.rating_kind === 'now', ru = L === 'ru';
+    return `<small style="color:var(--muted);font-size:11px;margin-left:4px;white-space:nowrap" title="${now ? (ru ? 'рейтинг сейчас' : 'rating now') : (ru ? 'рейтинг на момент матча' : 'rating at match time')}">${q.rating}${now ? (ru ? ' сейчас' : ' now') : ''}</small>`;
+  };
   const TEAMC = ['#2f8bff', '#ff3b30'];   // by side: the first team blue, the second red
   const SPEEDS = [1, 4, 8, 16, 32];
   let S = null;
@@ -350,7 +357,7 @@
       S.el.side.innerHTML = S.teams.map(tm => `<div class="sim-team"><h4><span style="color:${TEAMC[S.teams.indexOf(tm) % 2]}">${tname(tm)}</span><span id="simTP${tm}"></span></h4>` +
         D.players.filter(p => p.team === tm).map(p => {
           const r = AS.races[rk(p.race)] || {}, h = r.heroes && r.heroes[p.hero];
-          return `<div class="sim-p" data-pid="${p.pid}"><div class="sim-pn"><i class="sim-sh c${p.side}" style="background:${p.color};border-color:${TEAMC[p.side]}"></i>${r.icon ? `<img src="${A + r.icon}" alt="">` : ''}${h ? `<img src="${A + h.icon}" alt="" title="${esc(h.name)}">` : ''}<span title="${esc(p.name)}">${esc(p.name)}</span></div>` +
+          return `<div class="sim-p" data-pid="${p.pid}"><div class="sim-pn"><i class="sim-sh c${p.side}" style="background:${p.color};border-color:${TEAMC[p.side]}"></i>${r.icon ? `<img src="${A + r.icon}" alt="">` : ''}${h ? `<img src="${A + h.icon}" alt="" title="${esc(h.name)}">` : ''}<span title="${esc(p.name)}">${esc(p.name)}</span>${ratingOf(p.name)}</div>` +
             `<div class="sim-ps" id="simPS${p.pid}"></div><div class="sim-bar"><i id="simPB${p.pid}" style="background:${p.color}"></i></div></div>`;
         }).join('') + '</div>').join('');
       document.getElementById('simLeg').innerHTML = D.players.map(p => `<div data-pid="${p.pid}"><i class="sim-sh c${p.side}" style="background:${p.color};border-color:${TEAMC[p.side]}"></i><span>${esc(p.name)}</span></div>`).join('');

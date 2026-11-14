@@ -56,6 +56,7 @@ button[disabled] { opacity: .5; cursor: default; }
 .pp { display: flex; align-items: center; gap: 5px; font-size: 14px; min-width: 0; padding: 1px 0; }
 .pp img { width: 24px; height: 24px; border-radius: 4px; flex: none; }
 .pp img.rc { width: 18px; height: 18px; }
+.pp small.rt { flex: none; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .pp span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .more { display: block; margin: 12px auto 0; }
 .more[hidden] { display: none; }
@@ -122,7 +123,7 @@ const T = {
    needrec: 'A .rec replay file is required', unreadable: 'The browser could not read this file. Copy the replay to another folder (e.g. the Desktop) and drop it from there.', uploading: n => 'Uploading and analysing “' + n + '”…', err: 'Error: ', empty: 'Nothing here yet — be the first.',
    failed: 'Could not parse this replay', writing: 'The story is being written, this takes 1–3 minutes…', loadfail: 'failed to load', errstory: 'error', replay: 'Replay',
    browse: 'Replays', q: 'Player, map or lobby', allModes: 'All modes', allRaces: 'All races', allMaps: 'All maps', more: 'Show more',
-   none: 'No replays for these filters.', simtag: 'watch on the map', dlrec: 'Download replay (.rec)', ladder: 'ladder match', copies: n => n + ' uploads',
+   none: 'No replays for these filters.', simtag: 'watch on the map', dlrec: 'Download replay (.rec)', ratm: 'rating at match time', ratn: 'rating now', ratnow: 'now', ladder: 'ladder match', copies: n => n + ' uploads',
    race: { chaos_marines: 'Chaos', eldar: 'Eldar', imperial_guard: 'Imperial Guard', ordo_malleus: 'Ordo Malleus', orks: 'Orks', space_marines: 'Space Marines', t_tau: 'Tau', tyranids: 'Tyranids', z_unecron: 'Necrons' } },
  ru: { title: 'Разбор реплеев <b>Dawn of War II</b>', sub: 'Retribution и Elite Mod: загрузите файл <code>.rec</code>, получите игроков, билды, бои, потери и вероятного победителя.',
    drop: '<strong>Перетащите реплей сюда</strong> или нажмите, чтобы выбрать файл', where: 'Реплеи лежат в Документы\\My Games\\Dawn of War II - Retribution\\Playback',
@@ -130,7 +131,7 @@ const T = {
    needrec: 'Нужен файл реплея .rec', unreadable: 'Браузер не смог прочитать файл. Скопируйте реплей в другую папку (например, на рабочий стол) и перетащите оттуда.', uploading: n => 'Загружаю и разбираю «' + n + '»…', err: 'Ошибка: ', empty: 'Пока пусто — будьте первым.',
    failed: 'Не удалось разобрать реплей', writing: 'История пишется, это 1–3 минуты…', loadfail: 'не загрузилось', errstory: 'ошибка', replay: 'Реплей',
    browse: 'Реплеи', q: 'Ник, карта или лобби', allModes: 'Все режимы', allRaces: 'Все расы', allMaps: 'Все карты', more: 'Показать ещё',
-   none: 'Реплеев с такими условиями нет.', simtag: 'смотреть на карте', dlrec: 'Скачать реплей (.rec)', ladder: 'матч ладдера', copies: n => 'присылали ' + n + ' раз',
+   none: 'Реплеев с такими условиями нет.', simtag: 'смотреть на карте', dlrec: 'Скачать реплей (.rec)', ratm: 'рейтинг на момент матча', ratn: 'рейтинг сейчас', ratnow: 'сейчас', ladder: 'матч ладдера', copies: n => 'присылали ' + n + ' раз',
    race: { chaos_marines: 'Хаос', eldar: 'Эльдар', imperial_guard: 'Имп. гвардия', ordo_malleus: 'Ордо Маллеус', orks: 'Орки', space_marines: 'Космодесант', t_tau: 'Тау', tyranids: 'Тираниды', z_unecron: 'Некроны' } } };
 let L = (new URLSearchParams(location.search).get('lang')) || (() => { try { return localStorage.getItem('lang'); } catch (e) { return null; } })() || 'en';
 if (!T[L]) L = 'en';
@@ -182,9 +183,14 @@ function icons(p) {
   const h = p.hero != null && r.heroes && r.heroes[p.hero];
   return `<img class="rc" src="${A + r.icon}" alt="" title="${esc(rname(p.race))}">` + (h ? `<img src="${A + h.icon}" alt="" title="${esc(h.name)}">` : '');
 }
+function rating(p) {
+  if (!p.rating) return '';
+  const now = p.rating_kind === 'now';
+  return `<small class="rt" title="${now ? T[L].ratn : T[L].ratm}">${p.rating}${now ? ' ' + T[L].ratnow : ''}</small>`;
+}
 function teams(pl) {
   const ts = [...new Set(pl.map(p => p.team))].sort();
-  const side = t => '<div>' + pl.filter(p => p.team === t).map(p => `<div class="pp">${icons(p)}<span>${esc(p.name)}</span></div>`).join('') + '</div>';
+  const side = t => '<div>' + pl.filter(p => p.team === t).map(p => `<div class="pp">${icons(p)}<span>${esc(p.name)}</span>${rating(p)}</div>`).join('') + '</div>';
   return ts.length === 2 ? `<div class="tm">${side(ts[0])}<span class="vs">vs</span>${side(ts[1])}</div>` : `<div>${ts.map(side).join('')}</div>`;
 }
 const mins = s => s ? Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0') : '';
@@ -232,7 +238,10 @@ function renderResBox() {
   const b = $('resbox');
   if (!window.RESCTX || !window.SIM || !SIM.verdict) { b.hidden = true; return; }
   const sd = window.SIMD && window.SIMD.rid === rid ? window.SIMD : null;
-  b.innerHTML = SIM.resHTML(SIM.verdict(sd && sd.D, RESCTX.players, RESCTX.guess, RESCTX.dur)); b.hidden = false;
+  const v = SIM.verdict(sd && sd.D, RESCTX.players, RESCTX.guess, RESCTX.dur);
+  b.innerHTML = SIM.resHTML(v); b.hidden = false;
+  // the downloaded file's name carries the winner only when this verdict names one
+  $('dlrec').href = '/replay/api/r/' + rid + '/replay.rec' + (v.team != null ? '?w=' + v.team : '');
 }
 async function loadResult() {
   const j = await (await fetch('/replay/api/r/' + rid)).json();
