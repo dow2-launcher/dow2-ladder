@@ -460,6 +460,19 @@ NM_WAKE = asyncio.Event()         # nm_syncer: sync at once (a search was just m
 NM_SEQ = [int(time.time()) % 100000 * 100]
 NM_MODE = {1: '1v1', 2: '2v2', 3: '3v3'}            # match types: 1 head to head, 2 two on two, 3 team battle
 NM_DEAD = 35                      # s without automatch/polling (the game polls every ~11 s while searching): his game is gone
+# 14.11.2026 (siritos fb 1062: "observers must never hold up the match start"): an observer of a native room (a launcher room's) is
+# let in only until every player of the match has been in the room for NM_OBS_LATE s (he gets the room's id with the first guest -
+# a fair chance against the last player, none once the players' start is near); once every player is in and the room has not
+# started in NM_OBS_GRACE s, every observer in it gets AutomatchStopPollingMessage (his game leaves the room, the players' countdown
+# goes on without his "ready"). data/nm_obs_eject.off: no such eject (the late refusal stays; nm_watch.off: no observers at all).
+NM_OBS_LATE = float(os.environ.get('NM_OBS_LATE', '2'))
+NM_OBS_GRACE = float(os.environ.get('NM_OBS_GRACE', '8'))
+
+
+def nm_all_in(r, now):
+    """since when every player of this native room is in it (None = somebody is missing)"""
+    if not r.get('pids') or not set(r['pids']) <= set(r['members']): r.pop('all_in_t', None); return None
+    return r.setdefault('all_in_t', now)
 CRC_KEYS = ('modname', 'modversion', 'appbinarychecksum', 'datachecksum', 'moddllchecksum')
 
 
@@ -593,6 +606,8 @@ async def nm_syncer():
             if x['state'] in ('searching', 'matched') and now - x['polled'] > NM_DEAD:
                 x['state'] = 'gone'; log('native automatch: pid=%d stopped polling - his game is gone' % x['pid']); ladder_bg('leave', {'steam': x['steam'], 'why': 'game gone'})
         for k in [k for k, x in NM_POLLS.items() if x['state'] in ('gone', 'done') and now - x['t'] > 3600]: NM_POLLS.pop(k, None)
+        try: nm_obs_eject(now)
+        except Exception as e: log('native automatch: observer eject check failed: %r' % e)
         act = {x['steam']: x for x in NM_POLLS.values() if x['state'] in ('searching', 'matched') and x.get('joined')}
         if not act: continue
         try: vs = await ladder('sync', {'steams': list(act)})
@@ -679,7 +694,10 @@ async def nm_call(fn, p, sess):
         log('native automatch: pid=%d status poll=%s match=%s result=%s' % (sess['pid'], p.get('myPollID'), p.get('matchID'), p.get('result')))
         # result 0 = his host / join failed (the client reports it and keeps searching). Stands 03.11.2026: after a guest's failed join
         # the host's game soon leaves its room by itself - so the match is over at once: he is out, the host gets a clean cancel
-        if p.get('result') == '0' and x and x['state'] == 'matched':
+        if p.get('result') == '0' and x and x['state'] == 'matched' and x['view'].get('role') == 'watcher':   # 14.11.2026: an observer only
+            log('native automatch %s: observer pid=%d could not join - only he is out' % (x['view'].get('match'), sess['pid']))
+            ladder_bg('leave', {'steam': str(sess['steam']), 'why': 'observer could not join'})
+        elif p.get('result') == '0' and x and x['state'] == 'matched':
             ladder_bg('fail', {'match': x['view'].get('match'), 'culprits': [str(sess['steam'])], 'why': 'could not ' + ('host' if x['view'].get('host_pid') == sess['pid'] else 'join')})
         return [0]
     return None                                                              # getAutomatchMap etc.: Relic
@@ -718,6 +736,23 @@ def nm_watchers(r):
     return out
 
 
+def nm_obs_eject(now):
+    """every player of a native room in it and no start for NM_OBS_GRACE s: its observers are sent out (AutomatchStopPollingMessage -
+    the game leaves the room and ends its search), so the players' countdown never waits for an observer's "ready" (14.11.2026)"""
+    if flag('nm_obs_eject.off'): return
+    for r in list(ROOMS.values()):
+        if r.get('kind') != 'nm' or r['state'] != 'lobby' or not r.get('watch_pids'): continue
+        obs_in = [q for q in r['watch_pids'] if q in r['members']]
+        t = nm_all_in(r, now)
+        if not obs_in or t is None or now - t < NM_OBS_GRACE: continue
+        for q in obs_in:
+            if q in (r.get('ejected') or []): continue
+            r.setdefault('ejected', []).append(q)
+            x = next((y for y in NM_POLLS.values() if y['pid'] == q and y['state'] in ('searching', 'matched')), None)
+            n = push(q, [0, 'AutomatchStopPollingMessage', q, [x['poll'], x.get('party') or 0]]) if x else 0
+            log('room %d: every player in for %.1f s and no start - observer pid=%d sent out (%d session(s)%s)' % (r['mid'], now - t, q, n, '' if x else ', no search of his: nothing to stop'))
+
+
 def is_watcher(r, pid):
     return pid in (r.get('watch_pids') or ())
 
@@ -734,6 +769,11 @@ def nm_check_join(r, p, sess):
     He only gets past this server: a seat is the host game's call (an AUTOMATCH room has teams x size seats and a password)"""
     if r.get('kind') != 'nm': return None
     if sess['pid'] not in r.get('pids', ()):
+        t_in = nm_all_in(r, time.time()); late = t_in is not None and time.time() - t_in > NM_OBS_LATE   # the players' start is near: he could only hold them up
+        if (not flag('nm_watch.off') and r['state'] == 'lobby' and str(sess['steam']) in nm_watchers(r) and late
+                and sess['pid'] not in (r.get('watch_pids') or [])):
+            log('room %d: pid=%d (%s) is an observer of the match %s - too late, every player in for %.1f s - refused' % (r['mid'], sess['pid'], sess['alias'], r.get('match'), time.time() - t_in))
+            return NM_JOIN_FULL
         if (not flag('nm_watch.off') and r['state'] == 'lobby' and str(sess['steam']) in nm_watchers(r)
                 and sess['pid'] not in (r.get('watch_pids') or [])):
             r.setdefault('watch_pids', []).append(sess['pid'])
