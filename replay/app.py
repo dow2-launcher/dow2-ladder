@@ -32,9 +32,11 @@ with idb() as c:
         CREATE TABLE IF NOT EXISTS aliases (sha TEXT PRIMARY KEY, rid TEXT);''')
     # the replay pool of the launcher (13.11.2026): the game version, who put the replay in, their description, where it came from
     have = {r[1] for r in c.execute('PRAGMA table_info(replays)')}
-    for col, typ in (('vhash', 'TEXT'), ('author', 'TEXT'), ('author_steam', 'TEXT'), ('descr', 'TEXT'), ('source', 'TEXT'), ('src_link', 'TEXT')):
+    for col, typ in (('vhash', 'TEXT'), ('author', 'TEXT'), ('author_steam', 'TEXT'), ('descr', 'TEXT'), ('source', 'TEXT'), ('src_link', 'TEXT'),
+                     ('hidden', 'TEXT')):
         if col not in have: c.execute(f'ALTER TABLE replays ADD COLUMN {col} {typ}')
     c.execute('CREATE INDEX IF NOT EXISTS replays_author ON replays (author_steam)')
+    hide_backfill = 'hidden' not in have
 
 # The game version a replay was recorded on: bytes 4..7 of the file are a checksum of the game data (one per Elite release,
 # one per Tau test build, one for vanilla). The table is elite_versions.json next to this file; a value missing there = a new
@@ -87,6 +89,30 @@ def backfill():
         with _ilock, idb() as c: c.execute('UPDATE replays SET vhash = ? WHERE rid = ?', (vh, rid))
 backfill()
 
+# ---------- matches with a computer player (14.11.2026, siritos: "the pool must not hand out AI replays, and they are not worth
+# storing automatically - but a replay the player saved and puts in himself is in the pool") ----------
+# Who sends a replay: the game itself after a match (MMFind/<ver>: temp.rec of every match with other people; EliteAI/<ver>: temp.rec of
+# a skirmish against the new AI, X-Lobby newai - the AI team's test feed) or a person (the launcher's "put into the pool" with his
+# sign-in token X-Token, the site's upload form, the Discord import). The game's own uploads are told by their User-Agent.
+# - a game's own upload of a match with a computer: MMFind's is not stored (answered 200 {"stored": false, "reason": "computer_player"},
+#   so it is not sent again); EliteAI's is stored HIDDEN (hidden = 'ai_auto': the AI team still reads it by its link, the pool never
+#   lists it);
+# - a person's upload is always stored and listed, AI or not; a person's upload of a hidden match makes it visible;
+# - the lists (POST/GET /replay/api/list) leave hidden replays out; "ai": "all" (or true) lists them too, "ai": "none" (or false)
+#   leaves out every match with a computer, also those people put in. "mine" lists all of the player's own.
+# Replays stored before this (14.11.2026) are hidden by the same rule once (a computer + nobody's + a game's own file name).
+AUTO_UA = ('MMFind/', 'EliteAI/')
+AUTO_NAME = re.compile(r'^(?:match|MM-[\w.\-]+|NM-\d+)_\d{4}-\d\d-\d\d_\d\d-\d\d\.rec$')     # MMFind's name of temp.rec
+def bot_match(players):   # a computer in the match: the new AI gives its orders inside the sim, a replay of it never plays back the same
+    try: return any(p.get('pid') == 4294967295 or 'Computer Player' in (p.get('name') or '') for p in json.loads(players or '[]'))
+    except ValueError: return False
+if hide_backfill:
+    with _ilock, idb() as c:
+        rows = c.execute('SELECT rid, name, lobby, players FROM replays WHERE author_steam IS NULL AND hidden IS NULL').fetchall()
+        hid = [rid for rid, name, lobby, pl in rows if bot_match(pl) and (lobby == 'newai' or AUTO_NAME.match(name or ''))]
+        c.executemany("UPDATE replays SET hidden = 'ai_auto' WHERE rid = ?", [(x,) for x in hid])
+    print('replays: %d automatic uploads of matches with a computer hidden from the lists' % len(hid), flush=True)
+
 # Who is uploading: the launcher sends the session token of its Steam sign-in (X-Token / "token"); the ladder knows whose it is.
 # This service reaches only localhost, the ladder answers there. A token seen is remembered for 10 minutes.
 LADDER = os.environ.get('LADDER_URL', 'http://127.0.0.1:8217'); _who = {}
@@ -116,17 +142,23 @@ def race_key(r):
 def mode_of(pl):
     teams = {p.get('team') for p in pl}; per = max(1, len(pl) // max(1, len(teams)))
     return '%dv%d' % (per, per) if len(teams) == 2 else ('ffa' if len(teams) > 2 else '?')
-COLS = 'rid, name, lobby, map, players, ticks, recorded, uploaded, uploads, vhash, author, author_steam, descr, source, src_link'
+COLS = 'rid, name, lobby, map, players, ticks, recorded, uploaded, uploads, vhash, author, author_steam, descr, source, src_link, hidden'
 def item(r, steam=None):
-    rid, name, lobby, mp, pl, ticks, rec, up, ups, vh, author, a_steam, descr, source, link = r
-    pl = json.loads(pl or '[]'); cap = f'{STORE}/{rid}/caption.txt'
+    rid, name, lobby, mp, pl, ticks, rec, up, ups, vh, author, a_steam, descr, source, link, hidden = r
+    ai = bot_match(pl); pl = json.loads(pl or '[]'); cap = f'{STORE}/{rid}/caption.txt'
     return {'id': rid, 'name': name, 'lobby': lobby, 'map': mp, 'mode': mode_of(pl), 'nplayers': len(pl), 'players': pl,
             'races': sorted({race_key(p.get('race')) for p in pl}), 'duration': (ticks or 0) // 10, 'recorded': rec, 'uploaded': up,
             'uploads': ups, 'vhash': vh, 'version': vname(vh), 'author': author, 'descr': descr,
             'source': source or ('ladder' if (lobby or '').startswith('MM-') else 'site'), 'src_link': link,
             'mine': bool(steam and a_steam == steam), 'caption': open(cap).read() if os.path.exists(cap) else None,
-            'sim': os.path.exists(f'{STORE}/{rid}/sim.json.gz'), 'sim_ok': vh in SIM_VERSIONS and (ticks or 0) >= 300 and not bot_match(json.dumps(pl))}
-def replay_list(q='', mapk='', race='', mode='', page=0, n=30, version='', players='', author='', steam=None, mine=False):
+            'sim': os.path.exists(f'{STORE}/{rid}/sim.json.gz'), 'sim_ok': vh in SIM_VERSIONS and (ticks or 0) >= 300 and not ai,
+            'ai': ai, 'hidden': bool(hidden)}
+def ai_mode(v):   # the lists' "ai": '' (default: no hidden ones) / 'all' (true, 1) / 'none' (false, 0: no match with a computer at all)
+    if v is None or v == '': return ''
+    if v is True or str(v).lower() in ('all', '1', 'true', 'yes'): return 'all'
+    if v is False or str(v).lower() in ('none', '0', 'false', 'no'): return 'none'
+    return ''
+def replay_list(q='', mapk='', race='', mode='', page=0, n=30, version='', players='', author='', steam=None, mine=False, ai=''):
     with idb() as c:
         if mine: rows = c.execute(f'SELECT {COLS} FROM replays WHERE author_steam = ? ORDER BY uploaded DESC', (steam or '-',)).fetchall()
         else: rows = c.execute(f'SELECT {COLS} FROM replays ORDER BY uploaded DESC LIMIT 20000').fetchall()
@@ -135,6 +167,7 @@ def replay_list(q='', mapk='', race='', mode='', page=0, n=30, version='', playe
     out = []
     for r in rows:
         it = item(r, steam)
+        if not mine and ((ai != 'all' and it['hidden']) or (ai == 'none' and it['ai'])): continue
         if mapk and it['map'] != mapk.lower(): continue
         if want and not all(w in it['races'] for w in want): continue
         if mode and it['mode'] != mode: continue
@@ -147,7 +180,7 @@ def replay_list(q='', mapk='', race='', mode='', page=0, n=30, version='', playe
     page = max(0, int(page or 0)); n = max(1, min(100, int(n or 30)))
     return {'total': len(out), 'page': page, 'items': out[page * n:(page + 1) * n], 'maps': sorted({i['map'] for i in out if i['map']})}
 def version_list():
-    with idb() as c: rows = c.execute('SELECT vhash, COUNT(*), MAX(uploaded) FROM replays GROUP BY vhash').fetchall()
+    with idb() as c: rows = c.execute('SELECT vhash, COUNT(*), MAX(uploaded) FROM replays WHERE hidden IS NULL GROUP BY vhash').fetchall()
     agg = {}
     for vh, n, last in rows:
         v = vname(vh) or 'unknown'; a = agg.setdefault(v, {'version': v, 'count': 0, 'last': 0}); a['count'] += n; a['last'] = max(a['last'], last or 0)
@@ -235,9 +268,6 @@ def sim_state(rid):
     if (r[1] or 0) < 300: return 'unsupported', None
     if bot_match(r[2]): return 'unsupported', None
     return 'none', None
-def bot_match(players):   # a computer in the match: the new AI gives its orders inside the sim, a replay of it never plays back the same
-    try: return any(p.get('pid') == 4294967295 or 'Computer Player' in (p.get('name') or '') for p in json.loads(players or '[]'))
-    except ValueError: return False
 def sim_request(rid):
     st, _ = sim_state(rid)
     if st == 'failed':
@@ -279,7 +309,8 @@ def story_running(rid):
 
 def recent(n=15):
     items = []
-    for rid in sorted(os.listdir(STORE), key=lambda x: -os.path.getmtime(f'{STORE}/{x}'))[:n]:
+    with idb() as c: hid = {r[0] for r in c.execute('SELECT rid FROM replays WHERE hidden IS NOT NULL')}
+    for rid in [x for x in sorted(os.listdir(STORE), key=lambda x: -os.path.getmtime(f'{STORE}/{x}')) if x not in hid][:n]:
         cap = f'{STORE}/{rid}/caption.txt'
         if os.path.exists(cap): items.append({'id': rid, 'name': open(f'{STORE}/{rid}/name.txt').read() if os.path.exists(f'{STORE}/{rid}/name.txt') else rid,
                                               'caption': open(cap).read(), 'caption_en': to_en(open(cap).read())})
@@ -298,7 +329,7 @@ class H(BaseHTTPRequestHandler):
         if p == '/replay/api/list':
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query); g = lambda k: qs.get(k, [''])[0]
             try: return self.out(200, json.dumps(replay_list(g('q')[:64], g('map')[:64], g('race')[:120], g('mode')[:8], g('page') or 0, g('n') or 30,
-                                                             g('version')[:40], g('players')[:2], g('author')[:64]), ensure_ascii=False), 'application/json')
+                                                             g('version')[:40], g('players')[:2], g('author')[:64], ai=ai_mode(g('ai'))), ensure_ascii=False), 'application/json')
             except ValueError: return self.out(400, '{}', 'application/json')
         if p == '/replay/api/versions': return self.out(200, json.dumps(version_list(), ensure_ascii=False), 'application/json')
         if p == '/replay/api/vtable': return self.out(200, json.dumps({h: v['version'] for h, v in versions().items()}), 'application/json')   # the launcher names its own files' versions
@@ -353,7 +384,8 @@ class H(BaseHTTPRequestHandler):
         if p == '/replay/api/list':                   # the list with "mine" marked (and "only mine") for a signed-in player
             d = self.body(); u = who(d.get('token')); g = lambda k, n: str(d.get(k) or '')[:n]
             try: return J(200, replay_list(g('q', 64), g('map', 64), g('race', 120), g('mode', 8), d.get('page') or 0, d.get('n') or 30,
-                                           g('version', 40), g('players', 2), g('author', 64), u and u['steam'], bool(d.get('mine')) and bool(u)))
+                                           g('version', 40), g('players', 2), g('author', 64), u and u['steam'], bool(d.get('mine')) and bool(u),
+                                           ai_mode(d.get('ai'))))
             except (ValueError, TypeError): return J(400, {})
         if p == '/replay/api/have':                   # which of the player's files are in the pool: sha256[:16] of a file -> its replay
             ids = [x for x in (self.body().get('ids') or [])[:2000] if isinstance(x, str) and re.fullmatch(r'[0-9a-f]{16}', x)]
@@ -388,22 +420,30 @@ class H(BaseHTTPRequestHandler):
             lobby = re.sub(r'[^\w.\-]', '', self.headers.get('X-Lobby', ''))[:80]
             u = who(self.headers.get('X-Token'))         # the launcher's "put into the pool": the signed-in player is the author
             src = 'launcher' if self.headers.get('X-Token') else None
+            auto = not self.headers.get('X-Token') and (self.headers.get('User-Agent') or '').startswith(AUTO_UA)   # the game's own temp.rec
             tmp = f'{STORE}/.up_{rid}.rec'; open(tmp, 'wb').write(data)
             try: meta = rec_meta(tmp)
             except Exception: meta = None
             if not meta or not meta['mkey']: meta = dict(meta or {'map': '', 'players': [], 'ticks': 0, 'recorded': None}, mkey='file:' + rid)
+            hidden = None
+            if auto and bot_match(json.dumps(meta['players'])):          # a match with a computer, sent by the game itself (see AUTO_UA)
+                if lobby != 'newai':
+                    os.remove(tmp)
+                    return self.out(200, json.dumps({'stored': False, 'reason': 'computer_player'}), 'application/json')
+                hidden = 'ai_auto'                    # EliteAI: the AI team's test feed - kept, never listed
             with _ilock, idb() as c:                  # проверка и запись в индекс — одним шагом: двое шлют один матч одновременно
                 old = c.execute('SELECT rid, ticks, lobby FROM replays WHERE mkey = ?', (meta['mkey'],)).fetchone()
                 if not old:
-                    c.execute('INSERT OR IGNORE INTO replays (rid, mkey, name, lobby, map, players, ticks, recorded, uploaded, size, vhash, author, author_steam, source)'
-                              ' VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    c.execute('INSERT OR IGNORE INTO replays (rid, mkey, name, lobby, map, players, ticks, recorded, uploaded, size, vhash, author, author_steam, source, hidden)'
+                              ' VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                               (rid, meta['mkey'], name, lobby or None, meta['map'], json.dumps(meta['players'], ensure_ascii=False), meta['ticks'],
-                               meta['recorded'], int(time.time()), len(data), vhash_of(tmp), u and u['name'], u and u['steam'], src))
+                               meta['recorded'], int(time.time()), len(data), vhash_of(tmp), u and u['name'], u and u['steam'], src, hidden))
                 c.execute('INSERT OR REPLACE INTO aliases (sha, rid) VALUES (?, ?)', (rid, old[0] if old else rid))
             if old:                                   # этот матч уже есть: копию не храним, более полную запись — подменяем
                 rid0, t0, lb0 = old; d0 = f'{STORE}/{rid0}'
                 with _ilock, idb() as c:
                     c.execute('UPDATE replays SET uploads = uploads + 1, lobby = COALESCE(lobby, ?) WHERE rid = ?', (lobby or None, rid0))
+                    if not auto: c.execute('UPDATE replays SET hidden = NULL WHERE rid = ?', (rid0,))   # a person put it in: listed
                     if u:                             # the match came in from the ladder or the site with nobody's name: the player claims it
                         c.execute('UPDATE replays SET author = ?, author_steam = ?, source = COALESCE(source, ?) WHERE rid = ? AND author_steam IS NULL',
                                   (u['name'], u['steam'], src, rid0))

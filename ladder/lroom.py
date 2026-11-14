@@ -211,7 +211,7 @@ def view(r):
             'map': r['map'], 'map_name': (cat.get(r['map']) or {}).get('name') or r['map'], 'owner': r['owner'],
             'maps': [{'key': k, 'name': (cat.get(k) or {}).get('name') or k} for k in r['maps']], 'opts': dict(r['opts']),
             'state': r['state'], 'cd_end': int(r['cd'] * 1000) if r['state'] == 'countdown' else 0, 'now': int(now * 1000),
-            'slots': slots, 'obs': obs, 'obs_cap': _obs_cap(r), 'net': _net(r), 'note': r.get('note'), 'seq': r['seq'],
+            'slots': slots, 'obs': obs, 'obs_cap': _obs_cap(r), 'obs_free': max(0, _obs_cap(r) - len(obs)), 'net': _net(r), 'note': r.get('note'), 'seq': r['seq'],
             'hs': bool(r.get('hs')), 'all_ready': _all_ready(r, now), 'ping': _ping_view(r, now),
             'launch': {'t': int(la.get('t', 0)), 'deadline': int(la.get('deadline', 0)), 'host': la.get('host'), 'relay': la.get('relay'),
                        'match': la.get('match'), 'room': la.get('room'), 'map': la.get('map'),
@@ -236,7 +236,8 @@ def summary(r):
             'names': [_name(s) for s in _members(r)],
             'slots': [{'steam': s['steam'], 'name': _name(s['steam']), 'race': s['race'], 'hero': s['hero'], 'ready': s['ready'],
                        'rating': (L.users.get(s['steam']) or {}).get('rating')} if s else None for s in r['slots']],
-            'obs': [{'steam': o['steam'], 'name': _name(o['steam'])} for o in r.setdefault('obs', [])], 'obs_cap': _obs_cap(r)}
+            'obs': [{'steam': o['steam'], 'name': _name(o['steam'])} for o in r.setdefault('obs', [])], 'obs_cap': _obs_cap(r),
+            'obs_free': max(0, _obs_cap(r) - len(r['obs']))}   # 14.11.2026: observer seats left (obs_cap - taken)
 
 
 def _pub(r):

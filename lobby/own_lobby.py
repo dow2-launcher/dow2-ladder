@@ -293,14 +293,18 @@ def own_call(call, p, sess, mm=None):
     if fn == 'join':
         refused = nm_check_join(r, p, sess)
         if refused is not None: return refused
-        if r.get('kind') == 'nm': ladder_bg('joined', {'steam': str(sess['steam']), 'room': mid})
+        watcher = is_watcher(r, sess['pid'])
+        if r.get('kind') == 'nm' and not watcher: ladder_bg('joined', {'steam': str(sess['steam']), 'room': mid})
         r['members'].setdefault(sess['pid'], {'sg': sess['sg'], 'steam': sess['steam'], 'alias': sess['alias'], 'race': -1, 'team': 0})
+        if watcher: r['members'][sess['pid']]['watch'] = True
         ip, port = r['relay']
-        log('room %d: pid=%d (%s) joins' % (mid, sess['pid'], sess['alias']))
+        log('room %d: pid=%d (%s) joins%s' % (mid, sess['pid'], sess['alias'], ' as an observer' if watcher else ''))
         return [0, '/' + ip, ip, port, [member_row(r, sess['pid'])]]   # as Relic: code, the relay's address, relay, port, the joiner
     if fn == 'leave':
         r['members'].pop(sess['pid'], None)
-        if r.get('kind') == 'nm' and r['state'] == 'lobby':                 # left the native room before the start: he gave up
+        if is_watcher(r, sess['pid']):                                       # an observer left: only he is out, the match goes on
+            log('room %d: observer pid=%d (%s) left' % (mid, sess['pid'], sess['alias']))
+        elif r.get('kind') == 'nm' and r['state'] == 'lobby':               # left the native room before the start: he gave up
             ladder_bg('fail', {'room': mid, 'culprits': [str(sess['steam'])], 'why': 'left the room'})
         if sess['pid'] == r['host'] and r['state'] != 'playing':
             ROOMS.pop(mid, None); log('room %d closed by its host' % mid)
@@ -348,11 +352,13 @@ def report(r, sess, p):
     r.setdefault('first_report', time.time())
     r['reports'][sess['pid']] = {k: v for k, v in p.items() if k.lower() not in SECRET_PARAMS}
     r['reports'][sess['pid']]['_t'] = int(time.time())                    # 10.11.2026: when each game reported (own_matches)
-    log('room %d: result from pid=%d (%d of %d)' % (r['mid'], sess['pid'], len(r['reports']), len(r['members'])))
+    players = room_players(r)
+    log('room %d: result from pid=%d%s (%d of %d)' % (r['mid'], sess['pid'], ' (an observer)' if is_watcher(r, sess['pid']) else '',
+                                                     sum(1 for q in r['reports'] if q in players), len(players)))
     if r.get('stored'):                                                   # a report after the 90 s: the ladder's own_matches still gets it
         try: report_all(r)
         except Exception as e: log('room %d: nm/report failed: %r' % (r['mid'], e))
-    elif len(r['reports']) >= len(r.get('order') or r['members']):
+    elif all(q in r['reports'] for q in players):                       # every player's game (observers are not waited for)
         to_ladder(r)
     return [0]
 
@@ -379,7 +385,7 @@ def to_ladder(r):
     except Exception: played = {}
     start = int(r['started'] or r['created']); end = int(time.time())
     members = [{'profile_id': pid, 'race_id': played.get(pid, m.get('race', -1)), 'teamid': m.get('team', 0), 'statgroup_id': m.get('sg', 0),
-                'outcome': outcome.get(pid, -1)} for pid, m in r['members'].items()]
+                'outcome': outcome.get(pid, -1)} for pid, m in r['members'].items() if not is_watcher(r, pid)]   # observers: not members of the match
     p = r['params']
     m = {'id': r['mid'], 'source': 'ownlobby', 'mapname': p.get('mapname', ''), 'description': p.get('description', ''),
          'maxplayers': int(p.get('maxplayers') or 0), 'matchtype_id': 0, 'startgametime': start, 'completiontime': end,
@@ -425,12 +431,13 @@ def report_all(r):
     """10.11.2026 (own_rating step 1a): EVERY game's report of the room -> the ladder's own_matches (storage only, rates nothing):
     pid -> results/race_ids/counters/_t, the room's relay, who never reported (missing; to_ladder runs 90 s after the first report)"""
     if r.get('kind') != 'nm': return                                  # the native automatch's rooms (NM-<mid>) only
-    order = r.get('order') or list(r['members'])
+    order = room_players(r)
     ladder_bg('report', {'room': r['mid'], 'match': r.get('match'), 'relay': r.get('relay'), 'started': int(r['started'] or r['created']),
                          'first_t': int(r.get('first_report') or 0) or None, 'stored_t': int(time.time()),
                          'reports': {str(pid): {k: v for k, v in x.items() if k in REPORT_KEYS} for pid, x in r['reports'].items()},
                          'missing': [pid for pid in order if pid not in r['reports']],
-                         'members': {str(pid): {'team': m.get('team'), 'race': m.get('race')} for pid, m in r['members'].items()}})
+                         'members': {str(pid): {'team': m.get('team'), 'race': m.get('race')} for pid, m in r['members'].items() if not is_watcher(r, pid)},
+                         'watchers': sorted(r.get('watch_pids') or [])})
 
 
 # ---------------- native automatch (03.11.2026): the game's OWN "Find a Game", the match decided by the ladder ----------------
@@ -701,11 +708,38 @@ def nm_hosted(x, mid, relay_ip):
             y['view']['room'] = mid; nm_push_news(y)
 
 
+def nm_watchers(r):
+    """the steam ids of the ladder's observers of this room's native match (a launcher room's observers, lroom.py): the newest view
+    of any search of that match (nm/sync keeps them fresh every 0.5 s; ladder _nm_view "watchers" since 14.11.2026)"""
+    out = set()
+    for x in NM_POLLS.values():
+        v = x.get('view') or {}
+        if r.get('match') and v.get('match') == r.get('match'): out.update(str(s) for s in v.get('watchers') or [])
+    return out
+
+
+def is_watcher(r, pid):
+    return pid in (r.get('watch_pids') or ())
+
+
+def room_players(r):
+    """the players of a room (the game's order, the host first), its observers left out"""
+    return [q for q in (r.get('order') or list(r['members'])) if not is_watcher(r, q)]
+
+
 def nm_check_join(r, p, sess):
-    """a join into one of our native rooms: only the players of that match, only the very same game (checksums, as Relic checked)"""
+    """a join into one of our native rooms: only the players and the observers of that match, only the very same game (checksums,
+    as Relic checked). 14.11.2026 (siritos): a launcher room's observer (MMFind 0.50 "watch": the ladder's watcher of the room's
+    match, joins the host's room by its id) is let in while the room is not started; data/nm_watch.off turns that off.
+    He only gets past this server: a seat is the host game's call (an AUTOMATCH room has teams x size seats and a password)"""
     if r.get('kind') != 'nm': return None
     if sess['pid'] not in r.get('pids', ()):
-        log('room %d: pid=%d (%s) is not a player of this match - refused' % (r['mid'], sess['pid'], sess['alias'])); return NM_JOIN_FULL
+        if (not flag('nm_watch.off') and r['state'] == 'lobby' and str(sess['steam']) in nm_watchers(r)
+                and sess['pid'] not in (r.get('watch_pids') or [])):
+            r.setdefault('watch_pids', []).append(sess['pid'])
+            log('room %d: pid=%d (%s) is an observer of the match %s - let in' % (r['mid'], sess['pid'], sess['alias'], r.get('match')))
+        elif not is_watcher(r, sess['pid']):
+            log('room %d: pid=%d (%s) is not a player of this match - refused' % (r['mid'], sess['pid'], sess['alias'])); return NM_JOIN_FULL
     hp = r['params']
     bad = [k for k in CRC_KEYS if (p.get(k) or '').lower() != (hp.get(k) or '').lower()]
     if bad:

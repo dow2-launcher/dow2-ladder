@@ -1176,7 +1176,8 @@ def _slots(raw):
     # slotinfo (zlib) = u32 12, u16 number of slots (8; automatch 2/6), then per slot - read 03.11.2026 against 10.4k Relic match
     # histories (all members found, team and race as Relic has them; random = 255): i32 profile id (-1 empty / computer), i32 0,
     # i32 join order (1 = host), i32 0, i32 team, i32 hero, i32 race (Relic race id; 255 = random / none), u8, i32 -1, 10 bytes
-    # (byte 7: 0 player, 1 open, 2 computer, 5 closed); a player or computer then has his army (u32 n + UTF-16 name, 4 bytes,
+    # (byte 7 = the seat's type, as the game's GameInfo: 0 a player's seat (taken or open), 1 closed, 2 computer, 5 an open observer
+    # seat - RoomJoin 14's seat log on stand 1 and Relic's live list 14.11.2026; earlier read as "1 open, 5 closed"); a player or computer then has his army (u32 n + UTF-16 name, 4 bytes,
     # u32 n + badge path) and a tail of variable length (automatch adds more): the next slot is found by its head.
     # Slot index = place in the lobby: 0..3 the first team, 4..7 the second; a map for n per team plays slots 0..n-1 and 4..4+n-1,
     # the others are the OBSERVER slots (MMFind reverse 26.10.2026; the host opens them after a map change). FFA maps: every slot
@@ -1193,6 +1194,16 @@ def _slots(raw):
             off = next((q for q in range(off, min(len(raw) - 42, off + 600)) if _slot_head_at(raw, q)), None)
             if off is None: break
     return out
+
+def _obs_seats(sl, observer_slot, cap):
+    # 14.11.2026 (siritos: "can the server tell how many observer seats are open, so the launcher knows whether 'join as an
+    # observer' can work"): from the lobby's own seats (slotinfo), as the game browser's "Observers n/m". Relic's observermax is
+    # 512 in every room - useless. obs_open = observer seats the host opened (free + taken), obs_free = open and empty (RoomJoin 14
+    # {"as":"obs"} needs obs_free > 0), obs_taken = people on observer seats. None = the seats could not be read (no map size / slots)
+    if not sl or not cap: return {'obs_open': None, 'obs_free': None, 'obs_taken': None}
+    taken = sum(1 for q in sl if observer_slot(q) and q['pid'])
+    free = sum(1 for q in sl if observer_slot(q) and not q['pid'] and q['kind'] == 5)
+    return {'obs_open': free + taken, 'obs_free': free, 'obs_taken': taken}
 
 def _room_rating(steam):
     hit = _ROOM_RATING.get(steam)
@@ -1310,6 +1321,7 @@ def _rooms_once():
                     'password': bool(m.get('passwordprotected')), 'max': m.get('maxplayers'), 'players': players, 'ai': ai,
                     'free': max(0, cap - len(playing) - len(ai)) if cap else None,
                     'observers': m.get('observernum') or 0, 'observers_max': m.get('observermax') or 0,
+                    **_obs_seats(sl, observer_slot, cap),
                     'game': game, 'sure': sure, 'region': m.get('relayserver_region') or '',
                     'version': version, 'mod': mod, 'exact': exact})
     out.sort(key=lambda r: (r['game'] != 'elite', -len(r['players']), r['id']))
@@ -1596,7 +1608,10 @@ def _nm_view(p):  # under MM_LOCK: what own_lobby needs to answer the game
             'host_pid': (MM.get(m['host_steam']) or {}).get('pid') or 0, 'team': 0 if p['steam'] in m['host'] else 1,
             'teams': 2, 'size': TEAM_N[m['mode']], 'map': m.get('map') or '', 'steams': order,
             'pids': [(MM.get(s) or {}).get('pid') or 0 for s in order], 'relay': m.get('relay') or '', 'room': m.get('room'),
-            'joined': sorted(m.get('joined') or []), 'unrated': bool(m.get('unrated')), 'lroom': m.get('lroom') or ''}
+            'joined': sorted(m.get('joined') or []), 'unrated': bool(m.get('unrated')), 'lroom': m.get('lroom') or '',
+            # 14.11.2026 (siritos): the match's observers (a launcher room's, lroom._watch_in) - own_lobby lets them into the host's
+            # room; never in 'pids' (the host's game compares that list with its own: players only)
+            'watchers': list(m.get('watchers') or [])}
 
 def _nm_fail(m, culprits, why):  # under MM_LOCK: a native match that did not come together - the culprits out, the others search on
     # Stands 03.11.2026: a game already IN the room (the host once it is up, a guest that joined) ends its search when it leaves
