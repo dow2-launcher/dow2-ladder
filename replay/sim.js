@@ -173,7 +173,7 @@
     if (!card) { card = el('<div class="card sim" id="sim"></div>'); const r = document.getElementById('story'); r.parentNode.insertBefore(card, r); }
     card.hidden = false; card.innerHTML = `<div class="sim-sub">${tx('loading')}</div>`;
     let D;
-    try { D = await (await fetch('/replay/api/r/' + rid + '/sim.json')).json(); } catch (e) { card.innerHTML = `<div class="sim-sub">${tx('fail')}</div>`; return; }
+    try { D = await (await fetch('/replay/api/r/' + rid + '/sim.json?v=2')).json(); } catch (e) { card.innerHTML = `<div class="sim-sub">${tx('fail')}</div>`; return; }
     await assetsReady;
     S = { rid, D, t: 0, playing: false, speed: 8, trails: true, heat: '', last: 0, evf: 'all', mapKey: mapKey || D.map, hover: null };
     prep();
