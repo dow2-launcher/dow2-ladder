@@ -125,7 +125,7 @@ def item(r, steam=None):
             'uploads': ups, 'vhash': vh, 'version': vname(vh), 'author': author, 'descr': descr,
             'source': source or ('ladder' if (lobby or '').startswith('MM-') else 'site'), 'src_link': link,
             'mine': bool(steam and a_steam == steam), 'caption': open(cap).read() if os.path.exists(cap) else None,
-            'sim': os.path.exists(f'{STORE}/{rid}/sim.json.gz')}
+            'sim': os.path.exists(f'{STORE}/{rid}/sim.json.gz'), 'sim_ok': vh in SIM_VERSIONS and (ticks or 0) >= 300}
 def replay_list(q='', mapk='', race='', mode='', page=0, n=30, version='', players='', author='', steam=None, mine=False):
     with idb() as c:
         if mine: rows = c.execute(f'SELECT {COLS} FROM replays WHERE author_steam = ? ORDER BY uploaded DESC', (steam or '-',)).fetchall()
@@ -212,6 +212,59 @@ def analyse(rid):
     else:
         open(f'{d}/error.txt', 'w').write((r.stderr or r.stdout)[-3000:] or 'не удалось разобрать')
 
+# ---- the detailed analysis on demand (13.11): the game's own simulation of a replay, run by the headless runner on prod_gpu.
+# The page / launcher asks -> SIMQ/<rid>.req; prod_gpu (its mount of this folder) takes it -> <rid>.work, runs the replay,
+# puts <rid>.csv.gz / .players.csv.gz / .points.csv.gz into ROOT/sim and writes <rid>.done (or <rid>.fail with the reason);
+# here a thread turns .done into data/<rid>/sim.json.gz (sim_view.py). No emulator on this server.
+SIMQ = ROOT + '/simq'; SIMDIR = ROOT + '/sim'
+SIM_VERSIONS = {'819567f8', 'd6805b7d'}     # Elite 3.2.1, 3.2: the runner has their game data
+SIM_MAXQ = 40
+def sim_state(rid):
+    if os.path.exists(f'{STORE}/{rid}/sim.json.gz'): return 'ready', None
+    for st in ('fail', 'done', 'work', 'req'):
+        f = f'{SIMQ}/{rid}.{st}'
+        if os.path.exists(f):
+            if st == 'fail':
+                try: why = open(f).read().strip()[:200]
+                except OSError: why = ''
+                return 'failed', why
+            return {'done': 'building', 'work': 'running', 'req': 'queued'}[st], None
+    with idb() as c: r = c.execute('SELECT vhash, ticks FROM replays WHERE rid = ?', (rid,)).fetchone()
+    if not r: return 'none', None
+    if r[0] not in SIM_VERSIONS: return 'unsupported', None
+    if (r[1] or 0) < 300: return 'unsupported', None
+    return 'none', None
+def sim_request(rid):
+    st, _ = sim_state(rid)
+    if st == 'failed':
+        try: os.remove(f'{SIMQ}/{rid}.fail')
+        except OSError: pass
+        st = 'none'
+    if st != 'none': return st
+    os.makedirs(SIMQ, exist_ok=True)
+    if len([f for f in os.listdir(SIMQ) if f.endswith('.req')]) >= SIM_MAXQ: return 'busy'
+    tmp = f'{SIMQ}/.{rid}.tmp'
+    open(tmp, 'w').write(json.dumps({'rid': rid, 'ts': time.time()})); os.replace(tmp, f'{SIMQ}/{rid}.req')
+    return 'queued'
+def sim_builder():
+    while True:
+        try:
+            for f in sorted(os.listdir(SIMQ)) if os.path.isdir(SIMQ) else []:
+                if not f.endswith('.done'): continue
+                rid = f[:-5]
+                if not re.fullmatch(r'[0-9a-f]{16}', rid): continue
+                r = subprocess.run(['python3', APP + '/sim_view.py', rid], capture_output=True, text=True, timeout=600,
+                                   env=dict(os.environ, REPLAY_ROOT=ROOT, SIM_DIR=SIMDIR))
+                if os.path.exists(f'{STORE}/{rid}/sim.json.gz'):
+                    for e in ('req', 'work', 'done', 'fail'):
+                        try: os.remove(f'{SIMQ}/{rid}.{e}')
+                        except OSError: pass
+                else:
+                    open(f'{SIMQ}/{rid}.fail', 'w').write('build: ' + ((r.stdout or '') + (r.stderr or ''))[-200:])
+                    os.remove(f'{SIMQ}/{rid}.done')
+        except Exception as e: print('sim_builder', repr(e), flush=True)
+        time.sleep(5)
+
 def queue_story(rid, lang):
     # историю пишет отдельный процесс (replay_story_worker от root, Claude без инструментов): у этого сервиса
     # нет доступа ни к логину Claude, ни к ключам. Заявка — файл в очереди, результат — story_<lang>.md в папке разбора.
@@ -263,7 +316,8 @@ class H(BaseHTTPRequestHandler):
             return self.out(200, json.dumps({'name': rd('name.txt'), 'caption': rd('caption.txt'), 'report': rd('report.md'),
                 'caption_en': to_en(rd('caption.txt')), 'report_en': to_en(rd('report.md')),
                 'error': rd('error.txt'), 'story_ru': rd('story_ru.md'), 'story_en': rd('story_en.md'),
-                'story_running': story_running(m.group(1)), 'meta': replay_meta(m.group(1))}, ensure_ascii=False), 'application/json')
+                'story_running': story_running(m.group(1)), 'meta': replay_meta(m.group(1)),
+                'sim_state': sim_state(m.group(1))[0], 'sim_why': sim_state(m.group(1))[1]}, ensure_ascii=False), 'application/json')
         m = re.match(r'^/replay/r/([0-9a-f]{16})$', p)
         if m: return self.out(200, PAGE)
         if p == '/replay/sim.js':   # the match player (sim_view.py data); read per request so a deploy needs no restart
@@ -363,6 +417,11 @@ class H(BaseHTTPRequestHandler):
                 analyse(rid)
             elif os.path.exists(tmp): os.remove(tmp)
             return self.out(200, json.dumps({'id': rid, 'mine': bool(u)}), 'application/json')
+        m = re.match(r'^/replay/api/r/([0-9a-f]{16})/sim$', p)
+        if m:                                         # ask for the detailed analysis (the game's own simulation)
+            if not os.path.exists(f'{STORE}/{m.group(1)}/replay.rec'): return J(404, {'error': 'not_found'})
+            st = sim_request(m.group(1))
+            return J(429 if st == 'busy' else 400 if st == 'unsupported' else 200, {'state': st})
         m = re.match(r'^/replay/api/r/([0-9a-f]{16})/story/(ru|en)$', p)
         if m:
             rid, lang = m.groups(); d = f'{STORE}/{rid}'
@@ -377,4 +436,5 @@ class H(BaseHTTPRequestHandler):
 
 if __name__ == '__main__':
     print('replay web на', PORT, flush=True)
+    threading.Thread(target=sim_builder, daemon=True).start()
     ThreadingHTTPServer(('127.0.0.1', PORT), H).serve_forever()

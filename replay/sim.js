@@ -10,6 +10,9 @@
       heroDown: (h, p) => `${h} (${p}) is down`, squadLost: (s, p) => `${s} (${p}) wiped out`, alive: 'squads', bank: 'req', power: 'power', waaagh: 'Waaagh',
       dirs: { N: 'north', NE: 'north-east', E: 'east', SE: 'south-east', S: 'south', SW: 'south-west', W: 'west', NW: 'north-west', C: 'centre' },
       st: ['idle', 'moving', 'attack-move', 'in combat', 'melee', 'retreating', 'capturing', 'ability', 'dug in', 'jumping', 'building'],
+      offer: 'The detailed analysis is not made for this replay yet: the game itself replays the match (no graphics, about a minute) and the whole match appears here on the map - every squad, fights, points, losses.',
+      ask: '▶ Make the detailed analysis', queued: 'In the queue - this page will show the match by itself, usually within 2-5 minutes.', running: 'The game is replaying the match right now…', building: 'Almost ready…',
+      failed: 'The game could not replay this match', unsupported: 'The detailed analysis works for Elite 3.2 and 3.2.1 replays of at least half a minute.', busy: 'The queue is full right now - try in a few minutes.',
       hp: 'HP', sec: 's', models: 'models', end: 'Points at the end', loading: 'Loading the match…', fail: 'Could not load the match data', start: '▶ Watch the match' },
     ru: { title: 'Матч посекундно', badge: 'движок игры', sub: 'Все отряды матча так, как их просчитала сама игра: где стоят, сколько здоровья и что делают — каждую секунду. Жмите «Смотреть» или кликайте в любой момент.',
       play: 'Смотреть', pause: 'Пауза', trails: 'Следы', heat: 'Тепловая карта', heatNone: 'выкл', army: 'Сила армий (сумма HP отрядов на поле)',
@@ -18,6 +21,9 @@
       heroDown: (h, p) => `${h} (${p}) пал`, squadLost: (s, p) => `${s} (${p}) уничтожен`, alive: 'отрядов', bank: 'рек.', power: 'энергия', waaagh: 'Waaagh',
       dirs: { N: 'севере', NE: 'северо-востоке', E: 'востоке', SE: 'юго-востоке', S: 'юге', SW: 'юго-западе', W: 'западе', NW: 'северо-западе', C: 'центре' },
       st: ['стоит', 'идёт', 'атака с ходу', 'в бою', 'рукопашная', 'отступает', 'захватывает', 'способность', 'окопался', 'прыжок', 'строит'],
+      offer: 'Подробный разбор для этого реплея ещё не делали: сама игра заново прокрутит матч (без графики, около минуты), и здесь появится весь матч на карте — каждый отряд, бои, точки, потери.',
+      ask: '▶ Сделать подробный разбор', queued: 'В очереди — страница сама покажет матч, обычно через 2–5 минут.', running: 'Игра прямо сейчас прокручивает матч…', building: 'Почти готово…',
+      failed: 'Игра не смогла прокрутить этот матч', unsupported: 'Подробный разбор работает для реплеев Elite 3.2 и 3.2.1 длиной от полминуты.', busy: 'Очередь сейчас заполнена — попробуйте через несколько минут.',
       hp: 'HP', sec: 'с', models: 'моделей', end: 'Точки в конце', loading: 'Загружаю матч…', fail: 'Не удалось загрузить данные матча', start: '▶ Смотреть матч' } };
   const tx = k => (TX[L] || TX.en)[k];
   const tname = tm => { const i = S.teams.indexOf(tm); return i >= 0 && i < 2 ? tx('sides')[i] : tx('team')(tm + 1); };
@@ -109,6 +115,44 @@
     prep();
     build(card);
     if (location.hash === '#sim') setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);   // opened from the launcher
+  }
+  // no data yet: offer the detailed analysis (the replay goes to the runner's queue), then wait for it
+  function offer(rid, state, why, auto) {
+    stop();
+    if (!document.getElementById('sim-css')) { const st = document.createElement('style'); st.id = 'sim-css'; st.textContent = css; document.head.appendChild(st); }
+    let card = document.getElementById('sim');
+    if (!card) { card = el('<div class="card sim" id="sim"></div>'); const r = document.getElementById('story'); r.parentNode.insertBefore(card, r); }
+    if (S && S.rid !== rid) S = null;
+    card.hidden = false;
+    const wait = st => st === 'queued' || st === 'running' || st === 'building';
+    const render = (st, w) => {
+      const msg = st === 'none' ? tx('offer') : st === 'failed' ? tx('failed') + (w ? ' (' + esc(w) + ')' : '') + '. ' : tx(st) || '';
+      card.innerHTML = `<div class="sim-h"><span class="cap">${tx('title')}</span><span class="sim-badge">${tx('badge')}</span></div>`
+        + `<div class="sim-sub" style="margin-bottom:10px">${msg}</div>`
+        + (st === 'none' || st === 'failed' || st === 'busy' ? `<button class="play" id="simAsk" style="background:var(--gold);color:#111;font-weight:700">${tx('ask')}</button>` : '')
+        + (wait(st) ? '<div class="sim-wait" style="height:4px;border-radius:2px;background:linear-gradient(90deg,transparent,var(--gold),transparent);background-size:40% 100%;background-repeat:no-repeat;animation:simw 1.4s linear infinite"></div><style>@keyframes simw{from{background-position:-40% 0}to{background-position:140% 0}}</style>' : '');
+      const b = document.getElementById('simAsk'); if (b) b.onclick = ask;
+    };
+    const ask = async () => {
+      let st = 'busy';
+      try { const r = await fetch('/replay/api/r/' + rid + '/sim', { method: 'POST' }); st = (await r.json()).state || st; } catch (e) {}
+      render(st); if (wait(st)) poll();
+    };
+    let pt = null;
+    const poll = () => {
+      clearTimeout(window.__simPoll);
+      window.__simPoll = setTimeout(async () => {
+        try {
+          const j = await (await fetch('/replay/api/r/' + rid)).json();
+          if (j.sim_state === 'ready') { show(rid, j.meta && j.meta.map); return; }
+          render(j.sim_state, j.sim_why); if (wait(j.sim_state)) poll();
+        } catch (e) { poll(); }
+      }, 5000);
+    };
+    if (state === 'unsupported') { card.hidden = true; return; }
+    render(state, why);
+    if (wait(state)) poll();
+    else if (auto && state === 'none') ask();
   }
   function hide() { stop(); const c = document.getElementById('sim'); if (c) c.hidden = true; S = null; }
   function stop() { if (S && S.raf) cancelAnimationFrame(S.raf); if (S) S.raf = 0; }
@@ -489,5 +533,5 @@
     if (!S.raf) ui();
   }
 
-  window.SIM = { show, hide };
+  window.SIM = { show, hide, offer };
 })();

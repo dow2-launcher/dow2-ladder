@@ -227,7 +227,11 @@ async function loadResult() {
       `${mm.lobby ? ' · ' + T[L].ladder + ' ' + esc(mm.lobby) : ''}${mm.uploads > 1 ? ' · ' + T[L].copies(mm.uploads) : ''}</div>${teams(mm.players)}</div>`;
     $('head').hidden = false;
   }
-  if (window.SIM) { if (j.meta && j.meta.sim) SIM.show(rid, j.meta.map); else SIM.hide(); }
+  if (window.SIM) {
+    if (j.meta && j.meta.sim) SIM.show(rid, j.meta.map);
+    else if (j.sim_state && j.sim_state !== 'unsupported') SIM.offer(rid, j.sim_state, j.sim_why, location.hash === '#sim');   // #sim: opened from the launcher's button
+    else SIM.hide();
+  }
   const story = L === 'en' ? j.story_en : j.story_ru;
   $('story').hidden = !story; if (story) $('story').innerHTML = md(story);
   $('sbtn').hidden = !!story; $('sbtn').disabled = j.story_running.includes(L);
