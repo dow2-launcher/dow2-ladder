@@ -36,9 +36,9 @@ def sdsc(d):
     o = 4; n = struct.unpack_from('<I', b, o)[0]; o += 4 + n * 2 + 4
     if b[o:o + 4] != b'DOW2': raise ValueError('no DOW2 in DATASDSC')
     o += 4; n = struct.unpack_from('<I', b, o)[0]; mp = b[o + 4:o + 4 + n].decode('latin1'); o += 4 + n
-    for _ in range(2):
+    for _ in range(3):                  # name, description, a third string (empty, or a $ locstring id in some maps)
         n = struct.unpack_from('<I', b, o)[0]; o += 4 + n * 2
-    _, _, w, h = struct.unpack_from('<IIII', b, o)
+    _, w, h = struct.unpack_from('<III', b, o)   # max players, width, height
     return mp.replace('/', '\\').split('\\')[-1].lower(), w, h
 
 

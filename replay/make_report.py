@@ -14,7 +14,8 @@ RACE_DIR = {'chaos_marines': 'race_chaos', 'orks': 'race_ork', 'space_marines': 
             'tyranids': 'race_tyranid', 'grey_knights': 'race_gk', 'gk': 'race_gk',
             'necrons': 'race_necron', 'necron': 'race_necron'}
 RACE_RU = {'chaos_marines': 'хаос', 'orks': 'орки', 'space_marines': 'СМ', 'eldar': 'эльдары',
-           'imperial_guard': 'ИГ', 't_tau': 'тау', 'tyranids': 'тираниды', 'grey_knights': 'СР'}
+           'imperial_guard': 'ИГ', 't_tau': 'тау', 'tyranids': 'тираниды', 'grey_knights': 'СР',
+           'ordo_malleus': 'Ордо Маллеус', 'necrons': 'некроны', 'necron': 'некроны', 'z_unecron': 'некроны'}
 COMBAT = {0x30, 0x31, 0x35, 0x32, 0x46}
 
 def ts(t): return '%d:%02d' % (t // 600, t // 10 % 60)

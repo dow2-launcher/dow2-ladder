@@ -210,13 +210,21 @@ EN = [
  ('записан', 'recorded'), ('данные:', 'data:'), ('тиры:', 'tiers:'), ('капы:', 'captures:'), ('заказы:', 'orders:'),
  ('высокая', 'high'), ('средняя', 'medium'), ('низкая', 'low'), ('команда', 'team'), ('Команда', 'Team'),
  ('начало', 'early'), ('середина', 'mid'), ('конец', 'late'), ('ГЕРОЙ', 'HERO'), ('отряд', 'squad'),
- ('тираниды', 'Tyranids'), ('эльдары', 'Eldar'), ('хаос', 'Chaos'), ('орки', 'Orks'), ('тау', 'Tau'),
+ ('тираниды', 'Tyranids'), ('Ордо Маллеус', 'Ordo Malleus'), ('некроны', 'Necrons'), ('эльдары', 'Eldar'), ('хаос', 'Chaos'), ('орки', 'Orks'), ('тау', 'Tau'),
  ('ИГ', 'Imperial Guard'), ('СМ', 'Space Marines'), ('СР', 'Grey Knights'),
  ('реквизиция', 'requisition'), ('энергоузел', 'power node'), ('точка', 'point'), ('база', 'base'), (' у ', ' near '),
  ('в (', 'at ('),
 ]
 DIRS = {'СЗ': 'NW', 'СВ': 'NE', 'ЮЗ': 'SW', 'ЮВ': 'SE', 'С': 'N', 'Ю': 'S', 'З': 'W', 'В': 'E', 'центр': 'centre'}
 CHAT_EN = [('## Чат', '## Chat'), ('** (всем):', '** (to all):'), ('** (союзникам):', '** (to allies):'), ('** (наблюдатель):', '** (observer):')]
+# race keys the report left raw (make_report.RACE_RU has no entry for them): readable Russian names; the English side goes through EN below
+RACE_FIX = {'ordo_malleus': 'Ордо Маллеус', 'necrons': 'некроны', 'necron': 'некроны', 'z_unecron': 'некроны', 'tau': 'тау', 'chaos_space_marines': 'хаос'}
+def ru_fix(t):
+    if not t: return t
+    head, sep, chat = t.partition('\n## Чат\n')   # players' chat lines are left as they are
+    head = re.sub(r'(?<![\w])(' + '|'.join(RACE_FIX) + r')(?![\w])', lambda m: RACE_FIX[m.group(1)], head)
+    return head + sep + chat
+
 def to_en(t):
     if not t: return t
     head, sep, chat = t.partition('\n## Чат\n')   # реплики игроков не переводим: замены фраз отчёта ломали бы их текст
@@ -313,7 +321,7 @@ def recent(n=15):
     for rid in [x for x in sorted(os.listdir(STORE), key=lambda x: -os.path.getmtime(f'{STORE}/{x}')) if x not in hid][:n]:
         cap = f'{STORE}/{rid}/caption.txt'
         if os.path.exists(cap): items.append({'id': rid, 'name': open(f'{STORE}/{rid}/name.txt').read() if os.path.exists(f'{STORE}/{rid}/name.txt') else rid,
-                                              'caption': open(cap).read(), 'caption_en': to_en(open(cap).read())})
+                                              'caption': ru_fix(open(cap).read()), 'caption_en': to_en(ru_fix(open(cap).read()))})
     return items
 
 class H(BaseHTTPRequestHandler):
@@ -348,8 +356,8 @@ class H(BaseHTTPRequestHandler):
             d = f'{STORE}/{m.group(1)}'
             if not os.path.isdir(d): return self.out(404, '{}', 'application/json')
             rd = lambda f: open(f'{d}/{f}').read() if os.path.exists(f'{d}/{f}') else None
-            return self.out(200, json.dumps({'name': rd('name.txt'), 'caption': rd('caption.txt'), 'report': rd('report.md'),
-                'caption_en': to_en(rd('caption.txt')), 'report_en': to_en(rd('report.md')),
+            return self.out(200, json.dumps({'name': rd('name.txt'), 'caption': ru_fix(rd('caption.txt')), 'report': ru_fix(rd('report.md')),
+                'caption_en': to_en(ru_fix(rd('caption.txt'))), 'report_en': to_en(ru_fix(rd('report.md'))),
                 'error': rd('error.txt'), 'story_ru': rd('story_ru.md'), 'story_en': rd('story_en.md'),
                 'story_running': story_running(m.group(1)), 'meta': replay_meta(m.group(1)),
                 'sim_state': sim_state(m.group(1))[0], 'sim_why': sim_state(m.group(1))[1]}, ensure_ascii=False), 'application/json')
@@ -363,12 +371,12 @@ class H(BaseHTTPRequestHandler):
             if 'gzip' not in (self.headers.get('Accept-Encoding') or ''): b = gzip.decompress(b); enc = None
             else: enc = 'gzip'
             self.send_response(200); self.send_header('Content-Type', 'application/json'); self.send_header('Content-Length', str(len(b)))
-            self.send_header('Cache-Control', 'public, max-age=3600')
+            self.send_header('Cache-Control', 'no-cache')
             if enc: self.send_header('Content-Encoding', enc)
             self.end_headers(); self.wfile.write(b); return
         m = re.match(r'^/replay/api/r/([0-9a-f]{16})/report(_en)?\.md$', p)
         if m and os.path.exists(f'{STORE}/{m.group(1)}/report.md'):
-            t = open(f'{STORE}/{m.group(1)}/report.md').read()
+            t = ru_fix(open(f'{STORE}/{m.group(1)}/report.md').read())
             return self.out(200, to_en(t) if m.group(2) else t, 'text/markdown; charset=utf-8')
         self.out(404, 'not found', 'text/plain')
     def body(self, limit=64 * 1024):

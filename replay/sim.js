@@ -13,7 +13,11 @@
       offer: 'The detailed analysis is not made for this replay yet: the game itself replays the match (no graphics, about a minute) and the whole match appears here on the map - every squad, fights, points, losses.',
       ask: '▶ Make the detailed analysis', queued: 'In the queue - this page will show the match by itself, usually within 2-5 minutes.', running: 'The game is replaying the match right now…', building: 'Almost ready…',
       failed: 'The game could not replay this match', unsupported: 'The detailed analysis works for Elite 3.2 and 3.2.1 replays of at least half a minute.', busy: 'The queue is full right now - try in a few minutes.',
-      hp: 'HP', sec: 's', models: 'models', end: 'Points at the end', loading: 'Loading the match…', fail: 'Could not load the match data', start: '▶ Watch the match' },
+      hp: 'HP', sec: 's', models: 'models', end: 'Points at the end', loading: 'Loading the match…', fail: 'Could not load the match data', start: '▶ Watch the match',
+      resTitle: 'Match result', resWin: 'Winner', resLikely: 'Probable winner', resUnknown: 'Result unknown', at: 'At', resPts: 'points held', resVp: 'victory points held', resSq: 'squads on the field',
+      resWipe: 'all squads of the other side were destroyed', resRead: 'read from the state of the match at its end: victory points and points held, army strength', resGuess: 'estimated from retreats and squad losses in the last quarter of the match',
+      resNone: 'the replay does not say clearly enough who won',
+      resNote: 'The replay does not record how the match ended (victory points, HQ, surrender), so the verdict comes from the last seconds.' },
     ru: { title: 'Матч посекундно', badge: 'движок игры', sub: 'Все отряды матча так, как их просчитала сама игра: где стоят, сколько здоровья и что делают — каждую секунду. Жмите «Смотреть» или кликайте в любой момент.',
       play: 'Смотреть', pause: 'Пауза', trails: 'Следы', heat: 'Тепловая карта', heatNone: 'выкл', army: 'Сила армий (сумма HP отрядов на поле)',
       pts: 'Стратегические точки под контролем', req: 'Отрядов на поле', moments: 'Ключевые моменты', all: 'Все', fights: 'Бои', heroes: 'Герои', deaths: 'Потери', chat: 'Чат',
@@ -24,9 +28,14 @@
       offer: 'Подробный разбор для этого реплея ещё не делали: сама игра заново прокрутит матч (без графики, около минуты), и здесь появится весь матч на карте — каждый отряд, бои, точки, потери.',
       ask: '▶ Сделать подробный разбор', queued: 'В очереди — страница сама покажет матч, обычно через 2–5 минут.', running: 'Игра прямо сейчас прокручивает матч…', building: 'Почти готово…',
       failed: 'Игра не смогла прокрутить этот матч', unsupported: 'Подробный разбор работает для реплеев Elite 3.2 и 3.2.1 длиной от полминуты.', busy: 'Очередь сейчас заполнена — попробуйте через несколько минут.',
-      hp: 'HP', sec: 'с', models: 'моделей', end: 'Точки в конце', loading: 'Загружаю матч…', fail: 'Не удалось загрузить данные матча', start: '▶ Смотреть матч' } };
+      hp: 'HP', sec: 'с', models: 'моделей', end: 'Точки в конце', loading: 'Загружаю матч…', fail: 'Не удалось загрузить данные матча', start: '▶ Смотреть матч',
+      resTitle: 'Итог матча', resWin: 'Победа', resLikely: 'Вероятная победа', resUnknown: 'Результат неизвестен', at: 'На', resPts: 'точек под контролем', resVp: 'VP-точек под контролем', resSq: 'отрядов на поле',
+      resWipe: 'все отряды другой стороны уничтожены', resRead: 'по состоянию матча в конце: очки и точки под контролем, сила армий', resGuess: 'оценка по ретритам и потерям отрядов в последней четверти матча',
+      resNone: 'по реплею не удаётся уверенно сказать, кто победил',
+      resNote: 'Реплей не хранит, чем закончился матч (очки, штаб, сдача), поэтому вывод сделан по последним секундам.' } };
   const tx = k => (TX[L] || TX.en)[k];
-  const tname = tm => { const i = S.teams.indexOf(tm); return i >= 0 && i < 2 ? tx('sides')[i] : tx('team')(tm + 1); };
+  const tnm = (teams, tm) => { const i = teams.indexOf(tm); return i >= 0 && i < 2 ? tx('sides')[i] : tx('team')(tm + 1); };
+  const tname = tm => tnm(S.teams, tm);
   const TEAMC = ['#2f8bff', '#ff3b30'];   // by side: the first team blue, the second red
   const SPEEDS = [1, 4, 8, 16, 32];
   let S = null;
@@ -81,6 +90,11 @@
 .sim-charts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
 .sim-ch { font-size: 12.5px; color: var(--muted); margin: 0 0 4px; }
 .sim-charts canvas { width: 100%; height: 120px; display: block; cursor: pointer; border: 1px solid var(--line); border-radius: 8px; }
+.sim-res { margin-top: 12px; border: 1px solid var(--line); border-left: 4px solid var(--gold); border-radius: 8px; padding: 8px 12px; font-size: 13.5px; line-height: 1.5; }
+.sim-res .res-h { font-size: 15px; }
+.sim-res .res-d { color: var(--muted); font-size: 12.5px; }
+.sim-final { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); background: rgba(10,11,13,.88); color: #fff; border: 2px solid var(--gold); border-radius: 12px; padding: 12px 22px; text-align: center; font: 600 15px/1.5 system-ui, sans-serif; pointer-events: none; z-index: 1; }
+.sim-final[hidden] { display: none; }
 .sim-ev { margin-top: 16px; }
 .sim-evf { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 8px; }
 .sim-evf button { padding: 3px 10px; font-size: 13px; border-color: var(--line); color: var(--muted); }
@@ -101,6 +115,56 @@
   const fmt = s => { s = Math.max(0, Math.floor(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
   const nf = v => (v == null ? '–' : Math.round(v).toLocaleString(L === 'ru' ? 'ru-RU' : 'en-GB'));
 
+  // ---------- match result ----------
+  // The replay holds no explicit winner (the end of the game is not recorded), so the end state of the engine's simulation votes:
+  // all squads of one side gone = decisive; otherwise victory points held (2), points held (1), army strength at least 1.3x (1)
+  // and the retreat/loss guess of the report (1, half when 'medium'). A lead of 3+ is a probable winner, anything less is unknown.
+  function verdict(D, players, guess, dur) {
+    const teams = [...new Set(players.map(p => p.team))].sort();
+    const r = { teams, players, level: 'unknown', team: null, how: '', facts: null, dur: D ? D.dur - 1 : dur };
+    if (teams.length !== 2) return r;
+    const [a, b] = teams, other = tm => (tm === a ? b : a), vote = { [a]: 0, [b]: 0 };
+    const gw = guess && teams.includes(guess.team) ? guess : null;
+    if (gw) vote[gw.team] += gw.conf === 'высокая' ? 1 : gw.conf === 'средняя' ? 0.5 : 0;
+    if (D) {
+      const s = D.dur - 1, tmOf = {}; D.players.forEach(p => { tmOf[p.pid] = p.team; });
+      const f = { pts: {}, sq: {}, vp: null, army: {} };
+      teams.forEach(tm => { f.pts[tm] = ((D.points || {})[tm] || [])[s]; f.army[tm] = ((D.army_team || {})[tm] || [])[s]; f.sq[tm] = 0; });
+      const fr = D.frames[s] || [];
+      for (let i = 0; i < fr.length; i += 6) { const sq = D.squads[fr[i]], tm = sq && tmOf[sq[0]]; if (tm != null && fr[i + 4] > 0 && fr[i + 3] > 0) f.sq[tm]++; }
+      if (D.pown) {
+        const own = D.pown.pts.map(() => -1); for (const e of D.pown.ev) own[e[1]] = e[2];
+        const vps = D.pown.pts.map((p, i) => p[0] === 'vp' ? own[i] : null).filter(o => o !== null);
+        if (vps.length) { f.vp = { n: vps.length }; teams.forEach(tm => { f.vp[tm] = vps.filter(o => o === tm).length; }); }
+      }
+      r.facts = f;
+      if (f.sq[a] === 0 && f.sq[b] > 0) { r.team = b; r.level = 'sure'; r.how = 'resWipe'; return r; }
+      if (f.sq[b] === 0 && f.sq[a] > 0) { r.team = a; r.level = 'sure'; r.how = 'resWipe'; return r; }
+      if (f.vp && f.vp[a] !== f.vp[b]) vote[f.vp[a] > f.vp[b] ? a : b] += 2;
+      if (f.pts[a] != null && f.pts[b] != null && f.pts[a] !== f.pts[b]) vote[f.pts[a] > f.pts[b] ? a : b] += 1;
+      const ra = f.army[a], rb = f.army[b];
+      if (ra != null && rb != null && Math.max(ra, rb) >= 1.3 * Math.max(1, Math.min(ra, rb))) vote[ra > rb ? a : b] += 1;
+      const w = vote[a] > vote[b] ? a : b;
+      if (Math.abs(vote[a] - vote[b]) >= 3) { r.team = w; r.level = 'likely'; r.how = 'resRead'; }
+    } else if (gw && gw.conf === 'высокая') { r.team = gw.team; r.level = 'likely'; r.how = 'resGuess'; }
+    return r;
+  }
+  // text parts of a verdict (language of the page)
+  function resParts(r) {
+    const col = tm => TEAMC[r.teams.indexOf(tm) % 2], nm = tm => `<span style="color:${col(tm)}">${tnm(r.teams, tm)}</span>`;
+    const names = tm => r.players.filter(p => p.team === tm).map(p => esc(p.name)).join(', ');
+    const head = r.team != null ? `<b>${tx(r.level === 'sure' ? 'resWin' : 'resLikely')}: ${nm(r.team)}</b> (${names(r.team)})` : `<b>${tx('resUnknown')}</b>`;
+    const f = r.facts;
+    const facts = f ? tx('at') + ' ' + fmt(r.dur) + ': ' + r.teams.map(tm => `${nm(tm)} - ` + [f.pts[tm] != null ? `${f.pts[tm]} ${tx('resPts')}` : '', f.vp ? `${f.vp[tm]}/${f.vp.n} ${tx('resVp')}` : '', `${f.sq[tm]} ${tx('resSq')}`].filter(Boolean).join(', ')).join(' · ') : '';
+    return { head, why: r.team != null ? tx(r.how) : tx('resNone'), facts, note: r.how === 'resWipe' ? '' : tx('resNote') };
+  }
+  const resHTML = r => { const p = resParts(r); return `<div class="res-h">${tx('resTitle')}: ${p.head}</div><div class="res-d">${p.why}${p.facts ? '<br>' + p.facts : ''}${p.note ? '<br><i>' + p.note + '</i>' : ''}</div>`; };
+  function resbox() {
+    if (!S || !S.res || !S.el.res) return;
+    S.el.res.innerHTML = resHTML(S.res);
+    S.el.final.innerHTML = `${tx('resTitle')}<br>${resParts(S.res).head}`;
+  }
+
   async function show(rid, mapKey) {
     let card = document.getElementById('sim');
     if (S && S.rid === rid && card) { relabel(); return; }
@@ -113,7 +177,10 @@
     await assetsReady;
     S = { rid, D, t: 0, playing: false, speed: 8, trails: true, heat: '', last: 0, evf: 'all', mapKey: mapKey || D.map, hover: null };
     prep();
+    S.res = verdict(D, D.players, window.RESCTX && window.RESCTX.guess, 0);
+    window.SIMD = { rid, D, res: S.res };
     build(card);
+    if (window.renderResBox) window.renderResBox();
     if (location.hash === '#sim') setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);   // opened from the launcher
   }
   // no data yet: offer the detailed analysis (the replay goes to the runner's queue), then wait for it
@@ -216,7 +283,7 @@
       <div class="sim-sub" id="simSub"></div>
       <div class="sim-main">
         <div class="sim-mapw" id="simW"><canvas id="simMap"></canvas><div class="sim-clock" id="simClock"></div><div class="sim-score" id="simScore"></div>
-          <div class="sim-leg" id="simLeg"></div><div class="sim-chatbox" id="simChat"></div><div class="sim-tip" id="simTip"></div><div class="sim-big" id="simBig"><button id="simStart"></button></div></div>
+          <div class="sim-leg" id="simLeg"></div><div class="sim-chatbox" id="simChat"></div><div class="sim-tip" id="simTip"></div><div class="sim-big" id="simBig"><button id="simStart"></button></div><div class="sim-final" id="simFinal" hidden></div></div>
         <div class="sim-side" id="simSide"></div>
       </div>
       <div class="sim-ctl">
@@ -227,6 +294,7 @@
         <label class="sim-opt"><span id="simHL"></span> <select id="simHeat"></select></label>
       </div>
       <div class="sim-tl"><canvas id="simTl"></canvas></div>
+      <div class="sim-res" id="simRes"></div>
       <div class="sim-charts">
         <div><div class="sim-ch" id="simC1"></div><canvas id="simArmy"></canvas></div>
         <div><div class="sim-ch" id="simC2"></div><canvas id="simPts"></canvas></div>
@@ -236,7 +304,7 @@
       <div class="sim-cb" id="simCb" hidden></div>`;
     const $ = id => document.getElementById(id);
     S.el = { map: $('simMap'), tl: $('simTl'), army: $('simArmy'), pts: $('simPts'), req: $('simReq'), clock: $('simClock'), score: $('simScore'),
-      chat: $('simChat'), tip: $('simTip'), side: $('simSide'), time: $('simTime'), play: $('simPlay'), evl: $('simEvl'), big: $('simBig') };
+      chat: $('simChat'), tip: $('simTip'), side: $('simSide'), time: $('simTime'), play: $('simPlay'), evl: $('simEvl'), big: $('simBig'), res: $('simRes'), final: $('simFinal') };
     // background minimap
     const m = AS.maps && AS.maps[S.mapKey];
     S.bg = null;
@@ -272,7 +340,7 @@
     if (S.el.big) $('simStart').textContent = tx('start');
     const hs = $('simHeat'); hs.innerHTML = `<option value="">${tx('heatNone')}</option>` + S.D.players.map(p => `<option value="${p.pid}">${esc(p.name)}</option>`).join(''); hs.value = S.heat;
     $('simEvf').innerHTML = ['all', 'fights', 'heroes', 'deaths', 'chat'].map(k => `<button data-k="${k}" class="${S.evf === k ? 'on' : ''}">${tx(k)}</button>`).join('');
-    side(true); segs(); events(); ui(true); charts(); combat();
+    side(true); segs(); events(); ui(true); charts(); combat(); resbox();
   }
   function segs() { document.querySelectorAll('#simSpd button').forEach(b => b.classList.toggle('on', +b.dataset.v === S.speed)); }
 
@@ -417,6 +485,7 @@
       else { const c = e.c; const p = D.players.find(q => q.name === c[1]); ic = '💬'; x = `<b style="color:${p ? p.color : 'var(--muted)'}">${esc(c[1])}</b>: ${esc(c[3])}`; }
       return `<div class="sim-e" data-t="${e.t}"><span class="t">${fmt(e.t)}</span><span>${ic}</span><span class="x">${x}${d ? `<div class="d">${d}</div>` : ''}</span></div>`;
     });
+    if (S.res && S.evf === 'all') { const p = resParts(S.res); rows.push(`<div class="sim-e" data-t="${D.dur - 1}"><span class="t">${fmt(D.dur - 1)}</span><span>🏁</span><span class="x"><b>${tx('resTitle')}</b>: ${p.head}<div class="d">${p.why}</div></span></div>`); }
     S.el.evl.innerHTML = rows.join('') || '<div class="sim-e"><span></span><span></span><span class="x">—</span></div>';
     S.curEv = null; ui(true);
   }
@@ -597,6 +666,7 @@
   function ui(force) {
     if (!S || !S.el) return;
     S.el.time.textContent = fmt(S.t) + ' / ' + fmt(S.D.dur - 1);
+    if (S.el.final) S.el.final.hidden = !(S.t >= S.D.dur - 3 && !S.el.big);
     S.el.play.textContent = S.playing ? '❚❚ ' + tx('pause') : '▶ ' + tx('play');
     side(false);
     // current event highlight
@@ -626,5 +696,5 @@
     if (!S.raf) ui();
   }
 
-  window.SIM = { show, hide, offer };
+  window.SIM = { show, hide, offer, verdict, resHTML };
 })();
