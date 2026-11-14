@@ -232,7 +232,8 @@
         <div><div class="sim-ch" id="simC2"></div><canvas id="simPts"></canvas></div>
         <div><div class="sim-ch" id="simC3"></div><canvas id="simReq"></canvas></div>
       </div>
-      <div class="sim-ev"><div class="cap" id="simMo"></div><div class="sim-evf" id="simEvf"></div><div class="sim-evl" id="simEvl"></div></div>`;
+      <div class="sim-ev"><div class="cap" id="simMo"></div><div class="sim-evf" id="simEvf"></div><div class="sim-evl" id="simEvl"></div></div>
+      <div class="sim-cb" id="simCb" hidden></div>`;
     const $ = id => document.getElementById(id);
     S.el = { map: $('simMap'), tl: $('simTl'), army: $('simArmy'), pts: $('simPts'), req: $('simReq'), clock: $('simClock'), score: $('simScore'),
       chat: $('simChat'), tip: $('simTip'), side: $('simSide'), time: $('simTime'), play: $('simPlay'), evl: $('simEvl'), big: $('simBig') };
@@ -271,7 +272,7 @@
     if (S.el.big) $('simStart').textContent = tx('start');
     const hs = $('simHeat'); hs.innerHTML = `<option value="">${tx('heatNone')}</option>` + S.D.players.map(p => `<option value="${p.pid}">${esc(p.name)}</option>`).join(''); hs.value = S.heat;
     $('simEvf').innerHTML = ['all', 'fights', 'heroes', 'deaths', 'chat'].map(k => `<button data-k="${k}" class="${S.evf === k ? 'on' : ''}">${tx(k)}</button>`).join('');
-    side(true); segs(); events(); ui(true); charts();
+    side(true); segs(); events(); ui(true); charts(); combat();
   }
   function segs() { document.querySelectorAll('#simSpd button').forEach(b => b.classList.toggle('on', +b.dataset.v === S.speed)); }
 
@@ -302,6 +303,98 @@
       document.getElementById('simPB' + p.pid).style.width = Math.min(100, 100 * a / S.armyMax) + '%';
     });
     S.teams.forEach(tm => { const pt = (D.points || {})[tm] || [], x = document.getElementById('simTP' + tm); if (x) x.textContent = pt[s] != null ? '⚑ ' + pt[s] : ''; });
+  }
+
+  // ---------- squad stats: every hit of the match from the game engine (damage hook) + kill events (combatstats.py, 14.11) ----------
+  const CX = {
+    en: { title: 'Squad stats', sub: 'Every hit of the match as the game engine dealt it: damage, kills and who fought whom. Click a column to sort, a squad for details.',
+      squad: 'Squad', dealt: 'Dealt', taken: 'Taken', kills: 'Kills', dpm: 'Dmg / min', weapons: 'Weapons', abilities: 'Abilities', ranged: 'ranged', melee: 'melee',
+      ability: 'ability weapons', effect: 'ability effects', other: 'other', wlist: 'Damage by weapon', klist: 'Kills (models)', tf: 'Damaged by', per: 'Wargear and upgrades',
+      start: 'start', bought: 'bought', ko: 'heroes knocked out', st: 'buildings destroyed', alive: 'on the field', none: '—', perMin: '/min',
+      kd: { ranged: 'ranged', melee: 'melee', ability: 'ability', effect: 'ability effect', other: 'other', unknown: 'no hit' },
+      note: 'Damage = health actually lost (overkill not counted). Ability effects = damage the engine deals without a weapon: psychic powers, grenade and charge effects, burning and poison, crush. Buffs (Waaagh!, auras) are inside the hits and are not split out.' },
+    ru: { title: 'Статистика отрядов', sub: 'Каждое попадание матча так, как его нанёс движок игры: урон, убийства и кто с кем дрался. Клик по столбцу — сортировка, по отряду — подробности.',
+      squad: 'Отряд', dealt: 'Нанёс', taken: 'Получил', kills: 'Убил', dpm: 'Урон / мин', weapons: 'Оружие', abilities: 'Способности', ranged: 'дальний бой', melee: 'ближний бой',
+      ability: 'оружие способностей', effect: 'эффекты способностей', other: 'прочее', wlist: 'Урон по оружию', klist: 'Убитые модели', tf: 'Кто наносил урон', per: 'Снаряжение и улучшения',
+      start: 'начало', bought: 'куплено', ko: 'героев повержено', st: 'зданий разрушено', alive: 'на поле', none: '—', perMin: '/мин',
+      kd: { ranged: 'дальний', melee: 'ближний', ability: 'способность', effect: 'эффект способности', other: 'прочее', unknown: 'без попадания' },
+      note: 'Урон — реально снятое здоровье (лишний урон по уже убитым не считается). Эффекты способностей — урон, который движок наносит без оружия: псайкерские силы, действие гранат и рывков, горение и яд, давка. Баффы (Waaagh!, ауры) сидят внутри попаданий и отдельно не выделяются.' } };
+  const cx = k => (CX[L] || CX.en)[k];
+  const cbCss = `
+.sim-cb { margin-top: 18px; }
+.sim-cbp { margin-top: 12px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.sim-cbp > .sim-pn { padding: 7px 10px; background: rgba(127,127,127,.06); }
+.sim-cbt { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.sim-cbt { table-layout: fixed; }
+.sim-cbt th:not(.l) { width: 15%; }
+@media (max-width: 560px) { .sim-cbt th:not(.l) { width: 18%; } .sim-cbt th { white-space: normal; padding: 5px 6px; } .sim-cbt td { padding: 5px 6px; } .sim-cbt .life { display: block; margin: 0; } }
+.sim-cbt th { text-align: right; font-weight: 600; color: var(--muted); font-size: 12.5px; padding: 5px 10px; cursor: pointer; white-space: nowrap; user-select: none; border-top: 1px solid var(--line); }
+.sim-cbt th.l, .sim-cbt td.l { text-align: left; }
+.sim-cbt th.on { color: var(--text); }
+.sim-cbt td { text-align: right; padding: 5px 10px; border-top: 1px solid var(--line); white-space: nowrap; }
+.sim-cbt td.l { white-space: normal; }
+.sim-cbr { cursor: pointer; }
+.sim-cbr:hover { background: rgba(230,195,92,.07); }
+.sim-cbr.open { background: rgba(230,195,92,.14); }
+.sim-cbt .life { color: var(--muted); font-size: 12px; margin-left: 6px; }
+.sim-cbd td { text-align: left; white-space: normal; background: rgba(127,127,127,.04); padding: 8px 10px 12px; }
+.sim-cbs { margin-bottom: 8px; }
+.sim-cbg { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px 16px; }
+.sim-cbg h5 { margin: 0 0 3px; font-size: 12.5px; color: var(--muted); font-weight: 600; }
+.sim-cbg div div { font-size: 13px; line-height: 1.45; }
+.sim-cbg .m { color: var(--muted); }
+.sim-cbn { color: var(--muted); font-size: 12px; margin-top: 8px; }
+.sim-kd { font-size: 11.5px; color: var(--muted); }
+`;
+  const KIND_W = ['ranged', 'melee'], KIND_A = ['ability', 'effect'];
+  const csum = o => Object.values(o || {}).reduce((a, b) => a + b, 0);
+  const clife = q => Math.max(1, q.a[1] - q.a[0]);
+  function cval(q, k) { return k === 'n' ? q.n.toLowerCase() : k === 'd' ? csum(q.d) : k === 'tk' ? csum(q.tk) : k === 'k' ? q.k + q.ko / 10 : k === 'dpm' ? csum(q.d) / clife(q) * 60 : 0; }
+  function csplit(d) {
+    const part = (ks, t) => { const v = ks.filter(k => d[k]); return v.length ? `${t} <b>${nf(v.reduce((a, k) => a + d[k], 0))}</b> (${v.map(k => cx(k) + ' ' + nf(d[k])).join(', ')})` : ''; };
+    return [part(KIND_W, cx('weapons')), part(KIND_A, cx('abilities')), d.other ? `${cx('other')} <b>${nf(d.other)}</b>` : ''].filter(Boolean).join(' · ') || cx('none');
+  }
+  const pcol = pid => (S.P[pid] || {}).color || 'var(--muted)';
+  const kdn = k => (cx('kd') || {})[k] || k;
+  function cdetail(q) {
+    const C = S.D.combat;
+    const w = q.w.map(x => `<div>${x[0] ? esc(x[0]) + ` <span class="sim-kd">${kdn(x[1])}</span>` : `<i>${kdn(x[1])}</i>`} <b>${nf(x[2])}</b></div>`).join('') || `<div class="m">${cx('none')}</div>`;
+    const kv = q.kv.map(x => `<div>${x[3]} × <span style="color:${pcol(x[1])}">${esc(x[0])}</span> <span class="sim-kd">${kdn(x[2])}${x[4] ? ', ' + esc(x[4]) : ''}</span></div>`).join('')
+      + (q.kol || []).map(x => `<div>☠ <span style="color:${pcol(x[1])}">${esc(x[0])}</span> <span class="sim-kd">${cx('ko')}: ${x[3]}${x[4] ? ', ' + esc(x[4]) : ''}</span></div>`).join('')
+      + (q.stl || []).map(x => `<div>▣ <span style="color:${pcol(x[1])}">${esc(x[0])}</span> <span class="sim-kd">${cx('st')}: ${x[2]}</span></div>`).join('') || `<div class="m">${cx('none')}</div>`;
+    const tf = q.tf.map(x => `<div><span style="color:${pcol(x[1])}">${esc(x[2])}</span>${S.P[x[1]] ? ` <span class="sim-kd">${esc(S.P[x[1]].name)}</span>` : ''} <b>${nf(x[3])}</b></div>`).join('') || `<div class="m">${cx('none')}</div>`;
+    const pe = (q.pe || []).map((x, i) => { const dur = Math.max(1, x[1] - x[0]);
+      return `<div><span class="m">${fmt(x[0])}–${fmt(x[1])}</span> ${i === 0 ? cx('start') : cx('bought') + ' <b>' + esc(x[2].join(', ') || '?') + '</b>'}: ${cx('dealt').toLowerCase()} <b>${nf(x[3])}</b> (${nf(x[3] / dur * 60)}${cx('perMin')}), ${cx('taken').toLowerCase()} ${nf(x[4])}, ${cx('kills').toLowerCase()} ${x[5]}` +
+        (Object.keys(x[6] || {}).length ? `<div class="sim-kd">${csplit(x[6])}</div>` : '') + '</div>'; }).join('');
+    return `<tr class="sim-cbd"><td colspan="5"><div class="sim-cbs">${cx('dealt')}: ${csplit(q.d)}<br>${cx('taken')}: ${csplit(q.tk)}</div>
+      <div class="sim-cbg"><div><h5>${cx('wlist')}</h5>${w}</div><div><h5>${cx('klist')}</h5>${kv}</div><div><h5>${cx('tf')}</h5>${tf}</div>${pe ? `<div><h5>${cx('per')}</h5>${pe}</div>` : ''}</div></td></tr>`;
+  }
+  function combat() {
+    const box = document.getElementById('simCb'); if (!box || !S) return;
+    const C = S.D.combat; if (!C || !C.sq || !Object.keys(C.sq).length) { box.hidden = true; return; }
+    if (!document.getElementById('sim-cb-css')) { const st = document.createElement('style'); st.id = 'sim-cb-css'; st.textContent = cbCss; document.head.appendChild(st); }
+    box.hidden = false;
+    const so = S.cbSort || (S.cbSort = { k: 'd', dir: -1 });
+    const cols = [['n', cx('squad')], ['d', cx('dealt')], ['tk', cx('taken')], ['k', cx('kills')], ['dpm', cx('dpm')]];
+    let h = `<div class="cap">${cx('title')}</div><div class="sim-sub">${cx('sub')}</div>`;
+    for (const tm of S.teams) for (const p of S.D.players.filter(p => p.team === tm)) {
+      const list = Object.entries(C.sq).filter(([, q]) => q.p === p.pid);
+      if (!list.length) continue;
+      list.sort((a, b) => { const x = cval(a[1], so.k), y = cval(b[1], so.k); return (x < y ? -1 : x > y ? 1 : 0) * so.dir; });
+      const r = AS.races[rk(p.race)] || {};
+      h += `<div class="sim-cbp"><div class="sim-pn"><i class="sim-sh c${p.side}" style="background:${p.color};border-color:${TEAMC[p.side]}"></i>${r.icon ? `<img src="${A + r.icon}" alt="">` : ''}<span>${esc(p.name)}</span></div>` +
+        `<table class="sim-cbt"><thead><tr>${cols.map(([k, t]) => `<th data-k="${k}" class="${k === 'n' ? 'l' : ''}${so.k === k ? ' on' : ''}">${t}${so.k === k ? (so.dir < 0 ? ' ▾' : ' ▴') : ''}</th>`).join('')}</tr></thead><tbody>` +
+        list.map(([id, q]) => `<tr class="sim-cbr${S.cbOpen === id ? ' open' : ''}" data-id="${id}"><td class="l">${q.h ? '★ ' : ''}${esc(q.n)}<span class="life">${fmt(q.a[0])}–${fmt(q.a[1])}</span></td>` +
+          `<td>${nf(csum(q.d))}</td><td>${nf(csum(q.tk))}</td><td>${q.k}${q.ko ? ` <span class="sim-kd">+${q.ko}☠</span>` : ''}</td><td>${nf(csum(q.d) / clife(q) * 60)}</td></tr>` +
+          (S.cbOpen === id ? cdetail(q) : '')).join('') + '</tbody></table></div>';
+    }
+    box.innerHTML = h + `<div class="sim-cbn">${cx('note')}</div>`;
+    box.onclick = e => {
+      const th = e.target.closest('th[data-k]');
+      if (th) { const k = th.dataset.k; S.cbSort = so.k === k ? { k, dir: -so.dir } : { k, dir: k === 'n' ? 1 : -1 }; combat(); return; }
+      const tr = e.target.closest('tr.sim-cbr');
+      if (tr) { S.cbOpen = S.cbOpen === tr.dataset.id ? null : tr.dataset.id; combat(); }
+    };
   }
 
   function setFocus(pid) {

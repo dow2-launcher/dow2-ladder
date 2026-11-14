@@ -48,6 +48,66 @@ def label(bp):
     return ' '.join(p).strip().capitalize() or bp
 
 
+WG_SKIP = ('wp1', 'wp2', 'wp3', 'wp4', 'arm', 'acc', 'weapon', 'wargear')
+
+
+def wlabel(bp):
+    """weapon / wargear blueprint -> short readable name (race prefix and slot tokens dropped)"""
+    if not bp or bp == '-': return ''
+    p = [x for x in bp.split('_') if x]
+    if len(p) > 1 and p[0] in ('sm', 'csm', 'ork', 'ig', 'tau', 'eld', 'tyr', 'gk', 'om', 'inq', 'nis', 'kroot'): p = p[1:]
+    q = [x for x in p if x not in WG_SKIP] or p
+    return ' '.join(q).strip().capitalize() or bp
+
+
+def combat_block(rid, t0, squads, pinfo):
+    """per-squad combat stats (prod_gpu bin/combatstats.py: engine damage hook + SCAR kill events, 14.11) -> compact page data.
+    Engine player ids and squad ids are the same as in the per-second dump, so the page's player mapping applies as is."""
+    f = f'{SIM}/{rid}.combat.json.gz'
+    if not os.path.exists(f): return None
+    j = json.load(gzip.open(f, 'rt'))
+    if not ((j.get('checks') or {}).get('crc') or {}).get('ok'): return None
+    def name(sid, bp):
+        sq = squads.get(sid)
+        if sq and sq[2]: return (pinfo.get(sq[0]) or {}).get('hero_name') or sq[1]
+        return sq[1] if sq else label(bp or '?')
+    out = {}
+    rk = lambda d: {k: int(v) for k, v in (d or {}).items() if v}
+    for s in j.get('squads') or []:
+        sid = s['id']; pid = s.get('player')
+        if pid not in pinfo: continue
+        d = rk(s.get('dealt')); tk = rk(s.get('taken'))
+        kills = s.get('kills') or []
+        if not d and not tk and not kills: continue
+        per = []
+        for pr in s.get('periods') or []:
+            bought = [wlabel(x) for x in (pr.get('bought') or '').split(';') if x and 'decorator' not in x]
+            per.append([round(max(0, pr['from'] - t0), 1), round(max(0, pr['to'] - t0), 1), bought, int(pr.get('dealt') or 0),
+                        int(pr.get('taken') or 0), int(pr.get('kills') or 0), rk(pr.get('dealt_kind'))])
+        if len(per) > 1 and not per[0][3] and not per[0][4] and per[1][0] - per[0][0] < 2: per = per[1:]
+        sq = squads.get(sid)
+        out[str(sid)] = {
+            'p': pid, 'n': name(sid, s.get('bp')), 'h': 1 if sq and sq[2] else 0,
+            'a': [round(max(0, s['first'] - t0), 1), round(max(0, s['last'] - t0), 1)], 'd': d, 'tk': tk,
+            'k': sum(k['n'] for k in kills), 'ko': sum(k['n'] for k in s.get('kos') or []), 'st': sum(k['n'] for k in s.get('structures') or []),
+            'w': [[wlabel(w['weapon']) if w['weapon'] != '-' else '', w['kind'], int(w['damage'])] for w in s.get('dealt_by_weapon') or [] if w['damage'] > 0],
+            'kv': [[label(k['victim']), k.get('player'), k['kind'], k['n'], wlabel(k.get('weapon') or '')] for k in kills],
+            'kol': [[label(k['victim']), k.get('player'), k['kind'], k['n'], wlabel(k.get('weapon') or '')] for k in s.get('kos') or []],
+            'stl': [[label(k['victim']), k.get('player'), k['n']] for k in s.get('structures') or []],
+            'tf': [[t.get('squad'), t.get('player'), name(t.get('squad'), t['from']) if t.get('squad') is not None else label(t['from']), int(t['damage'])]
+                   for t in s.get('taken_from') or [] if t['damage'] > 0][:12],
+            'pe': per if len(per) > 1 else []}
+    c = j.get('checks') or {}
+    return {'v': 1, 'sq': out, 'chk': {'share': c.get('share_of_hook_damage_in_matching_cells'), 'kills': c.get('model_kill_events'),
+                                       'kills_hit': c.get('model_kills_with_hit')}}
+
+
+def combat_safe(*a):
+    try: return combat_block(*a)
+    except Exception as e:
+        print('combat block skipped:', repr(e)[:160], file=sys.stderr); return None
+
+
 def build(rid, assets):
     d = open(f'{STORE}/{rid}/replay.rec', 'rb').read()
     meta, _ = dow2rec.parse(f'{STORE}/{rid}/replay.rec')
@@ -248,7 +308,7 @@ def build(rid, assets):
             'heat': {str(k): v for k, v in heat.items()}, 'grid': G,
             'eco': {str(k): v for k, v in eco.items()}, 'points': pts,
             'army': {str(k): [int(x) for x in v] for k, v in army.items()}, 'army_team': {k: [int(x) for x in v] for k, v in teams_army.items()},
-            'chat': chat, 'mpoints': mpoints, 'pown': pown}
+            'chat': chat, 'mpoints': mpoints, 'pown': pown, 'combat': combat_safe(rid, t0, squads, pinfo)}
 
 
 def main(rids):
