@@ -14,6 +14,8 @@ ProtectSystem=strict
 ReadWritePaths=/srv/replayweb/data /srv/replayweb/reports /srv/replayweb/queue /srv/replayweb/simq
 ProtectHome=yes
 InaccessiblePaths=/var/www /mnt /etc/nginx /etc/supervisor /usr/local/bin /root /var/log
+# the site's game assets (race heroes for the match player): read only, the rest of /var/www stays hidden
+BindReadOnlyPaths=/var/www/rts-site/elite/assets:/srv/replayweb/assets
 PrivateTmp=yes
 PrivateDevices=yes
 NoNewPrivileges=yes

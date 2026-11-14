@@ -125,7 +125,7 @@ def item(r, steam=None):
             'uploads': ups, 'vhash': vh, 'version': vname(vh), 'author': author, 'descr': descr,
             'source': source or ('ladder' if (lobby or '').startswith('MM-') else 'site'), 'src_link': link,
             'mine': bool(steam and a_steam == steam), 'caption': open(cap).read() if os.path.exists(cap) else None,
-            'sim': os.path.exists(f'{STORE}/{rid}/sim.json.gz'), 'sim_ok': vh in SIM_VERSIONS and (ticks or 0) >= 300}
+            'sim': os.path.exists(f'{STORE}/{rid}/sim.json.gz'), 'sim_ok': vh in SIM_VERSIONS and (ticks or 0) >= 300 and not bot_match(json.dumps(pl))}
 def replay_list(q='', mapk='', race='', mode='', page=0, n=30, version='', players='', author='', steam=None, mine=False):
     with idb() as c:
         if mine: rows = c.execute(f'SELECT {COLS} FROM replays WHERE author_steam = ? ORDER BY uploaded DESC', (steam or '-',)).fetchall()
@@ -229,11 +229,15 @@ def sim_state(rid):
                 except OSError: why = ''
                 return 'failed', why
             return {'done': 'building', 'work': 'running', 'req': 'queued'}[st], None
-    with idb() as c: r = c.execute('SELECT vhash, ticks FROM replays WHERE rid = ?', (rid,)).fetchone()
+    with idb() as c: r = c.execute('SELECT vhash, ticks, players FROM replays WHERE rid = ?', (rid,)).fetchone()
     if not r: return 'none', None
     if r[0] not in SIM_VERSIONS: return 'unsupported', None
     if (r[1] or 0) < 300: return 'unsupported', None
+    if bot_match(r[2]): return 'unsupported', None
     return 'none', None
+def bot_match(players):   # a computer in the match: the new AI gives its orders inside the sim, a replay of it never plays back the same
+    try: return any(p.get('pid') == 4294967295 or 'Computer Player' in (p.get('name') or '') for p in json.loads(players or '[]'))
+    except ValueError: return False
 def sim_request(rid):
     st, _ = sim_state(rid)
     if st == 'failed':
@@ -254,7 +258,7 @@ def sim_builder():
                 rid = f[:-5]
                 if not re.fullmatch(r'[0-9a-f]{16}', rid): continue
                 r = subprocess.run(['python3', APP + '/sim_view.py', rid], capture_output=True, text=True, timeout=600,
-                                   env=dict(os.environ, REPLAY_ROOT=ROOT, SIM_DIR=SIMDIR))
+                                   env=dict(os.environ, REPLAY_ROOT=ROOT, SIM_DIR=SIMDIR, ASSETS_INDEX=ROOT + '/assets/index.json'))
                 if os.path.exists(f'{STORE}/{rid}/sim.json.gz'):
                     for e in ('req', 'work', 'done', 'fail'):
                         try: os.remove(f'{SIMQ}/{rid}.{e}')
