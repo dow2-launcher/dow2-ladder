@@ -66,6 +66,7 @@ button[disabled] { opacity: .5; cursor: default; }
 .resbox .res-h { font-size: 16px; }
 .resbox .res-d { color: var(--muted); font-size: 13px; }
 .resbox[hidden] { display: none; }
+.rres { margin-top: 4px; font-size: 13px; color: var(--muted); }
 .views { color: var(--muted); font-size: 13px; white-space: nowrap; }
 .simtag { color: #111; background: var(--gold); border-radius: 5px; padding: 0 6px; font-weight: 600; font-size: 12px; }
 @media (max-width: 560px) { .tm { grid-template-columns: 1fr; } .tm .vs { display: none; } .rr { grid-template-columns: 56px 1fr; } .mini { width: 56px; height: 56px; }
@@ -202,7 +203,7 @@ function row(x) {
   if (x.sim) tags.push('<span class="simtag">▶ ' + T[L].simtag + '</span>');
   if (x.views) tags.push('<span class="views" title="' + T[L].views + '">👁 ' + x.views + '</span>');
   return `<a class="rr" href="/replay/r/${x.id}"><div class="mini" ${mini(x.map)}></div><div style="min-width:0">
-    <div class="rh"><b>${tags.shift()}</b> · <b>${tags.shift()}</b> · ${tags.join(' · ')}</div>${teams(x.players)}</div></a>`;
+    <div class="rh"><b>${tags.shift()}</b> · <b>${tags.shift()}</b> · ${tags.join(' · ')}</div>${teams(x.players)}${(L === 'en' ? x.result_en : x.result) ? '<div class="rres">' + esc(L === 'en' ? x.result_en : x.result) + '</div>' : ''}</div></a>`;
 }
 function fillSel(maps) {
   const rs = $('f-race'), v = rs.value;
@@ -250,7 +251,7 @@ async function loadResult() {
   $('home').hidden = true; $('result').hidden = false;
   if (j.error && !j.report) { $('caption').textContent = T[L].failed; $('report').innerHTML = '<pre>' + esc(j.error) + '</pre>'; return; }
   document.title = (j.name || T[L].replay) + (L === 'en' ? ' — analysis' : ' — разбор');
-  $('caption').textContent = (L === 'en' ? j.caption_en : j.caption) || j.name;
+  $('caption').textContent = (L === 'en' ? (j.caption_show_en || j.caption_en) : (j.caption_show || j.caption)) || j.name;
   $('report').innerHTML = md(L === 'en' ? j.report_en : j.report);
   $('dl').href = '/replay/api/r/' + rid + (L === 'en' ? '/report_en.md' : '/report.md');
   $('dlrec').href = '/replay/api/r/' + rid + '/replay.rec';

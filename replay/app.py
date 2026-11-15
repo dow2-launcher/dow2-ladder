@@ -182,7 +182,10 @@ def replay_list(q='', mapk='', race='', mode='', page=0, n=30, version='', playe
                                    + [p.get('name') or '' for p in it['players']]).lower(): continue
         out.append(it)
     page = max(0, int(page or 0)); n = max(1, min(100, int(n or 30)))
-    return {'total': len(out), 'page': page, 'items': out[page * n:(page + 1) * n], 'maps': sorted({i['map'] for i in out if i['map']})}
+    pg = out[page * n:(page + 1) * n]
+    for it in pg:
+        if it['sim']: it['result'] = result_text(it['id']); it['result_en'] = result_text(it['id'], True)
+    return {'total': len(out), 'page': page, 'items': pg, 'maps': sorted({i['map'] for i in out if i['map']})}
 def version_list():
     with idb() as c: rows = c.execute('SELECT vhash, COUNT(*), MAX(uploaded) FROM replays WHERE hidden IS NULL GROUP BY vhash').fetchall()
     agg = {}
@@ -256,7 +259,9 @@ def add_ratings(it):
 def replay_meta(rid, steam=None):
     with idb() as c: r = c.execute(f'SELECT {COLS} FROM replays WHERE rid = ?', (rid,)).fetchone()
     if not r: return None
-    it = item(r, steam); it.pop('caption', None); return add_ratings(it)
+    it = item(r, steam); it.pop('caption', None)
+    if it['sim']: it['result'] = result_text(rid); it['result_en'] = result_text(rid, True)
+    return add_ratings(it)
 
 # ---------- download name (fb 1088): date, players with races per team, map, winner (only when the page's verdict names one: ?w=<team>) ----------
 RACE_TAG = (('imperial_guard', 'IG'), ('space_marines', 'SM'), ('chaos', 'CSM'), ('ordo_malleus', 'OM'), ('ork', 'Orks'), ('eldar', 'Eldar'),
@@ -330,6 +335,104 @@ def to_en(t):
     t = re.sub(r'(\d+)\s*с\b', r'\1 s', t)
     t = re.sub(r'Т(\d)', r'T\1', t)          # кириллическая «Т» в тирах
     return t
+
+# ---------- exact result from the replay's simulation (fb 1191, 15.11) ----------
+# The .rec itself holds no result. When the game replayed the match (sim.json.gz) the end state is known: one side without a single live squad
+# = that side lost (annihilation); otherwise the match was cut off (surrender / the record ends) and only the state at the end is shown.
+# Note: sim 'points' are strategic POINTS HELD (0..~11), not the 500-ticket victory score - the runner does not dump that score.
+def _sim_calc(D):
+    tm = {p['pid']: p['team'] for p in D['players']}; teams = sorted(set(tm.values()))
+    if len(teams) != 2: return None
+    s = max(0, D['dur'] - 1); fr = D['frames'][s] if s < len(D['frames']) else []
+    sq = {t: 0 for t in teams}
+    for i in range(0, len(fr), 6):
+        q = D['squads'].get(str(fr[i]))
+        if q and q[0] in tm and fr[i + 4] > 0 and fr[i + 3] > 0: sq[tm[q[0]]] += 1
+    pts = {t: None for t in teams}
+    if D.get('pown'):
+        own = [-1] * len(D['pown']['pts'])
+        for e in D['pown']['ev']:
+            if e[0] <= s: own[e[1]] = e[2]
+        pts = {t: sum(1 for o in own if o == t) for t in teams}
+    else:
+        for t in teams:
+            v = [x for x in (D.get('points') or {}).get(str(t), []) if x is not None]
+            pts[t] = v[-1] if v else None
+    names = {t: ', '.join(p['name'] for p in D['players'] if p['team'] == t) for t in teams}
+    win = None
+    if sq[teams[0]] == 0 and sq[teams[1]] > 0: win = teams[1]
+    elif sq[teams[1]] == 0 and sq[teams[0]] > 0: win = teams[0]
+    return {'v': 1, 'state': 'win' if win is not None else 'open', 'team': win, 'teams': teams, 'names': {str(k): v for k, v in names.items()},
+            'pts': {str(k): v for k, v in pts.items()}, 'sq': {str(k): v for k, v in sq.items()}, 'dur': s}
+def sim_result(rid):
+    f = f'{STORE}/{rid}/sim.json.gz'
+    if not os.path.exists(f): return None
+    cf = f'{STORE}/{rid}/simresult.json'; mt = os.path.getmtime(f)
+    try:
+        c = json.load(open(cf))
+        if c.get('mt') == mt and c.get('r', {}).get('v') == 1: return c['r']
+    except Exception: pass
+    try: r = _sim_calc(json.load(gzip.open(f)))
+    except Exception as e: print('sim_result', rid, repr(e), flush=True); return None
+    if r is None: return None
+    try:
+        tmp = cf + '.tmp'; open(tmp, 'w').write(json.dumps({'mt': mt, 'r': r})); os.replace(tmp, cf)
+    except OSError: pass
+    return r
+def _side(r, t, en):
+    k = r['teams'].index(t); col = (('Blue', 'Red') if en else ('синие', 'красные'))[k]
+    return ('team %d (%s)' if en else 'команда %d (%s)') % (t, col)
+def result_text(rid, en=False, short=False):
+    """One line with the exact result, or None when there is no simulation data."""
+    r = sim_result(rid)
+    if not r: return None
+    t = r['teams']; a, b = [str(x) for x in t]
+    tag = ' [from the replay run]' if en else ' [по прогону реплея]'
+    if r['state'] == 'win':
+        w = r['team']; o = [x for x in t if x != w][0]; ws, os_ = str(w), str(o)
+        if en:
+            s = f"Victory: {_side(r, w, True)} ({r['names'][ws]}) - all squads of the other side destroyed"
+        else:
+            s = f"Победа: {_side(r, w, False)} (игроки {r['names'][ws]}) — уничтожены все отряды соперника"
+        if not short:
+            s += (f"; at the end ⚑ {r['pts'][ws]} : {r['pts'][os_]} points held, squads {r['sq'][ws]} : {r['sq'][os_]}" if en else
+                  f"; на конец ⚑ {r['pts'][ws]} : {r['pts'][os_]} удерживаемых точек, отрядов {r['sq'][ws]} : {r['sq'][os_]}")
+        return s + tag
+    if en:
+        s = 'Not played to the end (surrender or the record stops) - no winner can be named'
+        if not short: s += f"; at the end {_side(r, t[0], True)} : {_side(r, t[1], True)} - ⚑ {r['pts'][a]} : {r['pts'][b]} points held, squads {r['sq'][a]} : {r['sq'][b]}"
+        else: s += f" (⚑ {r['pts'][a]} : {r['pts'][b]})"
+    else:
+        s = 'Не доиграно (сдача или обрыв записи) — победителя назвать нельзя'
+        if not short: s += f"; на конец {_side(r, t[0], False)} : {_side(r, t[1], False)} — ⚑ {r['pts'][a]} : {r['pts'][b]} удерживаемых точек, отрядов {r['sq'][a]} : {r['sq'][b]}"
+        else: s += f" (⚑ {r['pts'][a]} : {r['pts'][b]})"
+    return s + tag
+def _pending(rid, en):
+    st = sim_state(rid)[0]
+    if st == 'unsupported': return 'exact result is not available for this game version' if en else 'точный итог для этой версии игры недоступен'
+    return 'the exact result will appear after the replay is analysed' if en else 'точный итог появится после разбора реплея'
+def caption_show(rid, cap, en=False):
+    """The summary line with the exact result in place of the guess; without sim data the guess stays with a note."""
+    if not cap: return cap
+    m = re.search(r' · (вероятный победитель|likely winner): .*$', cap)
+    res = result_text(rid, en, short=True)
+    if res: return (cap[:m.start()] if m else cap) + ' · ' + ('result: ' if en else 'итог: ') + res
+    return cap + (' — ' if m else ' · ') + _pending(rid, en)
+def report_show(rid, t, en=False):
+    """The 'Итог' section: the exact result line first; the guess stays only as a fallback."""
+    if not t: return t
+    res = result_text(rid, en)
+    hyp = re.compile(r'^\*\*(Winner hypothesis|Гипотеза о победителе).*$', re.M)
+    if res:
+        r = sim_result(rid); line = ('**Result:** ' if en else '**Результат:** ') + res
+        if r and r['state'] == 'win':
+            t = re.sub(r'^(End: no surrender marker|Конец: маркера сдачи нет).*\n?', '', t, flags=re.M)   # contradicts the exact verdict
+            t = re.sub(r'\n{3,}', '\n\n', t)
+            t = hyp.sub(lambda m: line, t, count=1) if hyp.search(t) else t.replace('## Result\n\n' if en else '## Итог\n\n', ('## Result\n\n' if en else '## Итог\n\n') + line + '\n\n', 1)
+        else:
+            t = hyp.sub(lambda m: line + '\n\n' + m.group(0), t, count=1) if hyp.search(t) else t.replace('## Result\n\n' if en else '## Итог\n\n', ('## Result\n\n' if en else '## Итог\n\n') + line + '\n\n', 1)
+        return t
+    return hyp.sub(lambda m: m.group(0).rstrip() + ' _(' + _pending(rid, en) + ')_', t, count=1)
 
 def analyse(rid):
     d = f'{STORE}/{rid}'
@@ -430,7 +533,7 @@ def recent(n=15):
     for rid in [x for x in sorted(os.listdir(STORE), key=lambda x: -os.path.getmtime(f'{STORE}/{x}')) if x not in hid][:n]:
         cap = f'{STORE}/{rid}/caption.txt'
         if os.path.exists(cap): items.append({'id': rid, 'name': open(f'{STORE}/{rid}/name.txt').read() if os.path.exists(f'{STORE}/{rid}/name.txt') else rid,
-                                              'caption': ru_fix(open(cap).read()), 'caption_en': to_en(ru_fix(open(cap).read()))})
+                                              'caption': caption_show(rid, ru_fix(open(cap).read())), 'caption_en': caption_show(rid, to_en(ru_fix(open(cap).read())), True)})
     return items
 
 class H(BaseHTTPRequestHandler):
@@ -461,7 +564,8 @@ class H(BaseHTTPRequestHandler):
             try:
                 w = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get('w', [''])[0]
                 with idb() as c: r = c.execute(f'SELECT {COLS} FROM replays WHERE rid = ?', (m.group(1),)).fetchone()
-                fn = rec_filename(item(r), int(w) if re.fullmatch(r'\d{1,3}', w) else None)
+                wr = sim_result(m.group(1)); wn = int(w) if re.fullmatch(r'\d{1,3}', w) else (wr['team'] if wr and wr['state'] == 'win' else None)
+                fn = rec_filename(item(r), wn)
             except Exception: fn = re.sub(r'[^\w.\-\[\]]', '_', nm)
             self.send_response(200); self.send_header('Content-Type', 'application/octet-stream'); self.send_header('Content-Length', str(len(b)))
             self.send_header('Content-Disposition', disposition(fn)); self.end_headers(); self.wfile.write(b); return
@@ -470,8 +574,9 @@ class H(BaseHTTPRequestHandler):
             d = f'{STORE}/{m.group(1)}'
             if not os.path.isdir(d): return self.out(404, '{}', 'application/json')
             rd = lambda f: open(f'{d}/{f}').read() if os.path.exists(f'{d}/{f}') else None
-            return self.out(200, json.dumps({'name': rd('name.txt'), 'caption': ru_fix(rd('caption.txt')), 'report': ru_fix(rd('report.md')),
-                'caption_en': to_en(ru_fix(rd('caption.txt'))), 'report_en': to_en(ru_fix(rd('report.md'))),
+            return self.out(200, json.dumps({'name': rd('name.txt'), 'caption': ru_fix(rd('caption.txt')), 'report': report_show(m.group(1), ru_fix(rd('report.md'))),
+                'caption_en': to_en(ru_fix(rd('caption.txt'))), 'report_en': report_show(m.group(1), to_en(ru_fix(rd('report.md'))), True),
+                'caption_show': caption_show(m.group(1), ru_fix(rd('caption.txt'))), 'caption_show_en': caption_show(m.group(1), to_en(ru_fix(rd('caption.txt'))), True),
                 'error': rd('error.txt'), 'story_ru': rd('story_ru.md'), 'story_en': rd('story_en.md'),
                 'story_running': story_running(m.group(1)), 'meta': replay_meta(m.group(1)),
                 'sim_state': sim_state(m.group(1))[0], 'sim_why': sim_state(m.group(1))[1]}, ensure_ascii=False), 'application/json')
@@ -491,7 +596,7 @@ class H(BaseHTTPRequestHandler):
         m = re.match(r'^/replay/api/r/([0-9a-f]{16})/report(_en)?\.md$', p)
         if m and os.path.exists(f'{STORE}/{m.group(1)}/report.md'):
             t = ru_fix(open(f'{STORE}/{m.group(1)}/report.md').read())
-            return self.out(200, to_en(t) if m.group(2) else t, 'text/markdown; charset=utf-8')
+            return self.out(200, report_show(m.group(1), to_en(t), True) if m.group(2) else report_show(m.group(1), t), 'text/markdown; charset=utf-8')
         self.out(404, 'not found', 'text/plain')
     def body(self, limit=64 * 1024):
         n = int(self.headers.get('Content-Length', 0) or 0)
