@@ -1672,6 +1672,9 @@ def nm_join(d):
     except Exception: max_diff = 0
     try: race = RACE_KEYS[int(d.get('race'))]
     except Exception: race = None
+    # 15.11.2026 (fb 1199): with Random picked the game sends the race SHOWN in the drop-down, not the one rolled (SAPIENSnauta: shown
+    # Chaos, played IG; 4 of his 5 matches of the day were off). MMFind says "random" in its hint: then the race is unknown until the report
+    if _clean(h.get('race'), 32) == 'random': race = 'random'
     try: gpid = int(d.get('pid') or 0)
     except Exception: gpid = 0
     party = [x for x in (d.get('party') or []) if isinstance(x, dict) and str(x.get('steam') or '').isdigit()][:2]
