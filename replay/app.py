@@ -339,7 +339,10 @@ def to_en(t):
 # ---------- exact result from the replay's simulation (fb 1191, 15.11) ----------
 # The .rec itself holds no result. When the game replayed the match (sim.json.gz) the end state is known: one side without a single live squad
 # = that side lost (annihilation); otherwise the match was cut off (surrender / the record ends) and only the state at the end is shown.
-# Note: sim 'points' are strategic POINTS HELD (0..~11), not the 500-ticket victory score - the runner does not dump that score.
+# Note: sim 'points' are strategic POINTS HELD (0..~11), not the 500-ticket victory score.
+# 15.11: sim.json 'tk' = the victory-point score (tickets) per team per second and the end of the match as the game's own win condition
+# saw it (World_SetTeamWin: vp = the other side's tickets at 0, concede = the other side gave up, annihilate = no HQ left). With 'tk'
+# the result comes only from it (no win event = not played to the end, the score at the end shown); without it (older runs) - squads.
 def _sim_calc(D):
     tm = {p['pid']: p['team'] for p in D['players']}; teams = sorted(set(tm.values()))
     if len(teams) != 2: return None
@@ -359,10 +362,18 @@ def _sim_calc(D):
             v = [x for x in (D.get('points') or {}).get(str(t), []) if x is not None]
             pts[t] = v[-1] if v else None
     names = {t: ', '.join(p['name'] for p in D['players'] if p['team'] == t) for t in teams}
-    win = None
-    if sq[teams[0]] == 0 and sq[teams[1]] > 0: win = teams[1]
-    elif sq[teams[1]] == 0 and sq[teams[0]] > 0: win = teams[0]
-    return {'v': 1, 'state': 'win' if win is not None else 'open', 'team': win, 'teams': teams, 'names': {str(k): v for k, v in names.items()},
+    win = how = score = None
+    tk = D.get('tk')
+    if tk:
+        if tk.get('end') and all(str(t) in tk['end'] for t in teams): score = {str(t): tk['end'][str(t)] for t in teams}
+        w = tk.get('win')
+        if w and w.get('team') in teams: win, how = w['team'], w.get('how')
+    else:
+        if sq[teams[0]] == 0 and sq[teams[1]] > 0: win = teams[1]
+        elif sq[teams[1]] == 0 and sq[teams[0]] > 0: win = teams[0]
+        if win is not None: how = 'squads'
+    return {'v': 2, 'state': 'win' if win is not None else 'open', 'team': win, 'how': how, 'score': score, 'teams': teams,
+            'names': {str(k): v for k, v in names.items()},
             'pts': {str(k): v for k, v in pts.items()}, 'sq': {str(k): v for k, v in sq.items()}, 'dur': s}
 def sim_result(rid):
     f = f'{STORE}/{rid}/sim.json.gz'
@@ -370,7 +381,7 @@ def sim_result(rid):
     cf = f'{STORE}/{rid}/simresult.json'; mt = os.path.getmtime(f)
     try:
         c = json.load(open(cf))
-        if c.get('mt') == mt and c.get('r', {}).get('v') == 1: return c['r']
+        if c.get('mt') == mt and c.get('r', {}).get('v') == 2: return c['r']
     except Exception: pass
     try: r = _sim_calc(json.load(gzip.open(f)))
     except Exception as e: print('sim_result', rid, repr(e), flush=True); return None
@@ -388,15 +399,31 @@ def result_text(rid, en=False, short=False):
     if not r: return None
     t = r['teams']; a, b = [str(x) for x in t]
     tag = ' [from the replay run]' if en else ' [по прогону реплея]'
+    sc = r.get('score')
     if r['state'] == 'win':
         w = r['team']; o = [x for x in t if x != w][0]; ws, os_ = str(w), str(o)
-        if en:
-            s = f"Victory: {_side(r, w, True)} ({r['names'][ws]}) - all squads of the other side destroyed"
+        how = r.get('how')
+        if how == 'squads':
+            s = (f"Victory: {_side(r, w, True)} ({r['names'][ws]}) - all squads of the other side destroyed" if en else
+                 f"Победа: {_side(r, w, False)} (игроки {r['names'][ws]}) — уничтожены все отряды соперника")
         else:
-            s = f"Победа: {_side(r, w, False)} (игроки {r['names'][ws]}) — уничтожены все отряды соперника"
+            why = ({'vp': 'on victory points', 'concede': 'the other side conceded', 'annihilate': 'the HQ of the other side destroyed'} if en else
+                   {'vp': 'по победным очкам', 'concede': 'соперник сдался', 'annihilate': 'штаб соперника уничтожен'}).get(how, how or '')
+            s = f"Victory: {_side(r, w, True)} ({r['names'][ws]})" if en else f"Победа: {_side(r, w, False)} (игроки {r['names'][ws]})"
+            if sc: s += (f" - score {sc[ws]} : {sc[os_]}" if en else f" — счёт {sc[ws]} : {sc[os_]}") + (f" ({why})" if why else '')
+            elif why: s += f" - {why}" if en else f" — {why}"
         if not short:
             s += (f"; at the end ⚑ {r['pts'][ws]} : {r['pts'][os_]} points held, squads {r['sq'][ws]} : {r['sq'][os_]}" if en else
                   f"; на конец ⚑ {r['pts'][ws]} : {r['pts'][os_]} удерживаемых точек, отрядов {r['sq'][ws]} : {r['sq'][os_]}")
+        return s + tag
+    if sc:
+        cl = (('Blue', 'Red') if en else ('синие', 'красные'))
+        if en:
+            s = f"Not played to the end (surrender or the record stops), score at the end {sc[a]} : {sc[b]} ({cl[0]} : {cl[1]})"
+            if not short: s += f"; {_side(r, t[0], True)} : {_side(r, t[1], True)} - ⚑ {r['pts'][a]} : {r['pts'][b]} points held, squads {r['sq'][a]} : {r['sq'][b]}"
+        else:
+            s = f"Не доиграно (сдача или обрыв записи), счёт на конец {sc[a]} : {sc[b]} ({cl[0]} : {cl[1]})"
+            if not short: s += f"; {_side(r, t[0], False)} : {_side(r, t[1], False)} — ⚑ {r['pts'][a]} : {r['pts'][b]} удерживаемых точек, отрядов {r['sq'][a]} : {r['sq'][b]}"
         return s + tag
     if en:
         s = 'Not played to the end (surrender or the record stops) - no winner can be named'

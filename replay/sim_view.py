@@ -4,6 +4,8 @@
 Input: the per-second dumps of the headless replay runner (fastbench on prod_gpu, extract mode):
   <SIM>/<rid>.csv.gz          t,player,squad,bp,x,z,hp,hpmax,n,state[,sup]   every squad every second
   <SIM>/<rid>.players.csv.gz  t,player,req,pow,waaagh,pop,popmax,points       every player every second
+  <SIM>/<rid>.tickets.csv.gz  t,event,team,tickets,vps,player,info   the victory-point score (Elite wincondition.scar, 500 -> 0) every
+                              second + how the match ended (win: reason, conceded; hq: an HQ killed) - from 15.11.2026 on
 and the replay itself (names, teams, races, heroes, chat, the map size from DATASDSC).
 Output: <STORE>/<rid>/sim.json.gz - what the page plays back: positions, economy, points held, deaths, fights, heat maps, chat.
 
@@ -106,6 +108,51 @@ def combat_safe(*a):
     try: return combat_block(*a)
     except Exception as e:
         print('combat block skipped:', repr(e)[:160], file=sys.stderr); return None
+
+
+def tickets_block(rid, t0, nsec, pinfo):
+    """the VP score per lobby team per second (as the HUD shows it: ceil) + the end of the match from the game's own win condition.
+    The tickets file's team is the engine's Player_GetTeam: mapped to the lobby team by the player id written with it."""
+    f = f'{SIM}/{rid}.tickets.csv.gz'
+    if not os.path.exists(f): return None
+    lt = lambda pid: (pinfo.get(int(pid)) or {}).get('team') if str(pid).isdigit() else None
+    eng = {}                                   # engine team -> lobby team
+    by, end, start, win, over, hq = {}, {}, {}, None, None, []
+    rows = list(csv.DictReader(gzip.open(f, 'rt')))
+    for r in rows:
+        if r['event'] in ('tk', 'end') and r['player'] and r['team'] != '' and lt(r['player']) is not None: eng[r['team']] = lt(r['player'])
+    for r in rows:
+        try: t = float(r['t'])
+        except ValueError: continue
+        s = int(round(t - t0)); ev = r['event']
+        if ev in ('tk', 'end'):
+            tm = eng.get(r['team'])
+            if tm is None: continue
+            try: v = int(math.ceil(float(r['tickets']) - 1e-9))
+            except ValueError: continue
+            if ev == 'tk' and 0 <= s < nsec: by.setdefault(str(tm), [None] * nsec)[s] = v
+            if ev == 'tk' and str(tm) not in start: start[str(tm)] = v
+            end[str(tm)] = v
+        elif ev == 'win' and win is None:
+            info = dict(x.split('=', 1) for x in (r['info'] or '').split(';') if '=' in x)
+            win = {'s': max(0, s), 'team': lt(r['player']), 'reason': info.get('reason'), 'conceded': info.get('conceded') == '1'}
+        elif ev == 'over' and over is None: over = max(0, s)
+        elif ev == 'hq': hq.append([max(0, s), lt(r['player'])])
+    if win is not None:
+        # how: tickets of the other side at 0 = victory points; conceded = the other side gave up; annihilate = no HQ left
+        lose = [v for k, v in end.items() if k != str(win['team'])]
+        if win['conceded']: win['how'] = 'concede'
+        elif win['reason'] == 'annihilate': win['how'] = 'annihilate'
+        elif lose and min(lose) <= 0: win['how'] = 'vp'
+        else: win['how'] = win['reason'] or '?'
+    if not by and win is None and not hq: return {'v': 1, 'vp': False}
+    return {'v': 1, 'vp': bool(by), 'by': by, 'start': start or None, 'end': end or None, 'win': win, 'over': over, 'hq': hq}
+
+
+def tickets_safe(*a):
+    try: return tickets_block(*a)
+    except Exception as e:
+        print('tickets block skipped:', repr(e)[:160], file=sys.stderr); return None
 
 
 def build(rid, assets):
@@ -308,7 +355,8 @@ def build(rid, assets):
             'heat': {str(k): v for k, v in heat.items()}, 'grid': G,
             'eco': {str(k): v for k, v in eco.items()}, 'points': pts,
             'army': {str(k): [int(x) for x in v] for k, v in army.items()}, 'army_team': {k: [int(x) for x in v] for k, v in teams_army.items()},
-            'chat': chat, 'mpoints': mpoints, 'pown': pown, 'combat': combat_safe(rid, t0, squads, pinfo)}
+            'chat': chat, 'mpoints': mpoints, 'pown': pown, 'combat': combat_safe(rid, t0, squads, pinfo),
+            'tk': tickets_safe(rid, t0, nsec, pinfo)}
 
 
 def main(rids):
