@@ -185,6 +185,10 @@ def replay_list(q='', mapk='', race='', mode='', page=0, n=30, version='', playe
     pg = out[page * n:(page + 1) * n]
     for it in pg:
         if it['sim']: it['result'] = result_text(it['id']); it['result_en'] = result_text(it['id'], True)
+        if it.get('caption'):   # fb 1191: the launcher shows this field - the exact result in place of the guess (no sim data: unchanged)
+            c = ru_fix(it['caption'])
+            if it['sim']: it['caption'] = caption_show(it['id'], c)
+            it['caption_en'] = caption_show(it['id'], to_en(c), True) if it['sim'] else to_en(c)
     return {'total': len(out), 'page': page, 'items': pg, 'maps': sorted({i['map'] for i in out if i['map']})}
 def version_list():
     with idb() as c: rows = c.execute('SELECT vhash, COUNT(*), MAX(uploaded) FROM replays WHERE hidden IS NULL GROUP BY vhash').fetchall()
@@ -441,10 +445,18 @@ def _pending(rid, en):
 def caption_show(rid, cap, en=False):
     """The summary line with the exact result in place of the guess; without sim data the guess stays with a note."""
     if not cap: return cap
+    try: key = (rid, en, cap, os.path.getmtime(f'{STORE}/{rid}/sim.json.gz'))
+    except OSError: key = None
+    if key and key in _CAPC: return _CAPC[key]
     m = re.search(r' · (вероятный победитель|likely winner): .*$', cap)
     res = result_text(rid, en, short=True)
-    if res: return (cap[:m.start()] if m else cap) + ' · ' + ('result: ' if en else 'итог: ') + res
-    return cap + (' — ' if m else ' · ') + _pending(rid, en)
+    if not res: return cap + (' — ' if m else ' · ') + _pending(rid, en)   # no sim data: the guess stays (not cached: the data may appear)
+    out = (cap[:m.start()] if m else cap) + ' · ' + ('result: ' if en else 'итог: ') + res
+    if key:
+        if len(_CAPC) > 5000: _CAPC.clear()
+        _CAPC[key] = out
+    return out
+_CAPC = {}
 def report_show(rid, t, en=False):
     """The 'Итог' section: the exact result line first; the guess stays only as a fallback."""
     if not t: return t
@@ -601,8 +613,8 @@ class H(BaseHTTPRequestHandler):
             d = f'{STORE}/{m.group(1)}'
             if not os.path.isdir(d): return self.out(404, '{}', 'application/json')
             rd = lambda f: open(f'{d}/{f}').read() if os.path.exists(f'{d}/{f}') else None
-            return self.out(200, json.dumps({'name': rd('name.txt'), 'caption': ru_fix(rd('caption.txt')), 'report': report_show(m.group(1), ru_fix(rd('report.md'))),
-                'caption_en': to_en(ru_fix(rd('caption.txt'))), 'report_en': report_show(m.group(1), to_en(ru_fix(rd('report.md'))), True),
+            return self.out(200, json.dumps({'name': rd('name.txt'), 'caption': caption_show(m.group(1), ru_fix(rd('caption.txt'))) if sim_state(m.group(1))[0] == 'ready' else ru_fix(rd('caption.txt')), 'report': report_show(m.group(1), ru_fix(rd('report.md'))),
+                'caption_en': caption_show(m.group(1), to_en(ru_fix(rd('caption.txt'))), True) if sim_state(m.group(1))[0] == 'ready' else to_en(ru_fix(rd('caption.txt'))), 'report_en': report_show(m.group(1), to_en(ru_fix(rd('report.md'))), True),
                 'caption_show': caption_show(m.group(1), ru_fix(rd('caption.txt'))), 'caption_show_en': caption_show(m.group(1), to_en(ru_fix(rd('caption.txt'))), True),
                 'error': rd('error.txt'), 'story_ru': rd('story_ru.md'), 'story_en': rd('story_en.md'),
                 'story_running': story_running(m.group(1)), 'meta': replay_meta(m.group(1)),
