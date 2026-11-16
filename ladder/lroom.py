@@ -26,6 +26,9 @@
 # ping ("ping": who called whom, when the 30 s pause ends, the answers - every player's button shows the pause, the pinged
 # player's answer shows next to his name); verb ping_answer (yes / no); the owner's Start marks him ready; a kick keeps nobody
 # out (KICK_BAN) and an invitation into a room can be sent again once the player came in or left it.
+# 16.11.2026 (owner, launcher 1.6.17): the lobby's chat - the general chat in a room of its own for the lobby's people (verb say,
+# see "the lobby's chat" below), its feed carries who came in, left and moved; a player goes into the observers (verb seat with
+# slot "obs"; never the owner - the match is started from his game).
 import json, random, re, secrets, string, threading, time
 
 L = None                    # the ladder module (ladder.py sets it right after the import)
@@ -220,7 +223,7 @@ def view(r):
             'maps': [{'key': k, 'name': (cat.get(k) or {}).get('name') or k} for k in r['maps']], 'opts': dict(r['opts']),
             'state': r['state'], 'cd_end': int(r['cd'] * 1000) if r['state'] == 'countdown' else 0, 'now': int(now * 1000),
             'slots': slots, 'obs': obs, 'obs_cap': _obs_cap(r), 'obs_free': max(0, _obs_cap(r) - len(obs)), 'net': _net(r), 'note': r.get('note'), 'seq': r['seq'],
-            'hs': bool(r.get('hs')), 'all_ready': _all_ready(r, now), 'ping': _ping_view(r, now),
+            'hs': bool(r.get('hs')), 'all_ready': _all_ready(r, now), 'ping': _ping_view(r, now), 'cseq': r.get('cseq', 0),
             'launch': {'t': int(la.get('t', 0)), 'deadline': int(la.get('deadline', 0)), 'host': la.get('host'), 'relay': la.get('relay'),
                        'match': la.get('match'), 'room': la.get('room'), 'map': la.get('map'),
                        'map_name': (cat.get(la.get('map')) or {}).get('name') or la.get('map')} if la else None}
@@ -261,6 +264,121 @@ def _close(r, why):
     log('room %s closed (%s)' % (r['id'], why))
     try: L.stream.publish('lroom_gone', {'id': r['id'], 'why': why})
     except Exception: pass
+
+
+# ---------- the lobby's chat (owner 16.11.2026, launcher 1.6.17) ----------
+# The general chat in a room of its own for the lobby's people (its players and observers): the same messages (the original, its
+# translations ru / en, a reply's quote; @mentions are the launcher's), the same moderation (JEV - asked outside MM_LOCK, it takes
+# seconds: say_pre) and pace (1.5 s between two, 20 a minute). Kept in memory with the room (a lobby lives 15-20 minutes): the last
+# CHAT_MAX lines. The feed carries the lobby's own lines (sys) too: open, join, join_obs, leave, gone, kick, to_obs, to_seat (team),
+# host - the kind and the player; the launcher words them in its own language. Never in the room's view (it goes to every launcher):
+# the launchers of the lobby's people get "lroom_msg" {id, m} and, once a translation is in, "lroom_msg_tr" {id, mid, lang, ru, en};
+# the whole feed ("chat") comes with the room in the answers of create / join / get; the view's "cseq" is the feed's last line.
+CHAT_MAX = 200
+CHAT_LEN = 300
+CHAT_GAP = 1.5                                         # s between two messages of one player
+CHAT_PER_MIN = 20
+CHAT_RATE = {}                                         # steam -> the times of his lobby messages of the last minute
+CHAT_LOCK = threading.Lock()
+
+
+def _chat_text(v): return ''.join(ch for ch in str(v or '') if ch == '\n' or ch.isprintable()).strip()[:CHAT_LEN]
+
+
+def _entry(r, e):
+    """a line of the feed as the launcher gets it (names and avatars as they are now)"""
+    u = L.users.get(e['steam'])
+    if e.get('sys'):
+        out = {'id': e['id'], 'ts': int(e['ts']), 'sys': e['sys'], 'steam': e['steam'], 'name': u['name'] or 'Player'}
+        if e.get('team'): out['team'] = e['team']
+        return out
+    m = {'id': e['id'], 'ts': int(e['ts']), 'steam': e['steam'], 'name': u['name'] or 'Player', 'avatar': u['avatar'], 'text': e['text'],
+         'orig': e['text'], 'lang': e.get('lang') or '', 'ru': e.get('ru'), 'en': e.get('en'), 'obs': bool(e.get('obs'))}
+    if e.get('reply_to'):
+        q = next((x for x in r.get('chat', []) if x['id'] == e['reply_to'] and not x.get('sys')), None)
+        m['reply'] = {'id': q['id'], 'steam': q['steam'], 'name': _name(q['steam']), 'text': q['text'], 'ru': q.get('ru'), 'en': q.get('en')} if q \
+            else {'id': e['reply_to'], 'deleted': True}                     # older than the last CHAT_MAX lines
+    if e.get('cid'): m['cid'] = e['cid']
+    return m
+
+
+def chat_view(r): return [_entry(r, e) for e in r.get('chat', [])]
+
+
+def mine(r):
+    """the room's view with its chat - only in the answers to its own people"""
+    return dict(view(r), chat=chat_view(r))
+
+
+def _chat_send(r, ev, data):
+    for s in _everyone(r):
+        try: L.stream.publish(ev, data, to=s)
+        except Exception as x: log('chat %s -> %s: %r' % (r['id'], s, x))
+
+
+def _chat_add(r, e):
+    r['cseq'] = r.get('cseq', 0) + 1; e['id'] = r['cseq']; e.setdefault('ts', time.time())
+    ch = r.setdefault('chat', []); ch.append(e); del ch[:-CHAT_MAX]
+    _chat_send(r, 'lroom_msg', {'id': r['id'], 'm': _entry(r, e)})
+    return e
+
+
+def _sys(r, kind, steam, **kw): return _chat_add(r, dict(kw, sys=kind, steam=steam))
+
+
+def say_pre(steam, d):
+    """verb say before MM_LOCK (ladder.py): who may write, the pace, the moderation - JEV asks a model, seconds, never under the
+    lock. None: go on (api stores it); else the answer"""
+    if not ROOMS.get(BY.get(steam) or ''): return {'ok': False, 'error': 'no_room'}
+    text = _chat_text(d.get('text'))
+    if not text: return {'ok': False, 'error': 'empty'}
+    if L.users.get(steam)['banned']: return {'ok': False, 'error': 'banned'}
+    now = time.time()
+    with CHAT_LOCK:
+        t = [x for x in CHAT_RATE.get(steam, []) if now - x < 60]
+        if t and now - t[-1] < CHAT_GAP: return {'ok': False, 'error': 'too_fast', 'retry_after': int((CHAT_GAP - (now - t[-1])) * 1000) + 50}
+        if len(t) >= CHAT_PER_MIN: return {'ok': False, 'error': 'too_fast', 'retry_after': int((60 - (now - t[0])) * 1000) + 50}
+        CHAT_RATE[steam] = t + [now]
+    c = L.community; flags = {}
+    try: flags = c.MODFLAGS() if c.MODFLAGS else {}
+    except Exception: pass
+    if c.PREMOD and flags.get('premod', True):                         # the general chat's gate
+        try:
+            if c.PREMOD(text): return {'ok': False, 'error': 'premod'}
+        except Exception: pass                                          # fail-open: a moderation outage never blocks the chat
+    return None
+
+
+def _say(r, steam, d, obs):
+    text = _chat_text(d.get('text'))
+    if not text: return {'ok': False, 'error': 'empty'}
+    cid = str(d.get('cid') or '')
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,40}', cid): cid = None
+    if cid:                                                            # the same message again (a retry): the one stored
+        e = next((x for x in r.get('chat', []) if x.get('cid') == cid and x['steam'] == steam), None)
+        if e: return {'ok': True, 'm': _entry(r, e)}
+    try: rt = int(d.get('reply_to') or 0)
+    except Exception: rt = 0
+    if rt and not any(x['id'] == rt and not x.get('sys') for x in r.get('chat', [])): rt = 0   # gone, or a line of the lobby: plain
+    flags = {}
+    try: flags = L.community.MODFLAGS() if L.community.MODFLAGS else {}
+    except Exception: pass
+    later = flags.get('translate', True)
+    e = _chat_add(r, {'steam': steam, 'text': text, 'obs': obs, 'reply_to': rt or None, 'cid': cid,
+                      'lang': '', 'ru': None if later else text, 'en': None if later else text})
+    if later: threading.Thread(target=_chat_tr, args=(r['id'], e['id'], text), daemon=True).start()
+    return {'ok': True, 'm': _entry(r, e)}
+
+
+def _chat_tr(rid, mid, text):
+    """the translations come after the message (as the general chat): the lobby's people get them as lroom_msg_tr"""
+    try: lang, ru, en = L.community.translate(text)
+    except Exception: lang, ru, en = None, text, text
+    with L.MM_LOCK:
+        r = ROOMS.get(rid); e = r and next((x for x in r.get('chat', []) if x['id'] == mid), None)
+        if not e: return
+        e['lang'], e['ru'], e['en'] = lang or '', ru or text, en or text
+        _chat_send(r, 'lroom_msg_tr', {'id': rid, 'mid': mid, 'lang': e['lang'], 'ru': e['ru'], 'en': e['en']})
 
 
 # ---------- the countdown and the launch ----------
@@ -543,7 +661,7 @@ def tick(now):
         ch = False
         if r['state'] in ('lobby', 'countdown'):
             gone = [s['steam'] for s in r['slots'] if s and now - s['seen'] > HERE_GONE] + [o['steam'] for o in r.setdefault('obs', []) if now - o['seen'] > HERE_GONE]
-            for st in gone: _leave(r, st); _note(r, 'gone', [st]); ch = True
+            for st in gone: _leave(r, st, 'gone'); _note(r, 'gone', [st]); ch = True
             if r['id'] not in ROOMS: continue
             ch |= _check_ready(r, now)
             if r['state'] == 'countdown' and now >= r['cd']: _launch(r, now); ch = True
@@ -561,10 +679,14 @@ def tick(now):
     for k in [k for k, t in KICKED.items() if t < now]: KICKED.pop(k, None)
     for k in [k for k, t in INVITED.items() if t < now]: INVITED.pop(k, None)
     for k in [k for k, ts in INV_SENT.items() if not ts or now - ts[-1] > 60]: INV_SENT.pop(k, None)
+    with CHAT_LOCK:
+        for k in [k for k, ts in CHAT_RATE.items() if not ts or now - ts[-1] > 60]: CHAT_RATE.pop(k, None)
 
 
 # ---------- the launcher's calls ----------
-def _leave(r, steam):
+def _leave(r, steam, why='leave'):
+    """out of the room; why: the chat's line (leave | gone | kick, None - none)"""
+    owner = r['owner']
     for i, s in enumerate(r['slots']):
         if s and s['steam'] == steam: r['slots'][i] = None
     r['obs'] = [o for o in r.setdefault('obs', []) if o['steam'] != steam]
@@ -573,6 +695,9 @@ def _leave(r, steam):
     if BY.get(steam) == r['id']: BY.pop(steam, None)
     if r['owner'] == steam and _members(r): r['owner'] = _members(r)[0]
     if r['state'] == 'countdown': r['state'] = 'lobby'
+    if why and _everyone(r):
+        _sys(r, why, steam)
+        if r['owner'] != owner: _sys(r, 'host', r['owner'])
 
 
 def _seat(r, steam, slot=None):
@@ -622,13 +747,13 @@ def api(verb, steam, d):
         r = {'id': _new_id(), 'name': name, 'game': game, 'ver': L.short_ver(_clean(d.get('ver'), 24)), 'mode': mode, 'map': mp, 'owner': steam,
              'state': 'lobby', 'slots': [None] * (2 * L.TEAM_N[mode]), 'cd': 0, 'launch': None, 'note': None, 'pings': {}, 'seq': 0, 'created': now,
              'maps': [mp] if mp else [], 'opts': _opts_clean(d.get('opts') or {}, game), 'hs': d.get('start') == 'host', 'obs': []}
-        ROOMS[r['id']] = r; _seat(r, steam, 0)
+        ROOMS[r['id']] = r; _seat(r, steam, 0); _sys(r, 'open', steam)
         log('room %s made by %s (%s %s %s, %s)' % (r['id'], steam, game, r['ver'], mode, mp))
-        _pub(r); return {'ok': True, 'room': view(r)}
+        _pub(r); return {'ok': True, 'room': mine(r)}
     if verb == 'join':                                                      # 'as': 'obs' - an observer seat (1.5.3)
         t = ROOMS.get(str(d.get('id') or ''))
         if not t: return {'ok': False, 'error': 'no_room'}
-        if r is t: (_slot(t, steam) or _obs(t, steam))['seen'] = now; return {'ok': True, 'room': view(t)}
+        if r is t: (_slot(t, steam) or _obs(t, steam))['seen'] = now; return {'ok': True, 'room': mine(t)}
         if r and r['state'] not in ('lobby', 'countdown'): return {'ok': False, 'error': 'busy'}
         if KICKED.get((t['id'], steam), 0) > now: return {'ok': False, 'error': 'kicked', 'left': int(KICKED[(t['id'], steam)] - now)}
         if t['state'] not in ('lobby', 'countdown'): return {'ok': False, 'error': 'state'}
@@ -636,18 +761,18 @@ def api(verb, steam, d):
             if len(t.setdefault('obs', [])) >= _obs_cap(t): return {'ok': False, 'error': 'obs_full'}
             if r: _leave(r, steam); _note(r, 'left', [steam]); (_pub(r) if _members(r) else _close(r, 'empty'))
             t['obs'].append({'steam': steam, 'seen': now, 'gst': ''}); BY[steam] = t['id']; _note(t, 'joined_obs', [steam]); INVITED.pop((t['id'], steam), None)
-            _pub(t); return {'ok': True, 'room': view(t)}
+            _sys(t, 'join_obs', steam); _pub(t); return {'ok': True, 'room': mine(t)}
         if all(t['slots']): return {'ok': False, 'error': 'full'}
         if r: _leave(r, steam); _note(r, 'left', [steam]); (_pub(r) if _members(r) else _close(r, 'empty'))
         _seat(t, steam); _unready(t, 'joined', [steam]); _note(t, 'joined', [steam]); INVITED.pop((t['id'], steam), None)
-        _pub(t); return {'ok': True, 'room': view(t)}
+        _sys(t, 'join', steam); _pub(t); return {'ok': True, 'room': mine(t)}
     if not r: return {'ok': False, 'error': 'no_room'}
     me = _slot(r, steam); ob = None if me else _obs(r, steam)
     if not me and not ob: BY.pop(steam, None); return {'ok': False, 'error': 'no_room'}
     (me or ob)['seen'] = now
     if verb == 'here':                                                      # the launcher's heartbeat (every 15 s while in the room)
-        return {'ok': True, 'seq': r['seq']}
-    if verb == 'get': return {'ok': True, 'room': view(r)}
+        return {'ok': True, 'seq': r['seq'], 'cseq': r.get('cseq', 0)}   # cseq: the chat's last line (a launcher behind asks get)
+    if verb == 'get': return {'ok': True, 'room': mine(r)}
     if verb == 'ticket':                                                    # what MMFind needs, only for the player himself
         la = r.get('launch')
         if r['state'] == 'countdown':
@@ -756,6 +881,8 @@ def api(verb, steam, d):
         if steam in p['ans']: return {'ok': True}
         p['ans'][steam] = {'a': ans, 't': now}
         log('room %s: %s answers %s (%s)' % (r['id'], steam, ans, kind)); _pub(r); return {'ok': True}
+    if verb == 'say':                                                       # 1.6.17: the lobby's chat (say_pre has checked it outside MM_LOCK)
+        return _say(r, steam, d, bool(ob))
     if ob and verb in ('cancel', 'ready', 'army'): return {'ok': False, 'error': 'obs'}   # an observer has no army and no say in the start
     if verb == 'cancel':                                                    # stop the launch (any player, as Cancel on the game's countdown)
         if r['state'] == 'countdown': me['ready'] = False; r['state'] = 'lobby'; _note(r, 'unready', [steam])
@@ -778,13 +905,22 @@ def api(verb, steam, d):
             _pub(r)
         return {'ok': True, 'room': view(r)}
     if verb == 'seat':
+        if d.get('slot') == 'obs':                                          # 1.6.17: a player into the observers - his seat is free
+            if ob: return {'ok': True, 'room': view(r)}
+            if steam == r['owner']: return {'ok': False, 'error': 'owner'}   # the match is started from the owner's game
+            if len(r['obs']) >= _obs_cap(r): return {'ok': False, 'error': 'obs_full'}
+            r['slots'][r['slots'].index(me)] = None; r['obs'].append({'steam': steam, 'seen': now, 'gst': ''})
+            if r['state'] == 'countdown': r['state'] = 'lobby'               # one seat fewer: the countdown stops, as when he leaves
+            _note(r, 'to_obs', [steam]); _sys(r, 'to_obs', steam)
+            _pub(r); return {'ok': True, 'room': view(r)}
         try: i = int(d.get('slot'))
         except Exception: return {'ok': False, 'error': 'bad'}
         if not 0 <= i < len(r['slots']) or r['slots'][i]: return {'ok': False, 'error': 'taken'}
         if ob:                                                              # an observer sits down: a player now
             r['obs'] = [o for o in r['obs'] if o['steam'] != steam]
             r['slots'][i] = {'steam': steam, 'race': 'random', 'hero': -1, 'ready': False, 'seen': now, 'gst': ''}
-            _unready(r, 'joined', [steam]); _note(r, 'joined', [steam]); _pub(r); return {'ok': True, 'room': view(r)}
+            _unready(r, 'joined', [steam]); _note(r, 'joined', [steam]); _sys(r, 'to_seat', steam, team=1 if i < _size(r) else 2)
+            _pub(r); return {'ok': True, 'room': view(r)}
         j = r['slots'].index(me); r['slots'][i], r['slots'][j] = me, None; me['ready'] = False
         if r['state'] == 'countdown': r['state'] = 'lobby'; _note(r, 'changed', [steam])
         _pub(r); return {'ok': True, 'room': view(r)}
@@ -803,7 +939,7 @@ def api(verb, steam, d):
         t = str(d.get('steam') or '')
         if t == steam or not (_slot(r, t) or _obs(r, t)): return {'ok': False, 'error': 'bad'}
         was_obs = not _slot(r, t)
-        _leave(r, t)
+        _leave(r, t, 'kick')
         if KICK_BAN > 0: KICKED[(r['id'], t)] = now + KICK_BAN
         if not was_obs: _unready(r)
         _note(r, 'kicked', [t])
