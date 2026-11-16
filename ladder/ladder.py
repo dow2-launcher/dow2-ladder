@@ -1297,7 +1297,9 @@ def _rooms_once():
         if ex: (game, version, mod), sure, exact = ex, True, mt.get('src') or 'scan'
         # not in either filtered answer: maybe another mod, maybe a room Relic leaves out of findAdvertisements (full, password) - the guess below decides
         elif elite_sure({'mapname': mn, 'slotinfo': m.get('slotinfo', ''), 'matchhistorymember': races}): game, sure = 'elite', True
-        elif mn in VAN_MAPS and mn not in ELITE_MAPS and not any('elite' in w for w in b): game, sure = 'vanilla', True
+        # 16.11 (SirItos fb 1364): Elite has every vanilla map too (maps.txt VAN is ALL vanilla maps, ELITE_ONLY only the extra ones), so
+        # "vanilla for sure" only for a map Elite's catalog lacks; a shared map without the scan or Elite marks is "probably Elite" below
+        elif mn in VAN_MAPS and mn not in ELITE_MAPS and mn not in (_ASSETS.get('maps') or {}) and not any('elite' in w for w in b): game, sure = 'vanilla', True
         elif mn in VAN_MAPS or mn in ELITE_MAPS or mn in (_ASSETS.get('maps') or {}): game, sure = 'elite', False
         else: game, sure = 'other', False
         for p in players:                             # the race by the game's own table (vanilla: no OM / Tau in between)
