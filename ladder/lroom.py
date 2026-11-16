@@ -619,7 +619,7 @@ def api(verb, steam, d):
         if len(ROOMS) >= MAX_ROOMS: return {'ok': False, 'error': 'too_many'}
         maps = _maps(game, mode); mp = d.get('map') if d.get('map') in maps else (maps[0] if maps else '')
         name = _clean(d.get('name'), NAME_MAX) or ('%s: %s' % (_name(steam), mode))
-        r = {'id': _new_id(), 'name': name, 'game': game, 'ver': _clean(d.get('ver'), 24) or '', 'mode': mode, 'map': mp, 'owner': steam,
+        r = {'id': _new_id(), 'name': name, 'game': game, 'ver': L.short_ver(_clean(d.get('ver'), 24)), 'mode': mode, 'map': mp, 'owner': steam,
              'state': 'lobby', 'slots': [None] * (2 * L.TEAM_N[mode]), 'cd': 0, 'launch': None, 'note': None, 'pings': {}, 'seq': 0, 'created': now,
              'maps': [mp] if mp else [], 'opts': _opts_clean(d.get('opts') or {}, game), 'hs': d.get('start') == 'host', 'obs': []}
         ROOMS[r['id']] = r; _seat(r, steam, 0)
@@ -833,7 +833,7 @@ def api(verb, steam, d):
             if o != r['opts']: r['opts'] = o; changed = True
         nm = _clean(d.get('name'), NAME_MAX)
         if nm and nm != r['name']: r['name'] = nm; changed = True
-        v = _clean(d.get('ver'), 24)
+        v = L.short_ver(_clean(d.get('ver'), 24))   # at most 3.2.1 (fb 1385)
         if v and r['game'] == 'elite' and v != r['ver']: r['ver'] = v; changed = True
         if changed: _unready(r, 'conf'); _note(r, 'conf', [steam]); _pub(r)
         return {'ok': True, 'room': view(r)}

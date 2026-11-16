@@ -1215,32 +1215,54 @@ def _room_rating(steam):
     return r
 
 ADS_EXACT = os.environ.get('ADS_EXACT', '/srv/ladder/data/ads_exact.json')
-ADS_EXACT_FRESH = 120                                  # s: an older scan is not used (the scanner is paused - the guess as before)
+# 16.11.2026 (SirItos fb 1364): the scanner pauses while the stand's game runs (an hour and more), and a room drops out of the
+# filtered answers once it is passworded, full or started - the old 120 s freshness rule then threw away every exact answer and
+# the guess took over (an Elite room shown as vanilla). A Relic room id is never reused, so what a scan said about a room stays
+# true for the room's whole life: kept here, in memory only, while the room is in Relic's public list, dropped as soon as it is
+# not (bounded by that list - no file, no extra polling).
+_EXACT_KEEP = {}                                       # room id (str) -> the scan's fields for it
 
 def _ads_meta():
     # 03.11.2026 (owner): the exact game of a room from Relic itself - relic_scan (tools/relicscan, on prod_gpu) asks Relic's
     # findAdvertisements every 30 s with the stand account, once as vanilla DOW2 3.19 and once as Elite 3.2 (Relic answers only the
     # rooms of the asking game); room id -> the mod fields of the query that listed it (src 'scan'). 'other' = rooms of the public
-    # list at that scan in neither answer: another mod or version. ({}, set()) when the scan is old or missing: the guess below
+    # list at that scan in neither answer: another mod or version. The last scan whatever its age (a paused scanner keeps it in
+    # the file); ({}, set()) when there is none
     try:
         with open(ADS_EXACT) as f: d = json.load(f)
-        if time.time() - (d.get('scan_ts') or 0) > ADS_EXACT_FRESH: return {}, set()
         return d.get('ads') or {}, {str(x) for x in d.get('other') or []}
     except Exception:
         return {}, set()
+
+def _exact_meta(scan, public_ids):
+    # room id -> the scan's fields: the kept answers, the newest scan over them; only the rooms of the public list now - the rest
+    # are gone and dropped (an empty list - a Relic hiccup or nobody in a lobby - drops nothing: the next list does)
+    _EXACT_KEEP.update(scan)
+    if public_ids:
+        for k in [k for k in _EXACT_KEEP if k not in public_ids]: del _EXACT_KEEP[k]
+    return _EXACT_KEEP
+
+def short_ver(v):
+    # 16.11.2026 (SirItos fb 1385): a version as rooms show it - at most major.minor.patch, "3.2.1.0.0" -> "3.2.1", "3.2" stays
+    # "3.2"; anything not plain numbers (a test channel) as it is. The launcher compares versions with verSame (the number parts,
+    # trailing zeros dropped), so the cut changes no comparison as long as the parts past the third are zeros (our channels are)
+    v = str(v or '').strip()
+    m = re.match(r'(\d+(?:\.\d+){0,2})(?:\.\d+)*$', v)
+    return m.group(1) if m else v
 
 def _exact_game(meta):
     # (game, version, mod) from the game's own fields, or None: modname DOW2 = vanilla, Elite = Elite, anything else = another mod
     mod = str((meta or {}).get('modname') or '').strip()
     if not mod: return None
-    ver = str(meta.get('modversion') or '').strip()[:16] or None
+    ver = short_ver(meta.get('modversion'))[:16] or None
     ml = mod.lower()
     return ('vanilla' if ml == 'dow2' else 'elite' if ml == 'elite' else 'other'), ver, mod[:32]
 
 def _rooms_once():
     with urllib.request.urlopen(urllib.request.Request(ROOMS_URL, headers={'User-Agent': 'dow2-ladder'}), timeout=15) as r:
         d = json.load(r)
-    meta, scan_other = _ads_meta()
+    scan, scan_other = _ads_meta()
+    meta = _exact_meta(scan, {str(m.get('id')) for m in d.get('matches') or []})
     av = {a['profile_id']: a for a in d.get('avatars') or []}
     out = []
     rr = _ASSETS.get('relic_race_id') or {}
@@ -1290,12 +1312,13 @@ def _rooms_once():
         # probably Elite (a map both have) / another mod (a map neither has). Relic's public list carries no version field -
         # but Relic's own filtered query does: when relic_scan saw this room listed for vanilla 3.19 or Elite 3.2, that query's mod
         # name and version decide (exact = 'scan'); a room of the public list at that scan in neither answer is another mod or
-        # version (exact 'scan', mod unknown); the guess only for rooms the scan has not seen yet.
+        # version (exact 'scan', mod unknown); the guess only for rooms the scan has not seen yet. A room once listed keeps its
+        # answer while it is in the public list (_EXACT_KEEP), also when it is passworded, full or started or the scanner pauses.
         mt = meta.get(str(m.get('id')))
         ex = _exact_game(mt)
         version = mod = exact = None
         if ex: (game, version, mod), sure, exact = ex, True, mt.get('src') or 'scan'
-        # not in either filtered answer: maybe another mod, maybe a room Relic leaves out of findAdvertisements (full, password) - the guess below decides
+        # never in a filtered answer (e.g. passworded from the start, or made while the scanner paused) - the guess below decides
         elif elite_sure({'mapname': mn, 'slotinfo': m.get('slotinfo', ''), 'matchhistorymember': races}): game, sure = 'elite', True
         # 16.11 (SirItos fb 1364): Elite has every vanilla map too (maps.txt VAN is ALL vanilla maps, ELITE_ONLY only the extra ones), so
         # "vanilla for sure" only for a map Elite's catalog lacks; a shared map without the scan or Elite marks is "probably Elite" below
