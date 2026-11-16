@@ -2193,7 +2193,11 @@ class H(BaseHTTPRequestHandler):
                 d = self._body(); d = d if isinstance(d, dict) else {}
                 steam = community._session(d.get('token') or self.headers.get('X-Token'))
                 if not steam: return self.send(200, {'ok': False, 'error': 'auth'}, cache=0)
-                with MM_LOCK: return self.send(200, lroom.api(u.path[len('/ladder/api/lroom/'):][:16], str(steam), d), cache=0)
+                verb = u.path[len('/ladder/api/lroom/'):][:16]
+                if verb == 'say':                        # the lobby's chat: the pace and the moderation (a model, seconds) outside MM_LOCK
+                    pre = lroom.say_pre(str(steam), d)
+                    if pre: return self.send(200, pre, cache=0)
+                with MM_LOCK: return self.send(200, lroom.api(verb, str(steam), d), cache=0)
             if u.path.startswith('/ladder/api/nq/'):     # node quality per player (nodeq.py, 06.11.2026)
                 d = self._body(); d = d if isinstance(d, dict) else {}
                 verb = u.path[len('/ladder/api/nq/'):][:16]
