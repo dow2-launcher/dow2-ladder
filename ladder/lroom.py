@@ -567,8 +567,9 @@ def _assemble(r):
 
 def _seats(steam):
     """16.11.2026 (siritos: observers in a launcher room's match, a reliable way): this game builds and plays observer seats right -
-    MMFind 0.52 says "obs_seats": 2 in its mm/native body. With MMFind 0.51 every game of such a room died at the start ("Player
-    index out of Range", gameinfo.cpp:75 - report siritos_1116/OBSERVERS_TECH_RU.md); 0.52 fixes it in each game's own GameInfo"""
+    MMFind 0.53 says "obs_seats": 2 in its mm/native body (the released 0.52 is the seamless walk only - it does not). With MMFind
+    0.51 / 0.52 every game of such a room died at the start ("Player index out of Range", gameinfo.cpp:75 - report
+    siritos_1116/OBSERVERS_TECH_RU.md); 0.53 fixes it in each game's own GameInfo"""
     d = (L.NM_HINTS.get(steam or '') or {}).get('d') or {}
     try: return int(d.get('obs_seats') or 0) >= 2
     except (TypeError, ValueError): return False
@@ -584,7 +585,7 @@ def _watch_in(r):
         if not p or p.get('lroom') != r['id'] or p['state'] != 'searching' or not p.get('nm_watch'): continue
         if old or not _seats(o['steam']):
             L.MM.pop(o['steam'], None)
-            L.MM_CANCELLED[o['steam']] = {'by': "launcher room: a game of this match cannot have observers (MMFind 0.52 or newer, RoomObservers on)",
+            L.MM_CANCELLED[o['steam']] = {'by': "launcher room: a game of this match cannot have observers (MMFind 0.53 or newer, RoomObservers on)",
                                           'match': 'lroom-' + r['id'], 't': time.time(), 'again': False, 'native': True}
             o['gst'] = ''
             log('room %s: observer %s not in the match %s - no observer seats with %s' % (r['id'], o['steam'], mid, old or ['his own game']))
