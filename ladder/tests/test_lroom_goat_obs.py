@@ -61,7 +61,7 @@ def launch_and_search(flag, seats=2, old=None):
     rid, r = room_with_obs(hero_a=1); R.tick(r['cd'] + 0.1)
     host = r['launch']['host']
     for s, pid, race in ((A, 31, L.RACE_KEYS.index('orks')), (B, 32, L.RACE_KEYS.index('eldar'))):
-        L.NM_HINTS[s] = {'t': time.time(), 'd': dict({'room': rid}, **({'obs_seats': seats} if seats and s != old else {}))}   # MMFind 0.52 (16.11)
+        L.NM_HINTS[s] = {'t': time.time(), 'd': dict({'room': rid}, **({'obs_seats': seats} if seats and s != old else {}))}   # MMFind 0.53 (16.11)
         L.nm_join({'steam': s, 'mode': '1v1', 'race': race, 'pid': pid, 'key': 'k', 'game': 'elite'})
     L.NM_HINTS[C] = {'t': time.time(), 'd': dict({'room': rid, 'watch': True}, **({'obs_seats': 2} if seats else {}))}
     v = L.nm_join({'steam': C, 'mode': '1v1', 'race': 0, 'pid': 39, 'key': 'k', 'game': 'elite'})
@@ -81,7 +81,7 @@ th = R.api('ticket', host, {})['ticket']
 check('the host\'s ticket: obs 1', (th['host'], th['obs']), (True, 1))
 rid, r, host, v = launch_and_search(True, seats=0)
 mid = r['launch'].get('match')
-check('16.11: games without obs_seats (MMFind < 0.52): the players\' match is made', bool(mid), True)
+check('16.11: games without obs_seats (MMFind < 0.53): the players\' match is made', bool(mid), True)
 check('16.11: ... the observer is not its watcher, his search ends', (L.MM_MATCHES[mid]['watchers'], C in L.MM, 'cannot have observers' in (L.MM_CANCELLED.get(C) or {}).get('by', '')), ([], False, True))
 for old in (A, B):
     rid, r, host, v = launch_and_search(True, old=old)                 # one player's game old (host or guest)
