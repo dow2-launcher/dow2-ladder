@@ -104,6 +104,9 @@ backfill()
 # - a person's upload is always stored and listed, AI or not; a person's upload of a hidden match makes it visible;
 # - the lists (POST/GET /replay/api/list) leave hidden replays out; "ai": "all" (or true) lists them too, "ai": "none" (or false)
 #   leaves out every match with a computer, also those people put in. "mine" lists all of the player's own.
+# - 16.11.2026 (the launcher's "My replays", 1.6.16): "played" lists the matches the signed-in player played in - his Relic profile id
+#   by his SteamID (relicstats, steam_pid below) among the players' ids of the replay; the answer says the id ("me_pid", null: not known
+#   to Relic - nothing listed), the launcher filters its own files by it too. "mine" (the ones he uploaded) stays for 1.6.3-1.6.15.
 # Replays stored before this (14.11.2026) are hidden by the same rule once (a computer + nobody's + a game's own file name).
 AUTO_UA = ('MMFind/', 'EliteAI/')
 AUTO_NAME = re.compile(r'^(?:match|MM-[\w.\-]+|NM-\d+)_\d{4}-\d\d-\d\d_\d\d-\d\d\.rec$')     # MMFind's name of temp.rec
@@ -162,7 +165,7 @@ def ai_mode(v):   # the lists' "ai": '' (default: no hidden ones) / 'all' (true,
     if v is True or str(v).lower() in ('all', '1', 'true', 'yes'): return 'all'
     if v is False or str(v).lower() in ('none', '0', 'false', 'no'): return 'none'
     return ''
-def replay_list(q='', mapk='', race='', mode='', page=0, n=30, version='', players='', author='', steam=None, mine=False, ai=''):
+def replay_list(q='', mapk='', race='', mode='', page=0, n=30, version='', players='', author='', steam=None, mine=False, ai='', played=None):
     with idb() as c:
         if mine: rows = c.execute(f'SELECT {COLS} FROM replays WHERE author_steam = ? ORDER BY uploaded DESC', (steam or '-',)).fetchall()
         else: rows = c.execute(f'SELECT {COLS} FROM replays ORDER BY uploaded DESC LIMIT 20000').fetchall()
@@ -172,6 +175,7 @@ def replay_list(q='', mapk='', race='', mode='', page=0, n=30, version='', playe
     for r in rows:
         it = item(r, steam)
         if not mine and ((ai != 'all' and it['hidden']) or (ai == 'none' and it['ai'])): continue
+        if played is not None and not any(p.get('pid') == played for p in it['players']): continue
         if mapk and it['map'] != mapk.lower(): continue
         if want and not all(w in it['races'] for w in want): continue
         if mode and it['mode'] != mode: continue
@@ -259,6 +263,24 @@ def add_ratings(it):
             elif now.get(p.get('pid')): p['rating'] = now[p['pid']]; p['rating_kind'] = 'now'
     except Exception: pass
     return it
+
+# the Relic profile id of a SteamID (relicstats' line for "/steam/<id>", its 6th field), a day in the cache (10 min while unknown)
+_pid_of = {}; _pid_lock = threading.Lock()
+def steam_pid(steam):
+    steam = str(steam or '')
+    if not re.fullmatch(r'7656119\d{10}', steam): return None
+    with _pid_lock: hit = _pid_of.get(steam)
+    if hit and time.time() - hit[0] < (86400 if hit[1] else 600): return hit[1]
+    pid = None
+    try:
+        with urllib.request.urlopen(f'{RELIC_API}?n=' + urllib.parse.quote('/steam/' + steam), timeout=6) as r:
+            f = (r.read().decode('utf-8', 'replace').splitlines() or [''])[0].split('\t')
+        if len(f) >= 6 and f[5].isdigit() and 0 < int(f[5]) < 4294967295: pid = int(f[5])
+    except Exception: return hit[1] if hit else None       # relicstats down: the last answer, nothing cached
+    with _pid_lock:
+        if len(_pid_of) > 5000: _pid_of.clear()
+        _pid_of[steam] = (time.time(), pid)
+    return pid
 
 def replay_meta(rid, steam=None):
     with idb() as c: r = c.execute(f'SELECT {COLS} FROM replays WHERE rid = ?', (rid,)).fetchone()
@@ -649,9 +671,13 @@ class H(BaseHTTPRequestHandler):
         # ---- the launcher's Replays tab ----
         if p == '/replay/api/list':                   # the list with "mine" marked (and "only mine") for a signed-in player
             d = self.body(); u = who(d.get('token')); g = lambda k, n: str(d.get(k) or '')[:n]
-            try: return J(200, replay_list(g('q', 64), g('map', 64), g('race', 120), g('mode', 8), d.get('page') or 0, d.get('n') or 30,
-                                           g('version', 40), g('players', 2), g('author', 64), u and u['steam'], bool(d.get('mine')) and bool(u),
-                                           ai_mode(d.get('ai'))))
+            played = bool(d.get('played')); pid = steam_pid(u['steam']) if played and u else None
+            try:
+                out = replay_list(g('q', 64), g('map', 64), g('race', 120), g('mode', 8), d.get('page') or 0, d.get('n') or 30,
+                                  g('version', 40), g('players', 2), g('author', 64), u and u['steam'], bool(d.get('mine')) and bool(u),
+                                  ai_mode(d.get('ai')), (pid or -1) if played else None)
+                if played: out['me_pid'] = pid; out['signed_in'] = bool(u)
+                return J(200, out)
             except (ValueError, TypeError): return J(400, {})
         if p == '/replay/api/have':                   # which of the player's files are in the pool: sha256[:16] of a file -> its replay
             ids = [x for x in (self.body().get('ids') or [])[:2000] if isinstance(x, str) and re.fullmatch(r'[0-9a-f]{16}', x)]
