@@ -264,13 +264,40 @@ class Session:
             self.votes.pop(p.idx, None)
             self.notice(a[0], None)
 
+    def observers(self):
+        """16.11.2026: the numbers of this match's observers - the occupied seats of team 2 in the host's last lobby state before
+        the start (a launcher room's observer seats: MMFind 0.52 obs_build gives them team 2, the players' seats are team 0 / 1);
+        a seat's station is our number of that game (live_rec). Empty when there is no lobby state or it can't be read"""
+        if self.lobby is None or live_rec is None: return set()
+        try:
+            room = live_rec.Room(self.lobby); out = set()
+            for sl in room.slots:
+                if not sl['profile'] or sl['team'] in (0, 1): continue
+                i = sl['station']; nm = room.names.get(sl['profile'], '')
+                if nm and self.names.get(i) and self.names[i] != nm:   # not his number after all: by his name (peer announce)
+                    i = next((k for k, v in self.names.items() if v == nm), 0)
+                if i: out.add(i)
+            return out
+        except Exception as e: mlog_err('observers', e); return set()
+
     def leave(self, p, why=None):
         if p in self.peers: self.peers.remove(p)
         try: self._plog_leave(p, p.why or why or 'closed')
         except Exception as e: mlog_err('leave', e)
+        last = p.pid and p.pid not in self.gone and not any(q.pid == p.pid for q in self.peers)
+        # 16.11.2026: an observer who leaves the match (or whose connection breaks) is not waited for: out of the next tick at
+        # once (the players' games drop him themselves, as a late observer at the start: "Trying to drop unknown player type
+        # ... player type 5", no desync), no "Waiting for <name>" at the others, no way back (as after "don't wait")
+        if self.ticks and last and p.idx in self.observers():
+            self.gone.add(p.pid); self.lagging.discard(p.idx); self.votes.pop(p.idx, None)
+            log(ev='observer_left', sid=int.from_bytes(self.sid, 'little'), idx=p.idx, peer=p.addr, name=self.names.get(p.idx, ''))
+            try: self._plog_gone(p.pid, 'observer_left', None)
+            except Exception as e: mlog_err('observer', e)
+            self.notice(p.idx, None)                      # a "sends nothing" line shown in his last seconds goes away
+            last = False
         # 06.11.2026: a player whose connection breaks in the match stays in the ticks as silent for GRACE s - the game reconnects
         # by itself 15 s after the break; a player missing from a tick (neither sent nor silent) is dropped by the others at once
-        if self.ticks and GRACE > 0 and p.pid and p.pid not in self.gone and not any(q.pid == p.pid for q in self.peers):
+        if self.ticks and GRACE > 0 and last:
             g = LONG_GRACE if p.rejoin else GRACE
             self.away[p.pid] = (p.idx, time.monotonic() + g, p.last_turn or time.monotonic())   # away since his last turn
             log(ev='away', sid=int.from_bytes(self.sid, 'little'), idx=p.idx, peer=p.addr, grace=g, name=self.names.get(p.idx, ''))

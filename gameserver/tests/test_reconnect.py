@@ -178,6 +178,82 @@ if __name__ == '__main__':
         srv.terminate(); out = srv.communicate(timeout=5)[0].decode(errors='replace')
         print('\n'.join(l for l in out.splitlines() if 'away' in l or 'back' in l or 'error' in l))
 
+def room_with_observer():
+    """the host's lobby state of the stand match c7 (1v1: stations 1 and 2) with a third seat: an observer of team 2 at station 3
+    (a launcher room's observer seat, MMFind 0.52) - his slot is player 2's with profile, station and team changed"""
+    import struct
+    sys.path.insert(0, os.path.join(HERE, '..')); import live_rec
+    b = open(os.path.join(HERE, 'data', 'live_c7_lobby.bin'), 'rb').read(); n = struct.unpack_from('<I', b)[0]; room = b[4:4 + n]
+    r = live_rec.Room(room); o = 0x24
+    _, o = r._ws(o); _, o = r._ws(o); o += 4; o += 4 + struct.unpack_from('<I', room, o)[0]; o += 2
+    ns = o; o += 2; s1, o = r._slot(o); a = o; s2, o = r._slot(o); z = o
+    obs = bytearray(room[a:z]); struct.pack_into('<IIIIi', obs, 0, 777, 0, 3, 0, 2)
+    room = room[:5] + SID + room[9:ns] + struct.pack('<H', 3) + room[ns + 2:z] + bytes(obs) + room[z:]
+    assert [(x['station'], x['team']) for x in live_rec.Room(room).slots] == [(1, 0), (2, 1), (3, 2)]
+    return room
+
+def proxy_to(dsts, body):                                  # 10 src n(u16) n*dst len(u16) data + n*15, data = 09 <type> len 01 <zlib>
+    import zlib
+    data = b'\x09\x00' + b'\0\0' + b'\x01' + zlib.compress(body)
+    m = b'\x10\x01' + len(dsts).to_bytes(2, 'little') + bytes(dsts) + (len(data) + 15 * len(dsts)).to_bytes(2, 'little') + data + b'\0' * 15 * len(dsts)
+    return len(m).to_bytes(2, 'big') + m
+
+async def observer(port):
+    """16.11.2026, three DWR5 games: A hosts (its lobby state says C sits in an observer seat, team 2), B plays, C watches - all
+    three send turns. C leaves mid-match -> no "away", out of the next tick at once (neither sent nor silent), no "Waiting for"
+    notice (at most the clear one), his reconnect refused; then B's connection breaks -> B is a player: silent in the ticks and
+    the notices as before"""
+    A, B, C = b'J' * 8, b'K' * 8, b'L' * 8
+    con = {}
+    for k, pid in (('a', A), ('b', B), ('c', C)):
+        r, w = await asyncio.open_connection('127.0.0.1', port); w.write(b'DWR5' + b'\0' * 6 + hello(pid)); con[k] = (r, w)
+        await asyncio.sleep(0.1)
+    con['a'][1].write(proxy_to([2, 3], room_with_observer()))
+    turn = lambda w, x: w.write((5).to_bytes(2, 'big') + b'\x09\xfe\x01\x00' + x)
+    for i in range(5):
+        for k in 'abc': turn(con[k][1], k.encode())
+        await asyncio.sleep(0.1)
+    got = {'a': [], 'b': []}
+    async def rd(k):
+        r = con[k][0]
+        try:
+            while True:
+                n = int.from_bytes(await r.readexactly(2), 'big'); got[k].append(await r.readexactly(n))
+        except Exception: pass
+    ts = [asyncio.ensure_future(rd(k)) for k in 'ab']
+    await asyncio.sleep(0.2); mark = len(got['a'])
+    con['c'][1].close()
+    for i in range(15): turn(con['a'][1], b'a'); turn(con['b'][1], b'b'); await asyncio.sleep(0.1)
+    ticks = [x for x in got['a'][mark:] if x[:1] == b'\x0a']
+    assert len(ticks) > 10 and all(3 not in silent_of(t) for t in ticks[3:]), 'the observer must be out of the ticks at once'
+    waits = [x for x in got['a'] + got['b'] if x[:1] == b'\x7e' and x[1] == 3 and int.from_bytes(x[2:4], 'big') != 0xFFFF]
+    assert not waits, ('no "Waiting for" the observer', [x.hex() for x in waits])
+    r, w = await asyncio.open_connection('127.0.0.1', port); w.write(b'DWR5' + b'\0' * 6 + hello(C, 5)); back = []
+    try:
+        while True:
+            n = int.from_bytes(await asyncio.wait_for(r.readexactly(2), 2), 'big'); back.append(await r.readexactly(n))
+    except Exception: pass
+    assert not any(x[:1] == b'\x0a' for x in back), 'the observer who left: no way back'
+    mark = len(got['a']); con['b'][1].close()
+    for i in range(15): turn(con['a'][1], b'a'); await asyncio.sleep(0.1)
+    ticks = [x for x in got['a'][mark:] if x[:1] == b'\x0a']
+    assert ticks and all(2 in silent_of(t) for t in ticks[3:]), 'a player whose connection broke stays in the ticks as silent'
+    nb = [x for x in got['a'][mark:] if x[:1] == b'\x7e' and x[1] == 2 and int.from_bytes(x[2:4], 'big') < 0xFFFE]
+    assert nb and 160 <= int.from_bytes(nb[0][2:4], 'big') <= 170, ('the player is waited for as before', [x.hex() for x in nb])
+    for t in ts: t.cancel()
+    con['a'][1].close()
+    print('observer ok: the observer out of the ticks at once, no waiting notice, no way back; a player still waited for')
+
+if __name__ == '__main__':
+    s = socket.socket(); s.bind(('127.0.0.1', 0)); port = s.getsockname()[1]; s.close()
+    env = dict(os.environ, RELAY_PEERS='', RELAY_STATS_EVERY='0')
+    srv = subprocess.Popen([sys.executable, RELAY, str(port), '127.0.0.1'], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    try:
+        time.sleep(1.0); asyncio.run(observer(port))
+    finally:
+        srv.terminate(); out = srv.communicate(timeout=5)[0].decode(errors='replace')
+        print('\n'.join(l for l in out.splitlines() if 'observer' in l or 'away' in l or 'refused' in l or 'error' in l))
+
 if __name__ == '__main__':
     s = socket.socket(); s.bind(('127.0.0.1', 0)); port = s.getsockname()[1]; s.close()
     env = dict(os.environ, RELAY_PEERS='', RELAY_STATS_EVERY='0', RELAY_RECONNECT_GRACE='1')
