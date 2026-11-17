@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Unit stats — что показывает</title>
+<meta name="description" content="Дополнение UnitStats для Elite Mod / DoW2 Retribution: DPS, навык ближнего боя, броня, дальность, скорость, обзор и действующие эффекты отряда в панели выделения — что значит каждая иконка и число.">
+<style>
+@font-face { font-family: Cinzel; src: url(../fonts/cinzel-700.ttf); font-weight: 700; font-display: swap; }
+@font-face { font-family: Cinzel; src: url(../fonts/cinzel-900.ttf); font-weight: 900; font-display: swap; }
+@font-face { font-family: CinzelCyr; src: url(../fonts/cormorantsc-cyr-700.ttf); font-weight: 700 900; unicode-range: U+0400-045F, U+0490-0491, U+2116; font-display: swap; }
+@font-face { font-family: Spectral; src: url(../fonts/spectral-400.ttf); font-weight: 400; font-display: swap; }
+@font-face { font-family: Spectral; src: url(../fonts/spectral-600.ttf); font-weight: 600; font-display: swap; }
+:root {
+  --bg: #0d0b09; --panel: #16130f; --line: #3a3124; --gold: #d9b25f; --gold-2: #f0d48f;
+  --text: #e6dccb; --muted: #a39782; --red: #9e1b1b; --red-2: #c42a24;
+  --good: #8fe36a; --bad: #ff6b5a; --tag: #b8ae90;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 18px/1.6 Spectral, Georgia, serif; }
+a { color: var(--gold); }
+.wrap { max-width: 1060px; margin: 0 auto; padding: 0 16px; }
+.top { border-bottom: 1px solid var(--line); background: #110e0b; font-size: 15px; }
+.top .wrap { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 10px; padding-bottom: 10px; }
+.top a { text-decoration: none; }
+.hero { text-align: center; padding: 54px 0 34px; border-bottom: 1px solid var(--line);
+  background: radial-gradient(ellipse at 50% 0%, #2b1a0b 0%, #160f09 50%, var(--bg) 85%); }
+.kicker { font: 700 14px Cinzel, CinzelCyr, serif; letter-spacing: .35em; color: var(--red-2); text-transform: uppercase; }
+h1 { font: 900 clamp(30px, 6vw, 52px) Cinzel, CinzelCyr, serif; color: var(--gold-2); margin: 8px 0 12px; letter-spacing: .04em; }
+.lead { max-width: 760px; margin: 0 auto; }
+section { padding: 40px 0; border-bottom: 1px solid var(--line); }
+h2 { font: 700 clamp(22px, 4vw, 30px) Cinzel, CinzelCyr, serif; color: var(--gold); margin: 0 0 16px; letter-spacing: .04em; }
+.sub { margin: -6px 0 18px; color: var(--muted); font-size: 16px; max-width: 820px; }
+code { background: #221c14; padding: 1px 6px; font-size: 15px; word-break: break-word; }
+ol.steps { margin: 0; padding-left: 22px; } ol.steps li { margin-bottom: 6px; }
+figure { margin: 0 0 18px; }
+figure img { display: block; width: 100%; height: auto; border: 1px solid var(--line); }
+figcaption { color: var(--muted); font-size: 15px; margin-top: 6px; }
+.shots { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+.tbl { width: 100%; border-collapse: collapse; font-size: 16px; }
+.tbl th { font: 700 13px Cinzel, CinzelCyr, serif; letter-spacing: .08em; color: var(--muted); text-align: left; border-bottom: 1px solid var(--line); padding: 8px 8px; }
+.tbl td { border-bottom: 1px solid #262017; padding: 9px 8px; vertical-align: top; }
+.tbl td.ic { width: 52px; text-align: center; }
+.tbl td.ic img { width: 36px; height: 36px; object-fit: contain; vertical-align: middle; }
+.tbl td.ic img.sm { width: 30px; height: 30px; }
+.tbl b { color: var(--gold-2); font-weight: 600; }
+.num { display: inline-block; background: var(--red-2); color: #fff3df; border: 2px solid var(--gold-2); border-radius: 50%; width: 24px; height: 24px; line-height: 20px; text-align: center; font: 700 13px sans-serif; margin-right: 6px; }
+.g { color: var(--good); } .r { color: var(--bad); } .t { color: var(--tag); font-size: .85em; }
+.formula { background: #1a1611; border: 1px solid var(--line); border-left: 3px solid var(--gold); padding: 12px 16px; margin: 14px 0; font-size: 17px; }
+.note { color: var(--muted); font-size: 15px; }
+ul.plain { margin: 0; padding-left: 20px; } ul.plain li { margin-bottom: 6px; }
+footer { padding: 30px 0 50px; color: var(--muted); font-size: 15px; text-align: center; }
+@media (max-width: 760px) {
+  .shots { grid-template-columns: 1fr; } .hero { padding: 40px 0 26px; }
+  .tbl { font-size: 15px; } .tbl thead { display: none; }
+  .tbl tr { display: grid; grid-template-columns: 48px 1fr; border-bottom: 1px solid #262017; padding: 6px 0; }
+  .tbl td { border: 0; padding: 3px 6px; }
+  .tbl td.ic { grid-row: span 4; width: auto; }
+  .tbl.noic tr { grid-template-columns: 1fr; }
+  .tbl.noic td:first-child { color: var(--gold-2); font-weight: 600; }
+  .tbl td[data-h]::before { content: attr(data-h) ": "; color: var(--muted); font-size: 13px; }
+}
+</style>
+<script defer src="/elite/ui/mirrors.js"></script>
+</head>
+<body>
+
+<div class="top"><div class="wrap">
+  <a href="../lab/">← Elite Lab</a>
+  <a href="../">Elite Launcher</a>
+  <span data-mirrors style="margin-left:auto"></span>
+</div></div>
+
+<header class="hero"><div class="wrap">
+  <div class="kicker">Дополнение · UnitStats 0.5</div>
+  <h1>Unit stats</h1>
+  <p class="lead">Характеристики выбранного отряда прямо в панели выделения, слева от кнопки Retreat: DPS в дальнем и ближнем бою, навык ближнего боя, броня, дальность, скорость, обзор — и действующие на отряд эффекты (ауры, баффы, дебаффы). Ниже — что значит каждая иконка и каждое число.</p>
+</div></header>
+
+<section><div class="wrap">
+  <h2>Как включить</h2>
+  <ol class="steps">
+    <li>Установите Elite Launcher и откройте «Дополнения» (Add-ons).</li>
+    <li>В группе «Эксперимент» (Experiment) отметьте карточку <b>Unit stats</b>. По умолчанию выключено.</li>
+    <li>Запустите игру и выделите <b>один</b> отряд. Если выделено несколько отрядов или ни одного, блок пустой.</li>
+  </ol>
+  <p class="note">Работает и в Elite, и в ванильной Retribution (режим ванили в лаунчере). Видите только вы: дополнение ничего не меняет в игре и не влияет на синхронизацию.</p>
+</div></section>
+
+<section><div class="wrap">
+  <h2>Панель целиком</h2>
+  <figure>
+    <img src="panel_annotated.png" width="990" height="224" alt="Панель выделения тактического отряда с цифрами UnitStats">
+    <figcaption>Tactical Marine Squad (Elite). A — эффекты; 1–3 — верхняя строка: DPS дальний, DPS ближний, навык ближнего боя; 4–7 — нижняя: броня, дальность, скорость, обзор.</figcaption>
+  </figure>
+  <figure>
+    <img src="full_tactical.jpg" width="1280" height="800" loading="lazy" alt="Весь экран игры с панелью UnitStats">
+    <figcaption>Где это на экране: внизу, в штатной панели выделения игры, сразу слева от Retreat. Никаких оверлеев поверх игры.</figcaption>
+  </figure>
+</div></section>
+
+<section><div class="wrap">
+  <h2>Характеристики</h2>
+  <p class="sub">Все числа берутся из движка в момент показа — с учётом улучшений, снаряжения (wargear), уровня отряда и действующих баффов/дебаффов. Прочерк «-» — у отряда такого нет (например, нет стрелкового оружия).</p>
+  <table class="tbl">
+    <thead><tr><th></th><th>Что</th><th>Что значит число</th><th>Как считается</th></tr></thead>
+    <tbody>
+    <tr><td class="ic"><img src="icons/ranged.png" alt=""></td>
+      <td><span class="num">1</span><b>Ranged DPS</b></td>
+      <td data-h="Число"><code>43.75 <span class="t">(3×14.58)</span></code> — урон в секунду всего отряда в дальнем бою; в скобках — число моделей × DPS одной модели (только когда все модели одинаковые).</td>
+      <td data-h="Расчёт">Сумма по всем стволам всех моделей (стреляют все). Формула редактора атрибутов — см. ниже.</td></tr>
+    <tr><td class="ic"><img src="icons/melee.png" alt=""></td>
+      <td><span class="num">2</span><b>Melee DPS</b></td>
+      <td data-h="Число"><code>57 <span class="t">(3×19)</span></code> — урон в секунду отряда в ближнем бою, в скобках — на модель.</td>
+      <td data-h="Расчёт">У каждой модели берётся лучшее оружие ближнего боя (бьёт одно за раз), потом сумма по отряду. <code>damage / (wind_up + wind_down + cooldown)</code>.</td></tr>
+    <tr><td class="ic"><img src="icons/skill.png" alt=""></td>
+      <td><span class="num">3</span><b>Melee skill</b></td>
+      <td data-h="Число">Навык ближнего боя (melee skill) — именно то значение, которое игра использует в расчётах рукопашной.</td>
+      <td data-h="Расчёт">Собственная функция игры: навык по уровню отряда (leveling), иначе <code>melee weapon_skill</code>, плюс баффы навыка. Максимум по моделям.</td></tr>
+    <tr><td class="ic"><img class="sm" src="icons/arm_inf.png" alt=""> <img class="sm" src="icons/arm_heavy.png" alt=""><br><img class="sm" src="icons/arm_veh.png" alt=""> <img class="sm" src="icons/arm_bld.png" alt=""></td>
+      <td><span class="num">4</span><b>Armour</b></td>
+      <td data-h="Число">Тип брони отряда (короткое имя, таблица ниже). Иконка — класс: пехота, тяжёлая пехота/командир, техника, здание (те же значки, что в подсказке оружия «эффективно против»).</td>
+      <td data-h="Расчёт">Тип брони большинства моделей отряда. Язык — как у игры (русский, если игра русская).</td></tr>
+    <tr><td class="ic"><img src="icons/range.png" alt=""></td>
+      <td><span class="num">5</span><b>Range</b></td>
+      <td data-h="Число">Дальность стрельбы в игровых единицах, как в атрибутах оружия.</td>
+      <td data-h="Расчёт">Наибольшая максимальная дальность стрелкового оружия отряда, с модификаторами.</td></tr>
+    <tr><td class="ic"><img src="icons/speed.png" alt=""></td>
+      <td><span class="num">6</span><b>Speed</b></td>
+      <td data-h="Число">Максимальная скорость движения (игровые единицы в секунду).</td>
+      <td data-h="Расчёт">Самая медленная модель отряда, с модификаторами (подавление, спринт, ауры).</td></tr>
+    <tr><td class="ic"><img src="icons/sight.png" alt=""></td>
+      <td><span class="num">7</span><b>Sight</b></td>
+      <td data-h="Число">Радиус обзора.</td>
+      <td data-h="Расчёт">Текущий радиус обзора (как Entity_GetSightRadius), максимум по моделям.</td></tr>
+    </tbody>
+  </table>
+  <p class="note">Формат: DPS — два знака до 100, один до 1000, лишние нули убраны (8.57, 14.58, 25, 216.4); дальность, скорость, обзор — один знак до 10, дальше целые.</p>
+
+  <h2 style="margin-top:34px">Как считается DPS</h2>
+  <div class="formula"><code>DPS = shots × damage / (shots × (wind_up + firing + wind_down + cooldown) + reload)</code></div>
+  <ul class="plain">
+    <li><b>shots</b> — выстрелов до перезарядки: <code>reload frequency (min + max) / 2</code>; если перезарядки нет — 1 выстрел, без reload.</li>
+    <li><b>reload</b> — длительность перезарядки <code>(min + max) / 2</code>.</li>
+    <li><b>damage</b> — <code>damage_hp</code> за выстрел; у снарядного оружия × <code>projectiles_per_shot</code>; у настоящей очереди (есть <code>rate_of_fire</code>) × rate_of_fire × длительность очереди.</li>
+    <li><b>firing</b> — длительность очереди <code>(min + max) / 2</code> для настоящей очереди, иначе 0.</li>
+    <li>Урон, cooldown и reload — через модификаторы оружия игры (улучшения, wargear, баффы), × множитель урона уровня.</li>
+  </ul>
+  <p><b>Пример — дробовик:</b> 20 урона, wind_up 0, cooldown 1.5, wind_down 0.5, 9 выстрелов, перезарядка 3 с:<br>
+  <code>9 × 20 / (9 × (0 + 1.5 + 0.5) + 3) = 180 / 21 = 8.57</code></p>
+  <table class="tbl noic" style="margin-top:10px">
+    <thead><tr><th>Оружие</th><th>Атрибуты</th><th>Расчёт</th><th>Панель</th></tr></thead>
+    <tbody>
+      <tr><td>sm_bolter</td><td data-h="Атрибуты">очередь 2 с × 2/с, 25 урона/с, cd 1.0, reload 3, 6–8</td><td data-h="Расчёт">7 × 50 / (7 × 3 + 3)</td><td data-h="Панель">14.58</td></tr>
+      <tr><td>sm_heavy_bolter</td><td data-h="Атрибуты">очередь 2 с × 16/с, 300 урона/с, cd 0.5, reload 3, 10–12</td><td data-h="Расчёт">11 × 600 / (11 × 2.5 + 3)</td><td data-h="Панель">216.39</td></tr>
+      <tr><td>ork_rokkit_launcha</td><td data-h="Атрибуты">снаряд × 3, 12.8 урона, wd 4.0, без перезарядки</td><td data-h="Расчёт">3 × 12.8 / 4</td><td data-h="Панель">9.6</td></tr>
+      <tr><td>sm_chain_sword_assault</td><td data-h="Атрибуты">ближний, 35 урона, wu 0.8, wd 0.5</td><td data-h="Расчёт">35 / 1.3</td><td data-h="Панель">26.92</td></tr>
+    </tbody>
+  </table>
+  <p class="note">Это число редактора атрибутов (им же считают баланс). Реальный цикл движка (тики по 0.1 с, случайный cooldown 80–120%) чуть отличается; его можно включить строкой <code>ShowEngineCycle=1</code> в <code>UnitStats.ini</code>, по умолчанию он только в логе.</p>
+
+  <h2 style="margin-top:34px">Короткие имена брони</h2>
+  <table class="tbl">
+    <thead><tr><th></th><th>Тип в игре</th><th>EN</th><th>RU</th></tr></thead>
+    <tbody>
+      <tr><td class="ic"><img class="sm" src="icons/arm_inf.png" alt=""></td><td>infantry</td><td data-h="EN">Infantry</td><td data-h="RU">Пехота</td></tr>
+      <tr><td class="ic"><img class="sm" src="icons/arm_inf.png" alt=""></td><td>infantry_fire_resist</td><td data-h="EN">Inf. (fire)</td><td data-h="RU">Пех. (огн.)</td></tr>
+      <tr><td class="ic"><img class="sm" src="icons/arm_heavy.png" alt=""></td><td>heavy_infantry</td><td data-h="EN">Heavy inf.</td><td data-h="RU">Тяж. пех.</td></tr>
+      <tr><td class="ic"><img class="sm" src="icons/arm_heavy.png" alt=""></td><td>super_heavy_infantry</td><td data-h="EN">S-heavy inf.</td><td data-h="RU">Сверхтяж.</td></tr>
+      <tr><td class="ic"><img class="sm" src="icons/arm_heavy.png" alt=""></td><td>commander</td><td data-h="EN">Commander</td><td data-h="RU">Командир</td></tr>
+      <tr><td class="ic"><img class="sm" src="icons/arm_veh.png" alt=""></td><td>vehicle</td><td data-h="EN">Vehicle</td><td data-h="RU">Техника</td></tr>
+      <tr><td class="ic"><img class="sm" src="icons/arm_bld.png" alt=""></td><td>building</td><td data-h="EN">Building</td><td data-h="RU">Здание</td></tr>
+      <tr><td class="ic"><img class="sm" src="icons/arm_bld.png" alt=""></td><td>building_light</td><td data-h="EN">Light bldg</td><td data-h="RU">Лёгк. зд.</td></tr>
+      <tr><td class="ic"><img class="sm" src="icons/arm_bld.png" alt=""></td><td>building_defence</td><td data-h="EN">Defence</td><td data-h="RU">Оборона</td></tr>
+      <tr><td class="ic"><img class="sm" src="icons/arm_bld.png" alt=""></td><td>building_ig_turret</td><td data-h="EN">Turret</td><td data-h="RU">Турель</td></tr>
+    </tbody>
+  </table>
+</div></section>
+
+<section><div class="wrap">
+  <h2>Эффекты (блок A)</h2>
+  <p class="sub">Левее характеристик — до 6 действующих на отряд эффектов: ауры, баффы, дебаффы, пассивки. Каждый — иконка игры и <b>итоговое изменение, которое движок реально применяет</b>. Зелёное — хорошо для отряда, <span class="r">красное</span> — плохо. Сначала самые сильные. Мелкая приписка уточняет вид (<span class="t">heavy</span>, <span class="t">vs veh</span>…). Если эффекты не влезают в две строки, блок переходит на три строки мельче шрифтом.</p>
+  <div class="shots">
+    <figure><img src="fx_fortune.jpg" width="960" height="125" loading="lazy" alt=""><figcaption>Guardians под Fortune: урон по ним <span class="g">−30%</span> (и пассивные −50% / −50%).</figcaption></figure>
+    <figure><img src="fx_suppressed.jpg" width="960" height="125" loading="lazy" alt=""><figcaption>Подавленные Guardians: скорострельность <span class="r">−95%</span>, скорость <span class="r">−65%</span> (скорость 1.9).</figcaption></figure>
+    <figure><img src="fx_execution.jpg" width="960" height="125" loading="lazy" alt=""><figcaption>Guardsmen после казни комиссара: урон <span class="g">+100%</span>.</figcaption></figure>
+    <figure><img src="fx_aura.jpg" width="960" height="125" loading="lazy" alt=""><figcaption>Howling Banshees: аура экзарха <span class="g">+0.5</span> — абсолютная прибавка, не процент.</figcaption></figure>
+  </div>
+
+  <h2 style="margin-top:26px">Как читать число</h2>
+  <ul class="plain">
+    <li><b>«+50%» / «−30%»</b> — множитель: значение умножено на 1.5 / 0.7. Множители одного типа в DoW2 складываются: ×1.5 и ×1.5 = <span class="g">+100%</span>.</li>
+    <li><b>«+0.5», «+50»</b> (без %) — абсолютная прибавка к значению (скорость, навык ближнего боя).</li>
+    <li><b>Скорострельность</b> показана как темп: cooldown ×0.5 = <span class="g">+100%</span> (стреляет вдвое чаще); <span class="r">−95%</span> = в 20 раз реже.</li>
+    <li><b>Отбрасывание</b> — прибавка к шансу в процентных пунктах: <span class="g">−100%</span> = не отбрасывается.</li>
+    <li><b>Получаемый урон / подавление</b> — минус хорошо: <span class="g">−50%</span> = вдвое меньше.</li>
+    <li><b>hidden / no fire / no retreat</b> — включено/выключено, без числа.</li>
+    <li>Время до конца эффекта не показывается (движок хранит таймер у того, кто его наложил).</li>
+  </ul>
+
+  <table class="tbl" style="margin-top:18px">
+    <thead><tr><th></th><th>Эффект</th><th>Что меняется</th><th>Как показан</th></tr></thead>
+    <tbody>
+    <tr><td class="ic"><img src="icons/e_damage.png" alt=""></td><td><b>Damage</b></td><td data-h="Что">Наносимый урон, всё оружие. С припиской — против типа брони: <span class="t">vs inf / vs heavy / vs hero / vs veh / vs bld</span> (по пех. / по тяж. / по ком. / по техн. / по зд.)</td><td data-h="Вид">%, плюс хорошо</td></tr>
+    <tr><td class="ic"><img src="icons/skill.png" alt=""></td><td><b>Melee damage</b></td><td data-h="Что">Урон в ближнем бою</td><td data-h="Вид">%, плюс хорошо</td></tr>
+    <tr><td class="ic"><img src="icons/e_ranged.png" alt=""></td><td><b>Ranged damage</b></td><td data-h="Что">Урон в дальнем бою (и снарядами)</td><td data-h="Вид">%, плюс хорошо</td></tr>
+    <tr><td class="ic"><img src="icons/e_resist.png" alt=""></td><td><b>Damage taken</b></td><td data-h="Что">Получаемый урон, весь</td><td data-h="Вид">%, минус хорошо</td></tr>
+    <tr><td class="ic"><img src="icons/e_meleedef.png" alt=""></td><td><b>Melee damage taken</b></td><td data-h="Что">Получаемый урон в ближнем бою; <span class="t">light / heavy / power</span> (лёгк. / тяж. / сил.) — от такого оружия</td><td data-h="Вид">%, минус хорошо</td></tr>
+    <tr><td class="ic"><img src="icons/e_rangeddef.png" alt=""></td><td><b>Ranged damage taken</b></td><td data-h="Что">Получаемый урон в дальнем бою; <span class="t">pierce / flame / expl / plasma / det</span> (пробив. / огонь / взрыв / плазма / детон.)</td><td data-h="Вид">%, минус хорошо</td></tr>
+    <tr><td class="ic"><img src="icons/e_evade.png" alt=""></td><td><b>Evasion</b></td><td data-h="Что">Точность выстрелов по отряду (received accuracy)</td><td data-h="Вид">%, минус хорошо</td></tr>
+    <tr><td class="ic"><img src="icons/e_accuracy.png" alt=""></td><td><b>Accuracy</b></td><td data-h="Что">Точность своего оружия; <span class="t">melee</span> (ближн.) — в ближнем бою</td><td data-h="Вид">%, плюс хорошо</td></tr>
+    <tr><td class="ic"><img src="icons/e_rate.png" alt=""></td><td><b>Rate of fire</b></td><td data-h="Что">Темп стрельбы (cooldown); <span class="t">reload</span> (перезар.) — перезарядка; <span class="t">burst</span> (очередь) — длина очереди</td><td data-h="Вид">% темпа, плюс хорошо</td></tr>
+    <tr><td class="ic"><img src="icons/range.png" alt=""></td><td><b>Range</b></td><td data-h="Что">Максимальная дальность оружия</td><td data-h="Вид">%, плюс хорошо</td></tr>
+    <tr><td class="ic"><img src="icons/e_speed.png" alt=""></td><td><b>Speed</b></td><td data-h="Что">Максимальная скорость</td><td data-h="Вид">% или «+0.5»</td></tr>
+    <tr><td class="ic"><img src="icons/e_health.png" alt=""></td><td><b>Health</b></td><td data-h="Что">Максимум здоровья</td><td data-h="Вид">%, плюс хорошо</td></tr>
+    <tr><td class="ic"><img src="icons/e_regen.png" alt=""></td><td><b>Regeneration</b></td><td data-h="Что">Регенерация здоровья</td><td data-h="Вид">%, плюс хорошо</td></tr>
+    <tr><td class="ic"><img src="icons/sight.png" alt=""></td><td><b>Sight</b></td><td data-h="Что">Радиус обзора</td><td data-h="Вид">%, плюс хорошо</td></tr>
+    <tr><td class="ic"><img src="icons/e_skill.png" alt=""></td><td><b>Melee skill</b></td><td data-h="Что">Навык ближнего боя</td><td data-h="Вид">«+50» (прибавка)</td></tr>
+    <tr><td class="ic"><img src="icons/e_pen.png" alt=""></td><td><b>Penetration</b></td><td data-h="Что">Бронебойность оружия (armour penetration)</td><td data-h="Вид">%, плюс хорошо</td></tr>
+    <tr><td class="ic"><img src="icons/e_suppdmg.png" alt=""></td><td><b>Suppression</b> (наносимое)</td><td data-h="Что">Сколько подавления отряд наносит</td><td data-h="Вид">%, плюс хорошо</td></tr>
+    <tr><td class="ic"><img src="icons/e_suppdef.png" alt=""></td><td><b>Suppression taken</b></td><td data-h="Что">Получаемое подавление</td><td data-h="Вид">%, <span class="g">−100%</span> = не подавляется</td></tr>
+    <tr><td class="ic"><img src="icons/e_knock.png" alt=""></td><td><b>Knockback</b></td><td data-h="Что">Шанс быть отброшенным (все пять видов одной ячейкой)</td><td data-h="Вид">п.п. шанса, минус хорошо</td></tr>
+    <tr><td class="ic"><img src="icons/e_energy.png" alt=""></td><td><b>Energy</b></td><td data-h="Что">Восстановление энергии; <span class="t">max</span> (макс.) — запас энергии</td><td data-h="Вид">%, плюс хорошо</td></tr>
+    <tr><td class="ic"><img src="icons/e_cooldown.png" alt=""></td><td><b>Recharge</b></td><td data-h="Что">Время перезарядки способностей</td><td data-h="Вид">%, минус хорошо</td></tr>
+    <tr><td class="ic"><img src="icons/e_setup.png" alt=""></td><td><b>Setup</b></td><td data-h="Что">Время установки тяжёлого оружия</td><td data-h="Вид">%, минус хорошо</td></tr>
+    <tr><td class="ic"><img src="icons/e_invis.png" alt=""></td><td><b>Hidden</b></td><td data-h="Что">Отряд в камуфляже/невидим</td><td data-h="Вид">«hidden» / «скрыт»</td></tr>
+    <tr><td class="ic"><img src="icons/e_noretreat.png" alt=""></td><td><b>No retreat</b></td><td data-h="Что">Отряд не может отступить (например, казнь комиссара)</td><td data-h="Вид">«no retreat» / «без отхода»</td></tr>
+    <tr><td class="ic"><img src="icons/e_nofire.png" alt=""></td><td><b>No fire</b></td><td data-h="Что">Отряд не может стрелять (оглушение и т. п.)</td><td data-h="Вид">«no fire» / «не стреляет»</td></tr>
+    </tbody>
+  </table>
+</div></section>
+
+<section><div class="wrap">
+  <h2>Заметки</h2>
+  <ul class="plain">
+    <li>Видите только вы. Дополнение только читает данные игры и рисует в её собственной панели — никаких приказов, никакого рассинхрона, без Direct3D-оверлеев.</li>
+    <li>Работает в Elite и в ванильной Retribution; имена брони и приписки эффектов — на языке игры.</li>
+    <li>Все числа — от движка: улучшения, wargear, уровень, ауры и дебаффы уже учтены.</li>
+    <li>Иконки и размеры можно поменять в <code>UnitStats.ini</code> (<code>[Icons]</code>, <code>[EffectIcons]</code>, <code>[ArmourNames]</code>); все иконки — текстуры самой игры.</li>
+  </ul>
+  <div class="shots" style="margin-top:20px">
+    <figure><img src="dps_devastator.jpg" width="990" height="330" loading="lazy" alt=""><figcaption>Devastator: heavy bolter 216.39 плюс болтеры.</figcaption></figure>
+    <figure><img src="vanilla_scouts.jpg" width="990" height="330" loading="lazy" alt=""><figcaption>Ванильная Retribution: скауты.</figcaption></figure>
+  </div>
+</div></section>
+
+<footer><div class="wrap">По просьбе grantovich (Elite Mod). Исходники: <a href="https://github.com/dow2-launcher/Dow2-patches">Dow2-patches</a>. Elite Mod делает команда Elite; эта страница не их. Dawn of War II — товарный знак Games Workshop, Relic Entertainment и SEGA.</div></footer>
+</body>
+</html>

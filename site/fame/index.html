@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Elite Hall of Fame</title>
+<meta name="description" content="The players who helped the Elite launcher most: reports, tests, ideas and mods, and what changed thanks to them.">
+<link rel="icon" href="../img/favicon.png">
+<style>
+@font-face { font-family: Cinzel; src: url(../fonts/cinzel-700.ttf); font-weight: 700; font-display: swap; }
+@font-face { font-family: Cinzel; src: url(../fonts/cinzel-900.ttf); font-weight: 900; font-display: swap; }
+@font-face { font-family: CinzelCyr; src: url(../fonts/cormorantsc-cyr-700.ttf); font-weight: 700 900; unicode-range: U+0400-045F, U+0490-0491, U+2116; font-display: swap; }
+@font-face { font-family: Spectral; src: url(../fonts/spectral-400.ttf); font-weight: 400; font-display: swap; }
+@font-face { font-family: Spectral; src: url(../fonts/spectral-600.ttf); font-weight: 600; font-display: swap; }
+:root { --bg: #0d0b09; --panel: #16130f; --line: #3a3124; --gold: #d9b25f; --gold-2: #f0d48f; --text: #e6dccb; --muted: #a39782; --red-2: #c42a24; --ok: #6fbf73; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.6 Spectral, Georgia, serif; }
+a { color: var(--gold); }
+.wrap { max-width: 860px; margin: 0 auto; padding: 0 16px; }
+.top { border-bottom: 1px solid var(--line); background: #110e0b; font-size: 15px; }
+.top .wrap { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 10px; padding-bottom: 10px; }
+.top a { text-decoration: none; }
+.langs a { cursor: pointer; margin-left: 10px; color: var(--muted); font-weight: 600; }
+.langs a.on { color: var(--gold-2); }
+.hero { text-align: center; padding: 40px 0 24px; border-bottom: 1px solid var(--line); background: radial-gradient(ellipse at 50% 0%, #2b1a0b 0%, #160f09 50%, var(--bg) 85%); }
+.kicker { font: 700 13px Cinzel, CinzelCyr, serif; letter-spacing: .35em; color: var(--red-2); text-transform: uppercase; }
+h1 { font: 900 clamp(30px, 6vw, 48px) Cinzel, CinzelCyr, serif; color: var(--gold-2); margin: 6px 0 10px; letter-spacing: .04em; }
+.lead { max-width: 640px; margin: 0 auto; color: var(--muted); }
+.list { padding: 24px 0 48px; display: flex; flex-direction: column; gap: 12px; }
+details { background: linear-gradient(#1a1611, #13100c); border: 1px solid var(--line); }
+details[open] { border-color: #6b5320; }
+summary { list-style: none; cursor: pointer; padding: 14px 18px; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 4px 12px; align-items: start; }
+summary::-webkit-details-marker { display: none; }
+.rank { font: 900 22px/1.2 Cinzel, serif; color: var(--gold); text-align: center; }
+.nm { font: 700 20px/1.25 Cinzel, CinzelCyr, serif; color: var(--gold-2); overflow-wrap: anywhere; }
+.role { font-size: 14px; color: var(--muted); margin-left: 8px; font-family: Spectral, serif; font-weight: 600; }
+.ords { display: inline-flex; gap: 2px; vertical-align: -5px; margin-left: 10px; }
+.ords svg { width: 22px; height: 26px; }
+.ords .off { opacity: .18; filter: grayscale(1); }
+.short { grid-column: 2 / 4; color: var(--text); font-size: 16px; }
+.last { font-size: 13px; color: var(--muted); white-space: nowrap; padding-top: 4px; }
+.arrow { display: inline-block; transition: transform .15s; color: var(--gold); margin-left: 6px; }
+details[open] .arrow { transform: rotate(90deg); }
+.tl { margin: 0; padding: 4px 18px 16px 64px; list-style: none; border-top: 1px solid var(--line); }
+.tl li { position: relative; padding: 10px 0 10px 0; border-bottom: 1px dashed #2c251b; }
+.tl li:last-child { border-bottom: 0; }
+.tl li::before { content: ""; position: absolute; left: -22px; top: 17px; width: 9px; height: 9px; border-radius: 50%; background: var(--gold); }
+.d { font: 600 13px Spectral, serif; color: var(--gold); letter-spacing: .03em; }
+.did { margin: 2px 0; }
+.chg { font-size: 15px; color: #bfe3c0; }
+.chg b { color: var(--ok); font-weight: 600; }
+.empty { color: var(--muted); text-align: center; padding: 40px 0; }
+footer { color: var(--muted); font-size: 14px; text-align: center; padding: 0 0 40px; }
+@media (max-width: 560px) { summary { grid-template-columns: 26px minmax(0, 1fr); } .last { grid-column: 2; padding-top: 0; } .short { grid-column: 2; } .tl { padding-left: 40px; } .role { display: block; margin: 2px 0 0; } }
+</style>
+<script defer src="/elite/ui/mirrors.js"></script>
+</head>
+<body>
+<div class="top"><div class="wrap"><a href="../" data-i="back">← Elite Mod</a><span data-mirrors style="margin-left:auto"></span><span class="langs" id="langs"></span></div></div>
+<div class="hero"><div class="wrap"><div class="kicker" data-i="kicker">Elite launcher</div><h1 data-i="title">Hall of Fame</h1><p class="lead" data-i="lead"></p></div></div>
+<div class="wrap"><div class="list" id="list"><div class="empty">…</div></div></div>
+<footer><div class="wrap" data-i="foot"></div></footer>
+<script>
+var T = {
+  en: { back: '← Elite Mod', kicker: 'Elite launcher', title: 'Hall of Fame', lead: 'The players who helped the launcher most: reports with logs, tests, ideas and mods. On top is the one who helped most recently; open a name to see what they did and what changed thanks to them.', last: 'last: ', changed: 'What we changed:', ord: function (n) { return 'Orders: ' + n + ' of 5 - compared with the others in the hall'; }, none: 'Nothing here yet.', foot: 'Thank you all. Send your feedback from the launcher: the chat with the developers.' },
+  ru: { back: '← Elite Mod', kicker: 'Лаунчер Elite', title: 'Зал славы', lead: 'Игроки, которые больше всех помогли лаунчеру: отчёты с логами, тесты, идеи и моды. Сверху — тот, кто помогал последним; нажмите на имя, чтобы увидеть, что сделано и что мы изменили благодаря этому.', last: 'последний вклад: ', changed: 'Что мы изменили:', ord: function (n) { return 'Ордена: ' + n + ' из 5 — по сравнению с остальными в зале'; }, none: 'Пока пусто.', foot: 'Спасибо всем. Отзывы — из лаунчера, в чате с разработчиками.' },
+  es: { back: '← Elite Mod', kicker: 'Launcher de Elite', title: 'Salón de la fama', lead: 'Los jugadores que más ayudaron al launcher: informes con registros, pruebas, ideas y mods. Arriba, quien ayudó más recientemente; abre un nombre para ver qué hizo y qué cambió gracias a ello.', last: 'último: ', changed: 'Qué cambiamos:', ord: function (n) { return 'Órdenes: ' + n + ' de 5, comparado con los demás'; }, none: 'Aún vacío.', foot: 'Gracias a todos. Envía tus comentarios desde el launcher, en el chat con los desarrolladores.' },
+  fr: { back: '← Elite Mod', kicker: 'Launcher Elite', title: 'Panthéon', lead: 'Les joueurs qui ont le plus aidé le launcher : rapports avec journaux, tests, idées et mods. En haut, celui qui a aidé le plus récemment ; ouvrez un nom pour voir ce qui a été fait et ce que nous avons changé.', last: 'dernier : ', changed: 'Ce que nous avons changé :', ord: function (n) { return 'Ordres : ' + n + ' sur 5, par rapport aux autres'; }, none: 'Rien pour l\'instant.', foot: 'Merci à tous. Vos retours : depuis le launcher, dans le chat avec les développeurs.' },
+  de: { back: '← Elite Mod', kicker: 'Elite-Launcher', title: 'Ruhmeshalle', lead: 'Die Spieler, die dem Launcher am meisten geholfen haben: Berichte mit Logs, Tests, Ideen und Mods. Oben steht, wer zuletzt geholfen hat; einen Namen öffnen, um zu sehen, was getan wurde und was sich dadurch geändert hat.', last: 'zuletzt: ', changed: 'Was wir geändert haben:', ord: function (n) { return 'Orden: ' + n + ' von 5 im Vergleich zu den anderen'; }, none: 'Noch leer.', foot: 'Danke an alle. Feedback bitte aus dem Launcher, im Chat mit den Entwicklern.' } };
+var L = (new URLSearchParams(location.search).get('lang')) || (function () { try { return localStorage.getItem('lang'); } catch (e) { return null; } })() || ((navigator.language || 'en').slice(0, 2));
+if (!T[L]) L = 'en';
+var DATA = null, OPEN = {};
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+function tx(o) { return o ? (o[L] || o.en || o.ru || '') : ''; }
+function day(d) { try { return new Date(d + 'T12:00:00').toLocaleDateString(L === 'en' ? 'en-GB' : L, { day: 'numeric', month: 'long', year: 'numeric' }); } catch (e) { return d; } }
+// an order of merit (a cross with a skull, in the spirit of the setting); 1-5 of them, relative to the best in the hall
+var ORDER = '<svg viewBox="0 0 22 26" aria-hidden="true"><path d="M8 0h6l-1 2h-4z" fill="#8e1b1b"/><path d="M7 2h8v3H7z" fill="#b8252a"/>'
+  + '<path d="M11 5l3 4 5-2-2 5 4 2-4 2 2 5-5-2-3 4-3-4-5 2 2-5-4-2 4-2-2-5 5 2z" fill="#d9b25f" stroke="#5a4214" stroke-width=".8"/>'
+  + '<circle cx="11" cy="14" r="3.6" fill="#f3ead8" stroke="#5a4214" stroke-width=".6"/><circle cx="9.7" cy="13.6" r=".9" fill="#2a1d0e"/><circle cx="12.3" cy="13.6" r=".9" fill="#2a1d0e"/><path d="M10.2 16.3h1.6" stroke="#2a1d0e" stroke-width=".7"/></svg>';
+function score(p) { return (p.events || []).reduce(function (s, e) { return s + (e.changed ? 2 : 1); }, 0); }
+function orders(p, best) { var n = Math.max(1, Math.min(5, Math.round(5 * score(p) / Math.max(1, best)))); var h = ''; for (var i = 0; i < 5; i++) h += i < n ? ORDER : ORDER.replace('<svg ', '<svg class="off" '); return '<span class="ords" title="' + esc(T[L].ord(n)) + '">' + h + '</span>'; }
+function lastOf(p) { return (p.events || []).reduce(function (m, e) { return e.date > m ? e.date : m; }, ''); }
+function render() {
+  document.documentElement.lang = L;
+  document.querySelectorAll('[data-i]').forEach(function (e) { e.textContent = T[L][e.dataset.i]; });
+  document.title = T[L].title + ' — Elite';
+  document.getElementById('langs').innerHTML = Object.keys(T).map(function (k) { return '<a data-l="' + k + '" class="' + (k === L ? 'on' : '') + '">' + k.toUpperCase() + '</a>'; }).join('');
+  var box = document.getElementById('list');
+  if (!DATA) return;
+  var ppl = (DATA.people || []).slice().sort(function (a, b) { return lastOf(b).localeCompare(lastOf(a)); });
+  var best = ppl.reduce(function (m, p) { return Math.max(m, score(p)); }, 0);
+  if (!ppl.length) { box.innerHTML = '<div class="empty">' + T[L].none + '</div>'; return; }
+  box.innerHTML = ppl.map(function (p, i) {
+    var ev = (p.events || []).slice().sort(function (a, b) { return b.date.localeCompare(a.date); });
+    return '<details data-n="' + esc(p.name) + '"' + (OPEN[p.name] ? ' open' : '') + '><summary><span class="rank">' + (i + 1) + '</span>'
+      + '<span><span class="nm">' + esc(p.name) + '</span>' + orders(p, best) + '<span class="role">' + esc(tx(p.role)) + '</span></span>'
+      + '<span class="last">' + T[L].last + esc(day(lastOf(p))) + '<span class="arrow">▸</span></span>'
+      + '<span class="short">' + esc(tx(p.short)) + '</span></summary>'
+      + '<ul class="tl">' + ev.map(function (e) {
+        return '<li><div class="d">' + esc(day(e.date)) + '</div><div class="did">' + esc(tx(e.did)) + '</div>'
+          + (e.changed ? '<div class="chg"><b>' + T[L].changed + '</b> ' + esc(tx(e.changed)) + '</div>' : '') + '</li>';
+      }).join('') + '</ul></details>';
+  }).join('');
+}
+document.getElementById('langs').addEventListener('click', function (e) { var l = e.target.dataset && e.target.dataset.l; if (!l) return; L = l; try { localStorage.setItem('lang', l); } catch (x) {} render(); });
+document.getElementById('list').addEventListener('toggle', function (e) { if (e.target.tagName === 'DETAILS') OPEN[e.target.dataset.n] = e.target.open; }, true);
+render();
+fetch('../fame.json', { cache: 'no-cache' }).then(function (r) { return r.json(); }).then(function (j) { DATA = j; render(); })
+  .catch(function () { document.getElementById('list').innerHTML = '<div class="empty">—</div>'; });
+</script>
+</body>
+</html>
