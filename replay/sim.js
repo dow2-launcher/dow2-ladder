@@ -13,7 +13,7 @@
       offer: 'The detailed analysis is not made for this replay yet: the game itself replays the match (no graphics, about a minute) and the whole match appears here on the map - every squad, fights, points, losses.',
       ask: '▶ Make the detailed analysis', queued: 'In the queue - this page will show the match by itself, usually within 2-5 minutes.', running: 'The game is replaying the match right now…', building: 'Almost ready…',
       failed: 'The game could not replay this match', unsupported: 'The detailed analysis works for Elite 3.2 and 3.2.1 replays of at least half a minute.', busy: 'The queue is full right now - try in a few minutes.',
-      hp: 'HP', sec: 's', models: 'models', end: 'Points at the end', loading: 'Loading the match…', fail: 'Could not load the match data', start: '▶ Watch the match',
+      hp: 'HP', sec: 's', models: 'models', qBuilt: 'built', qDead: 'wiped out', qDown: 'down', qOff: 'not on the map (garrison / transport)', end: 'Points at the end', loading: 'Loading the match…', fail: 'Could not load the match data', start: '▶ Watch the match',
       resTitle: 'Match result', resWin: 'Winner', resLikely: 'Probable winner', resUnknown: 'Result unknown', at: 'At', resPts: 'points held', resVp: 'victory points held', resSq: 'squads on the field',
       resWipe: 'all squads of the other side were destroyed', resRead: 'read from the state of the match at its end: victory points and points held, army strength', resGuess: 'estimated from retreats and squad losses in the last quarter of the match',
       resNone: 'the replay does not say clearly enough who won',
@@ -28,7 +28,7 @@
       offer: 'Подробный разбор для этого реплея ещё не делали: сама игра заново прокрутит матч (без графики, около минуты), и здесь появится весь матч на карте — каждый отряд, бои, точки, потери.',
       ask: '▶ Сделать подробный разбор', queued: 'В очереди — страница сама покажет матч, обычно через 2–5 минут.', running: 'Игра прямо сейчас прокручивает матч…', building: 'Почти готово…',
       failed: 'Игра не смогла прокрутить этот матч', unsupported: 'Подробный разбор работает для реплеев Elite 3.2 и 3.2.1 длиной от полминуты.', busy: 'Очередь сейчас заполнена — попробуйте через несколько минут.',
-      hp: 'HP', sec: 'с', models: 'моделей', end: 'Точки в конце', loading: 'Загружаю матч…', fail: 'Не удалось загрузить данные матча', start: '▶ Смотреть матч',
+      hp: 'HP', sec: 'с', models: 'моделей', qBuilt: 'построен', qDead: 'уничтожен', qDown: 'повержен', qOff: 'не на карте (в здании / транспорте)', end: 'Точки в конце', loading: 'Загружаю матч…', fail: 'Не удалось загрузить данные матча', start: '▶ Смотреть матч',
       resTitle: 'Итог матча', resWin: 'Победа', resLikely: 'Вероятная победа', resUnknown: 'Результат неизвестен', at: 'На', resPts: 'точек под контролем', resVp: 'VP-точек под контролем', resSq: 'отрядов на поле',
       resWipe: 'все отряды другой стороны уничтожены', resRead: 'по состоянию матча в конце: очки и точки под контролем, сила армий', resGuess: 'оценка по ретритам и потерям отрядов в последней четверти матча',
       resNone: 'по реплею не удаётся уверенно сказать, кто победил',
@@ -43,7 +43,11 @@
     const now = q.rating_kind === 'now', ru = L === 'ru';
     return `<small style="color:var(--muted);font-size:11px;margin-left:4px;white-space:nowrap" title="${now ? (ru ? 'рейтинг сейчас' : 'rating now') : (ru ? 'рейтинг на момент матча' : 'rating at match time')}">${q.rating}${now ? (ru ? ' сейчас' : ' now') : ''}</small>`;
   };
-  const TEAMC = ['#2f8bff', '#ff3b30'];   // by side: the first team blue, the second red
+  const TEAMC = ['#2f8bff', '#ff3b30'];
+  // 17.11.2026 (owner): the squads of every player with their icons in build order, numbered - the same numbers on the minimap.
+  // squads.json: the game's squad portraits + names by blueprint (tools/replay_squad_icons.py, from the Elite Codex build)
+  let sqaP = null;
+  const SQA = () => sqaP || (sqaP = fetch(A + 'squads.json').then(r => r.json()).catch(() => ({})));   // by side: the first team blue, the second red
   const SPEEDS = [1, 4, 8, 16, 32];
   let S = null;
 
@@ -73,16 +77,30 @@
 .sim-big { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.25); }
 .sim-big button { background: rgba(15,16,18,.85); border: 2px solid var(--gold); color: #fff; font-size: 18px; padding: 12px 22px; border-radius: 12px; }
 .sim-side { display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
-.sim-team { border: 1px solid var(--line); border-radius: 10px; padding: 8px 9px; }
+.sim-team { border: 1px solid var(--line); border-radius: 10px; padding: 8px 9px; min-width: 0; }
 .sim-team h4 { margin: 0 0 6px; font-size: 13px; display: flex; justify-content: space-between; }
 .sim-p { padding: 4px 0; border-top: 1px solid var(--line); }
 .sim-p:first-of-type { border-top: 0; }
 .sim-pn { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .sim-pn i { flex: none; }
 .sim-pn img { width: 20px; height: 20px; border-radius: 4px; flex: none; }
-.sim-pn span { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sim-pn span { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sim-ps { color: var(--muted); font-size: 12px; display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; font-variant-numeric: tabular-nums; }
 .sim-ps b { color: var(--text); font-weight: 600; }
+.sim-qs { position: relative; display: flex; flex-wrap: wrap; gap: 4px 3px; margin-top: 5px; }
+.sim-qs:empty { display: none; }
+.sim-q { position: relative; width: 24px; height: 24px; flex: none; border-radius: 4px; border: 1.5px solid; box-sizing: border-box; background: #1b1c1f; cursor: pointer; touch-action: manipulation; }
+.sim-q img { display: block; width: 100%; height: 100%; border-radius: 2.5px; }
+.sim-q em { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; font: 700 8.5px/1 system-ui, sans-serif; font-style: normal; color: #eee; letter-spacing: -.2px; overflow: hidden; }
+.sim-q b { position: absolute; right: -4px; bottom: -4px; min-width: 13px; height: 13px; padding: 0 2px; box-sizing: border-box; border-radius: 7px; background: #111; color: #fff; border: 1px solid rgba(255,255,255,.55); z-index: 1; font: 700 9.5px/11px system-ui, sans-serif; text-align: center; font-variant-numeric: tabular-nums; }
+.sim-q.d img, .sim-q.x img, .sim-q.d em, .sim-q.x em { filter: grayscale(1) brightness(.6); }
+.sim-q.d, .sim-q.x { opacity: .5; border-color: rgba(127,127,127,.6) !important; }
+.sim-q.x::after { content: ''; position: absolute; inset: 0; background: linear-gradient(45deg, transparent 45%, #ff4d4d 45% 55%, transparent 55%), linear-gradient(-45deg, transparent 45%, #ff4d4d 45% 55%, transparent 55%); }
+.sim-q.g { opacity: .6; border-style: dashed; }
+.sim-q.on { outline: 2px solid var(--gold); outline-offset: 1px; opacity: 1; }
+.sim-qtip { position: absolute; z-index: 3; display: none; pointer-events: none; background: rgba(10,11,13,.94); color: #fff; border: 1px solid #555; border-radius: 7px; padding: 5px 8px; font-size: 12.5px; line-height: 1.4; max-width: 230px; box-sizing: border-box; }
+.sim-qtip small { color: #bbb; font-size: 11.5px; }
+.sim-side { position: relative; }
 .sim-bar { height: 5px; border-radius: 3px; background: rgba(127,127,127,.18); margin-top: 4px; overflow: hidden; }
 .sim-bar i { display: block; height: 100%; border-radius: 3px; transition: width .25s; }
 .sim-ctl { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 0 6px; }
@@ -183,7 +201,8 @@
     let D;
     try { D = await (await fetch('/replay/api/r/' + rid + '/sim.json?v=2')).json(); } catch (e) { card.innerHTML = `<div class="sim-sub">${tx('fail')}</div>`; return; }
     await assetsReady;
-    S = { rid, D, views: views || 0, t: 0, playing: false, speed: 8, trails: true, heat: '', last: 0, evf: 'all', mapKey: mapKey || D.map, hover: null };
+    const sqa = await SQA();
+    S = { rid, D, SQ: sqa, views: views || 0, t: 0, playing: false, speed: 8, trails: true, heat: '', last: 0, evf: 'all', mapKey: mapKey || D.map, hover: null };
     prep();
     S.res = verdict(D, D.players, window.RESCTX && window.RESCTX.guess, 0);
     window.SIMD = { rid, D, res: S.res };
@@ -241,7 +260,16 @@
     const FILL = [['#4da3ff', '#35e0d0', '#b18cff', '#9fd8ff'], ['#ff5c4d', '#ffa43a', '#ff70c8', '#ffe066']];
     const seen = {};
     D.players.forEach(p => { const side = Math.max(0, S.teams.indexOf(p.team)) % 2, n = seen[side] = (seen[side] || 0) + 1; p.side = side; p.color = FILL[side][(n - 1) % 4]; });
-    S.focus = null; S.focusLock = null;
+    S.focus = null; S.focusLock = null; S.hl = null; S.qtip = null;
+    // build order: the second a squad first shows up in the dump; summoned ones (temporary Bloodletters, clouds) get no number
+    const first = {}, last = {};
+    D.frames.forEach((fr, s) => { for (let i = 0; i < fr.length; i += 6) { const id = fr[i]; if (first[id] == null) first[id] = s; last[id] = s; } });
+    S.life = { first, last }; S.order = {}; S.num = {};
+    Object.keys(D.squads).map(Number).filter(id => first[id] != null).sort((a, b) => first[a] - first[b] || a - b).forEach(id => {
+      const sq = D.squads[id], a = (S.SQ || {})[sq[3]];
+      if (!S.P[sq[0]] || !(sq[2] || (a ? !a.s : last[id] - first[id] >= 30))) return;
+      const l = S.order[sq[0]] || (S.order[sq[0]] = []); l.push(id); S.num[id] = l.length;
+    });
     S.idx = D.frames.map(fr => { const m = new Map(); for (let i = 0; i < fr.length; i += 6) m.set(fr[i], i); return m; });
     const ax = Object.values(D.army || {}).flat(); S.armyMax = Math.max(1, ...ax);
     // events
@@ -330,7 +358,7 @@
     }
     S.el.map.addEventListener('pointermove', e => { const r = S.el.map.getBoundingClientRect(); S.hover = [e.clientX - r.left, e.clientY - r.top]; if (!S.playing) draw(); });
     S.el.map.addEventListener('pointerleave', () => { S.hover = null; S.el.tip.style.display = 'none'; if (!S.playing) draw(); });
-    S.el.map.addEventListener('click', () => { if (S.el.big) return; toggle(); });
+    S.el.map.addEventListener('click', () => { if (S.qpin) qhide(); if (S.el.big) return; toggle(); });
     $('simEvf').onclick = e => { const k = e.target.dataset.k; if (k) { S.evf = k; events(); } };
     S.el.evl.onclick = e => { const r = e.target.closest('.sim-e'); if (r) { seek(Math.max(0, +r.dataset.t - 4)); if (!S.playing) toggle(true); } };
     if (!S.ro) { S.ro = new ResizeObserver(() => { if (S) { sizeAll(); draw(); charts(); } }); }
@@ -359,13 +387,16 @@
         D.players.filter(p => p.team === tm).map(p => {
           const r = AS.races[rk(p.race)] || {}, h = r.heroes && r.heroes[p.hero];
           return `<div class="sim-p" data-pid="${p.pid}"><div class="sim-pn"><i class="sim-sh c${p.side}" style="background:${p.color};border-color:${TEAMC[p.side]}"></i>${r.icon ? `<img src="${A + r.icon}" alt="">` : ''}${h ? `<img src="${A + h.icon}" alt="" title="${esc(h.name)}">` : ''}<span title="${esc(p.name)}">${esc(p.name)}</span>${ratingOf(p.name)}</div>` +
-            `<div class="sim-ps" id="simPS${p.pid}"></div><div class="sim-bar"><i id="simPB${p.pid}" style="background:${p.color}"></i></div></div>`;
-        }).join('') + '</div>').join('');
+            `<div class="sim-ps" id="simPS${p.pid}"></div><div class="sim-qs" id="simQ${p.pid}"></div><div class="sim-bar"><i id="simPB${p.pid}" style="background:${p.color}"></i></div></div>`;
+        }).join('') + '</div>').join('') + '<div class="sim-qtip" id="simQT"></div>';
+      S.qkey = {}; S.qtip = null; S.hl = null;
+      S.el.side.onpointerover = e => { const q = e.pointerType === 'mouse' && e.target.closest('.sim-q'); if (q) qshow(+q.dataset.q, false); };
+      S.el.side.onpointerout = e => { const q = e.pointerType === 'mouse' && e.target.closest('.sim-q'); if (q && !q.contains(e.relatedTarget) && !S.qpin) qhide(); };
       document.getElementById('simLeg').innerHTML = D.players.map(p => `<div data-pid="${p.pid}"><i class="sim-sh c${p.side}" style="background:${p.color};border-color:${TEAMC[p.side]}"></i><span>${esc(p.name)}</span></div>`).join('');
       for (const box of [S.el.side, document.getElementById('simLeg')]) {
         box.onmouseover = e => { const r = e.target.closest('[data-pid]'); if (r) setFocus(+r.dataset.pid); };
-        box.onmouseleave = () => setFocus(null);
-        box.onclick = e => { const r = e.target.closest('[data-pid]'); if (!r) return; S.focusLock = S.focusLock === +r.dataset.pid ? null : +r.dataset.pid; setFocus(null); };
+        box.onmouseleave = () => { setFocus(null); if (!S.qpin) qhide(); };
+        box.onclick = e => { if (qclick(e)) return; const r = e.target.closest('[data-pid]'); if (!r) return; S.focusLock = S.focusLock === +r.dataset.pid ? null : +r.dataset.pid; setFocus(null); };
       }
     }
     // live values
@@ -375,10 +406,56 @@
       const e = (D.eco || {})[p.pid] || {}, a = ((D.army || {})[p.pid] || [])[s] || 0;
       const ps = document.getElementById('simPS' + p.pid); if (!ps) return;
       const wg = p.race === 'orks' && e.wg ? ` · ${tx('waaagh')} <b>${nf(e.wg[s])}</b>` : '';
-      ps.innerHTML = `${tx('bank')} <b>${nf(e.req && e.req[s])}</b> · ${tx('power')} <b>${nf(e.pow && e.pow[s])}</b>${wg} · ${tx('alive')} <b>${alive[p.pid] || 0}</b>`;
+      ps.innerHTML = `${tx('bank')} <b>${nf(e.req && e.req[s])}</b> · ${tx('power')} <b>${nf(e.pow && e.pow[s])}</b>${wg}` + (S.order[p.pid] ? '' : ` · ${tx('alive')} <b>${alive[p.pid] || 0}</b>`);
+      qrow(p, s);
       document.getElementById('simPB' + p.pid).style.width = Math.min(100, 100 * a / S.armyMax) + '%';
     });
+    if (S.qtip != null) { const tip = document.getElementById('simQT'); if (tip && S.el.side.querySelector(`.sim-q[data-q="${S.qtip}"]`)) tip.innerHTML = qtext(S.qtip); else qhide(); }
     S.teams.forEach(tm => { const pt = (D.points || {})[tm] || [], x = document.getElementById('simTP' + tm); if (x) x.textContent = pt[s] != null ? '⚑ ' + pt[s] : ''; });
+  }
+
+  // squad state at second s: a alive, d down (a hero at 0 HP, can be revived), g not on the map (garrison, transport), x wiped out
+  function qstate(id, s) {
+    if (s > S.life.last[id]) return 'x';
+    const j = S.idx[s] && S.idx[s].get(id); if (j == null) return 'g';
+    const fr = S.D.frames[s]; return fr[j + 4] <= 0 || fr[j + 3] <= 0 ? 'd' : 'a';
+  }
+  const qname = id => { const sq = S.D.squads[id], a = (S.SQ || {})[sq[3]]; return (a && a.n && (a.n[L] || a.n.en)) || (sq[2] ? (S.P[sq[0]] || {}).hero_name : '') || sq[1]; };
+  const qshort = n => { const w = n.replace(/[^\p{L}\p{N} ]/gu, ' ').split(/\s+/).filter(x => x && !/^(squad|team|отряд)$/i.test(x)); return (w.length > 1 ? w.slice(0, 3).map(x => x[0]).join('') : (w[0] || '?').slice(0, 3)).toUpperCase(); };
+  function qrow(p, s) {
+    const box = document.getElementById('simQ' + p.pid); if (!box) return;
+    const ids = (S.order[p.pid] || []).filter(id => S.life.first[id] <= s), st = ids.map(id => qstate(id, s));
+    const key = L + ids.map((id, i) => id + st[i]).join(',');
+    if (S.qkey[p.pid] === key) return; S.qkey[p.pid] = key;
+    box.innerHTML = ids.map((id, i) => { const a = (S.SQ || {})[S.D.squads[id][3]], n = qname(id);
+      return `<span class="sim-q ${st[i]}${S.hl === id ? ' on' : ''}" data-q="${id}" style="border-color:${p.color}">${a && a.i ? `<img src="${A + a.i}" alt="${esc(n)}" loading="lazy" draggable="false">` : `<em>${esc(qshort(n))}</em>`}<b>${S.num[id]}</b></span>`; }).join('');
+  }
+  function qtext(id) {
+    const D = S.D, sq = D.squads[id], p = S.P[sq[0]] || {}, s = Math.min(D.dur - 1, Math.floor(S.t)), st = qstate(id, s);
+    const fr = D.frames[s], j = S.idx[s] && S.idx[s].get(id);
+    const now = st === 'x' ? `${tx('qDead')} ${fmt(S.life.last[id] + 1)}` : st === 'g' ? tx('qOff') : st === 'd' ? tx('qDown') :
+      `${fr[j + 3]}% ${tx('hp')} · ${fr[j + 4]} ${tx('models')}` + ((tx('st')[fr[j + 5]] || '') ? ' · ' + tx('st')[fr[j + 5]] : '');
+    return `<b style="color:${p.color}">#${S.num[id]} ${esc(qname(id))}</b><br>${now}<br><small>${esc(p.name || '')} · ${tx('qBuilt')} ${fmt(S.life.first[id])}</small>`;
+  }
+  function qshow(id, pin) {
+    const tip = document.getElementById('simQT'), q = S.el.side.querySelector(`.sim-q[data-q="${id}"]`); if (!tip || !q) return;
+    S.qtip = id; S.qpin = pin; qmark(id);
+    tip.innerHTML = qtext(id); tip.style.display = 'block';
+    const sr = S.el.side.getBoundingClientRect(), r = q.getBoundingClientRect(), tw = tip.offsetWidth;
+    tip.style.left = Math.max(0, Math.min(sr.width - tw, r.left - sr.left + r.width / 2 - tw / 2)) + 'px';
+    tip.style.top = (r.bottom - sr.top + 6) + 'px';
+  }
+  function qhide() { const tip = document.getElementById('simQT'); if (tip) tip.style.display = 'none'; S.qtip = null; S.qpin = false; qmark(null); }
+  function qmark(id) {
+    if (S.hl === id) return; S.hl = id;
+    S.el.side.querySelectorAll('.sim-q.on').forEach(x => x.classList.remove('on'));
+    if (id != null) { const q = S.el.side.querySelector(`.sim-q[data-q="${id}"]`); if (q) q.classList.add('on'); }
+    if (!S.playing) draw();
+  }
+  function qclick(e) {   // a tap on an icon (touch screens have no hover): pin its tooltip and ring the squad on the map; again = off
+    const q = e.target.closest('.sim-q'); if (!q) { if (S.qpin) qhide(); return false; }
+    const id = +q.dataset.q; if (S.qpin && S.qtip === id) qhide(); else qshow(id, true);
+    return true;
   }
 
   // ---------- squad stats: every hit of the match from the game engine (damage hook) + kill events (combatstats.py, 14.11) ----------
@@ -591,6 +668,7 @@
     sqs.sort((a, b) => (D.squads[a.id][2] - D.squads[b.id][2]));
     const blink = (performance.now() / 250 | 0) % 2;
     let hov = null, hd = 1e9;
+    const labels = [];
     for (const q of sqs) {
       const sq = D.squads[q.id], p = S.P[sq[0]]; if (!p) continue;
       const [px, py] = W2P(q.x, q.z), hero = sq[2], down = q.hp <= 0 || q.n <= 0;
@@ -605,14 +683,38 @@
       shape(r);
       c.fillStyle = p.color; if (retreat) c.globalAlpha *= 0.5; c.fill(); c.globalAlpha = dim ? 0.16 : 1;
       c.lineWidth = 2 * k; c.strokeStyle = TEAMC[p.side]; if (retreat) { c.setLineDash([3, 2]); c.strokeStyle = '#fff'; c.lineWidth = 1.4; } c.stroke(); c.setLineDash([]);
+      if (S.num[q.id] && !dim) labels.push([S.num[q.id], px, py, r, q.id === S.hl, p.color, hero]);
+      if (q.id === S.hl) { c.beginPath(); c.arc(px, py, r + 6 * k, 0, 7); c.strokeStyle = '#fff'; c.lineWidth = 2.2; c.stroke(); c.beginPath(); c.arc(px, py, r + 6 * k + 2.2, 0, 7); c.strokeStyle = 'rgba(0,0,0,.7)'; c.lineWidth = 1.2; c.stroke(); }
       if (q.hp < 99) { const bw = Math.max(8, 2 * r), by = py + r + 3 * k; c.fillStyle = 'rgba(0,0,0,.7)'; c.fillRect(px - bw / 2 - 1, by - 1, bw + 2, 4); c.fillStyle = q.hp > 50 ? '#6dff7a' : q.hp > 25 ? '#ffd23f' : '#ff4d4d'; c.fillRect(px - bw / 2, by, bw * q.hp / 100, 2); }
       c.globalAlpha = 1;
+    }
+    // squad numbers (build order per player, as in the side panel): a small dark badge beside the marker, over all markers.
+    // Badges do not overlap: each tries four corners of its marker; one that finds no free place is left out (hover / the panel tell)
+    if (labels.length) {
+      const fs = Math.max(9, Math.min(12, 9 * k)), placed = [];
+      c.textAlign = 'center'; c.textBaseline = 'middle';
+      labels.sort((a, b) => (b[4] - a[4]) || (b[6] - a[6]) || (a[0] - b[0]));
+      for (const [n, px, py, r, on, col] of labels) {
+        const f = on ? fs + 2 : fs; c.font = `700 ${f}px system-ui, -apple-system, sans-serif`;
+        const bw = Math.max(f + 2, c.measureText(n).width + 6), bh = f + 3, o = r * 0.55 + 1;
+        let box = null;
+        for (const [dx, dy] of [[1, -1], [-1, -1], [1, 1], [-1, 1]]) {
+          const x = dx > 0 ? px + o : px - o - bw, y = dy < 0 ? py - o - bh : py + o;
+          if (on || !placed.some(b => x < b[0] + b[2] && b[0] < x + bw && y < b[1] + b[3] && b[1] < y + bh)) { box = [x, y, bw, bh]; break; }
+        }
+        if (!box) continue;
+        placed.push(box);
+        const [x, y] = box;
+        c.beginPath(); if (c.roundRect) c.roundRect(x, y, bw, bh, bh / 2); else c.rect(x, y, bw, bh);
+        c.fillStyle = on ? 'rgba(0,0,0,.92)' : 'rgba(0,0,0,.74)'; c.fill(); c.lineWidth = on ? 1.6 : 1; c.strokeStyle = on ? '#ffd75e' : col; c.stroke();
+        c.fillStyle = on ? '#ffd75e' : '#fff'; c.fillText(n, x + bw / 2, y + bh / 2 + 0.5);
+      }
     }
     // tooltip
     const tip = S.el.tip;
     if (hov) {
       const { q, sq, p, px, py } = hov; const name = sq[2] ? (p.hero_name || sq[1]) : sq[1];
-      tip.innerHTML = `<b style="color:${p.color}">${esc(name)}</b><br>${esc(p.name)} · ${q.hp}% ${tx('hp')} · ${q.n} ${tx('models')}<br>${(tx('st')[q.st] || '')}`;
+      tip.innerHTML = `<b style="color:${p.color}">${S.num[q.id] ? '#' + S.num[q.id] + ' ' : ''}${esc(S.num[q.id] ? qname(q.id) : name)}</b><br>${esc(p.name)} · ${q.hp}% ${tx('hp')} · ${q.n} ${tx('models')}<br>${(tx('st')[q.st] || '')}`;
       tip.style.display = 'block'; const tw = tip.offsetWidth;
       tip.style.left = Math.min(w - tw - 4, Math.max(4, px + 12)) + 'px'; tip.style.top = Math.max(4, py - 46) + 'px';
     } else tip.style.display = 'none';
