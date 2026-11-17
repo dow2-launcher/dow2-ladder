@@ -92,8 +92,8 @@ def newdb(d):
     c = sqlite3.connect(fn); o.migrate(c); c.execute('CREATE TABLE matches (id INTEGER PRIMARY KEY, data TEXT)'); c.commit(); return fn, c
 def add(c, sid, start, ps, kind='mm', secs=900):
     """ps: (steam, team, rep) - the reports at start+secs, everybody leaves 10 s later"""
-    c.execute('INSERT INTO own_matches (sid, lobby, kind, mode, season, started, reports) VALUES (?,?,?,?,?,?,?)',
-              (sid, 'NM-%d' % sid, kind, '%dv%d' % (len(ps) // 2, len(ps) // 2), '2027-Q1', start, json.dumps({'reports': {}})))
+    c.execute('INSERT INTO own_matches (sid, lobby, kind, mode, modname, season, started, reports) VALUES (?,?,?,?,?,?,?,?)',   # 17.11: Elite (a preseason rates Elite only)
+              (sid, 'NM-%d' % sid, kind, '%dv%d' % (len(ps) // 2, len(ps) // 2), 'Elite', '2027-Q1', start, json.dumps({'reports': {}})))
     for i, (st, team, rep) in enumerate(ps):
         c.execute('INSERT INTO own_match_players (sid, steam, pid, team, report_result, report_t, leave_t) VALUES (?,?,?,?,?,?,?)',
                   (sid, st, i + 1, team, rep, start + secs, start + secs + 10))
@@ -115,7 +115,7 @@ c.close()
 # the same with a preseason from match 103 on
 ok('step2 with a preseason from match 103', o.step2(fn, log=quiet, cfg={'label': '2027-pre', 'start': S + 3 * H}))
 c = sqlite3.connect(fn)
-ok('only 103+ counted, under the label', q('SELECT season, games FROM own_ratings WHERE steam = "x"') == [('2027-pre', 3)]
+ok('only 103+ counted, under the label (106 too: 180 s is not short in a preseason, 17.11)', q('SELECT season, games FROM own_ratings WHERE steam = "x"') == [('2027-pre', 4)]
    and q('SELECT DISTINCT season FROM own_ratings') == [('2027-pre',)])
 ok('pair count restarts at the preseason start: 103, 104 weight 1', [w for (w,) in q('SELECT weight FROM own_match_players WHERE steam = "x" AND sid IN (103, 104) ORDER BY sid')] == [1, 1])
 c.close()

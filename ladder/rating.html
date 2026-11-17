@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="/favicon.ico" sizes="any">
+<title>Elite Rating — Dawn of War II</title>
+<meta name="description" content="Рейтинг Elite по матчам автоматча: Glicko-2, 1v1 / 2v2 / 3v3.">
+<meta name="robots" content="noindex">
+<!-- 17.11.2026: the own rating's table alone (SirItos: only the table, the mode switch, a player -> his stats, Home, and how the
+     rating works under an accordion). Data: /ladder/api/own (rows: the rated by the shown rating, then calibration by name).
+     The look of the launcher (1.5 "D look": teal on dark slate, Spectral headings, Roboto Condensed text). Not linked yet. -->
+<style>
+@font-face { font-family: Spectral; src: url(/elite/fonts/spectral-400.ttf); font-weight: 400; font-display: swap; }
+@font-face { font-family: Spectral; src: url(/elite/fonts/spectral-600.ttf); font-weight: 600; font-display: swap; }
+@font-face { font-family: Cinzel; src: url(/elite/fonts/cinzel-700.ttf); font-weight: 700; font-display: swap; }
+:root {
+  --bg: #0a1112; --p: #0f1a1c; --p2: #152326; --ln: #1e5a52; --ln2: #2b8273; --tx: #e4f3ed; --sf: #bdd1cb; --mu: #86a19b; --dim: #6f8c86;
+  --gd: #45e0c0; --gd2: #c8fff0; --gdbg: #10302b; --ok: #62e39a; --wa: #e8a14a; --bd: #ff8f7d;
+  --fb: "Roboto Condensed", "Arial Narrow", Arial, sans-serif; --fh: Spectral, Georgia, serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--tx); font: 15px/1.45 var(--fb); min-height: 100vh;
+  background-image: radial-gradient(ellipse at 50% -20%, rgba(69, 224, 192, .10), transparent 60%); }
+a { color: var(--gd2); text-decoration: none; }
+.wrap { max-width: 860px; margin: 0 auto; padding: 0 16px 48px; }
+.top { display: flex; align-items: center; gap: 12px; padding: 22px 0 14px; border-bottom: 2px solid var(--ln); box-shadow: 0 1px 0 #000; }
+.top h1 { margin: 0; font: 700 26px Cinzel, var(--fh); letter-spacing: 3px; color: #e8fff8; text-shadow: 0 0 14px rgba(69, 224, 192, .35); white-space: nowrap; }
+.tag { font: 600 12px var(--fb); letter-spacing: .08em; text-transform: uppercase; color: var(--wa); border: 1px solid rgba(232, 161, 74, .5); padding: 2px 8px; }
+.sp { flex: 1; }
+.btn { font: 600 15px var(--fh); color: var(--tx); background: var(--p2); border: 1px solid var(--ln2); padding: 6px 14px; cursor: pointer; white-space: nowrap; }
+.btn:hover { color: var(--gd2); border-color: var(--gd); }
+.lang { display: inline-flex; border: 1px solid var(--ln); }
+.lang button { font: 600 13px var(--fb); color: var(--mu); background: none; border: 0; padding: 6px 10px; cursor: pointer; }
+.lang button.on { color: var(--gd2); background: var(--gdbg); }
+.modes { display: inline-flex; margin: 18px 0 12px; border: 1px solid var(--ln2); }
+.modes button { font: 600 17px var(--fh); color: #8fb0a8; background: none; border: 0; padding: 7px 20px; cursor: pointer; }
+.modes button + button { border-left: 1px solid var(--ln); }
+.modes button.on { color: #eafff8; background: linear-gradient(transparent 30%, rgba(69, 224, 192, .22)); text-shadow: 0 0 10px rgba(69, 224, 192, .7); }
+table { width: 100%; border-collapse: collapse; table-layout: fixed; background: var(--p); border: 1px solid var(--ln); }
+th { font: 600 12px var(--fb); letter-spacing: .08em; text-transform: uppercase; color: var(--mu); text-align: right; padding: 10px 12px;
+  border-bottom: 1px solid var(--ln); background: var(--p2); }
+td { padding: 9px 12px; border-bottom: 1px solid rgba(30, 90, 82, .45); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+th.l, td.l { text-align: left; }
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr:hover td { background: rgba(69, 224, 192, .05); }
+.c-n { width: 48px; } .c-r { width: 150px; } .c-g { width: 64px; } .c-wl { width: 120px; }
+td.n { color: var(--mu); }
+td.n.t1 { color: #f0d48f; } td.n.t2 { color: #cfd2d6; } td.n.t3 { color: #cd8f52; }
+td.pl { overflow: hidden; text-overflow: ellipsis; font-size: 16px; }
+td.pl a:hover { text-decoration: underline; }
+td.r { font: 600 17px var(--fh); color: var(--gd2); }
+td.cal { color: var(--mu); font: 400 14px var(--fb); }
+tr.calrow td.pl a { color: var(--sf); }
+tr.firstcal td { border-top: 1px solid var(--ln2); }
+.wl .lv { color: var(--wa); }
+.empty { text-align: center; color: var(--mu); padding: 28px 12px; white-space: normal; }
+details { margin-top: 18px; background: var(--p); border: 1px solid var(--ln); }
+summary { cursor: pointer; padding: 11px 14px; font: 600 17px var(--fh); color: var(--sf); list-style: none; display: flex; align-items: center; gap: 10px; }
+summary::-webkit-details-marker { display: none; }
+summary::before { content: ""; width: 7px; height: 7px; border: solid var(--gd); border-width: 0 1.5px 1.5px 0; transform: rotate(-45deg); transition: transform .15s; flex: none; }
+details[open] summary::before { transform: rotate(45deg); }
+summary:hover { color: var(--gd2); }
+.how { padding: 0 18px 14px 18px; color: var(--sf); font-size: 15px; line-height: 1.55; }
+.how p { margin: 0 0 10px; }
+.how b { color: var(--tx); font-weight: 700; }
+@media (max-width: 620px) {
+  .top { flex-wrap: wrap; row-gap: 10px; padding-top: 16px; } .top .sp { flex-basis: 100%; height: 0; } .lang { margin-left: auto; }
+  .top h1 { font-size: 21px; letter-spacing: 2px; }
+  .modes { display: flex; } .modes button { flex: 1; padding: 7px 0; font-size: 16px; }
+  th, td { padding: 8px 6px; } th { font-size: 11px; letter-spacing: .03em; } .c-n { width: 30px; } .c-r { width: 104px; } .c-g { width: 50px; } .c-wl { width: 78px; }
+  td.pl { font-size: 15px; } td.r { font-size: 16px; } td.cal { font-size: 13px; }
+  .hide { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1 id="title">Elite</h1><span class="tag" id="tag" hidden></span>
+    <span class="sp"></span>
+    <div class="lang" id="lang"><button data-l="ru">RU</button><button data-l="en">EN</button></div>
+    <a class="btn" href="/" id="home">На главную</a>
+  </div>
+
+  <div class="modes" id="modes"><button data-m="1v1" class="on">1 vs 1</button><button data-m="2v2">2 vs 2</button><button data-m="3v3">3 vs 3</button></div>
+
+  <table>
+    <thead><tr><th class="l c-n">#</th><th class="l" data-t="player"></th><th class="c-r" data-t="rating" data-h="ratingHint"></th>
+      <th class="c-g" data-t="games"></th><th class="c-wl hide" data-h="wlHint" data-t="wl"></th></tr></thead>
+    <tbody id="rows"><tr><td colspan="5" class="empty" data-t="loading"></td></tr></tbody>
+  </table>
+
+  <details id="howbox"><summary data-t="howTitle"></summary><div class="how" id="how"></div></details>
+</div>
+<script>
+const I18N = {
+  ru: { title: 'Рейтинг Elite', home: 'На главную', pre: 'Предсезон', test: 'Тест', player: 'Игрок', rating: 'Рейтинг', games: 'Игр', wl: 'П – П – У',
+    ratingHint: 'Осторожный рейтинг: Glicko-2 минус две неопределённости (RD)', wlHint: 'Победы – поражения – поражения за уход',
+    cal: (k, n) => `калибровка ${k}/${n}`, loading: 'Загрузка…', empty: 'В этом режиме пока никто не играл.', err: 'Не удалось загрузить таблицу.',
+    stats: 'Статистика игрока', howTitle: 'Как считается рейтинг',
+    how: [
+      '<b>Glicko-2.</b> После каждого матча рейтинг растёт за победу и падает за поражение. Насколько — зависит от силы соперника и от того, насколько система уже уверена в вашем уровне: у новичка рейтинг движется быстро, у опытного игрока — спокойнее.',
+      '<b>Что в таблице.</b> Осторожная оценка: рейтинг минус две неопределённости. Поэтому удачная серия из нескольких побед не выводит новичка сразу на первое место. Отдельная таблица для 1v1, 2v2 и 3v3; в командах каждый сравнивается со средним рейтингом команды соперника.',
+      '<b>Калибровка.</b> Первые 5 игр в режиме рейтинг скрыт — в таблице написано «калибровка 2/5». Такие игроки стоят под рейтинговыми, по алфавиту.',
+      '<b>Какие матчи считаются.</b> Только матчи нашего автоматча в Elite. Комнаты лаунчера, игры с компьютером и ваниль в рейтинг не идут.',
+      '<b>Уход = поражение.</b> Вышел, вылетел или потерял связь до конца матча — это поражение, даже если команда потом победила. Тиммейтам ушедшего, если команда проиграла в меньшинстве, — только половина потери.',
+      '<b>Первые 3 минуты.</b> Если кто-то вышел в первые 3 минуты, матч не идёт в рейтинг ни для кого. Один такой выход в сутки прощается, второй и следующие — поражение тому, кто вышел. Матч, закончившийся быстрее 3 минут (например, сдачей), тоже не в рейтинге. Если все отвалились разом (сбой сервера или сети) — матч не считается.',
+      '<b>Одни и те же соперники.</b> Если в 1v1 одна и та же пара играет больше трёх раз за сутки, с 4-го матча рейтинг меняется только на четверть.',
+      '<b>Подбор.</b> Автоматч ищет соперника близкого уровня: сначала с разницей до 150 очков, каждую минуту ожидания окно шире на 50, а после 6 минут — подойдёт любой, чтобы никто не ждал бесконечно. Игроки на калибровке ищутся как 1500, и окно для них шире. Команды делятся так, чтобы их рейтинги были как можно ближе.',
+      '<b>Предсезон.</b> Сейчас мы проверяем правила. К старту сезона рейтинги всех игроков обнулятся.' ] },
+  en: { title: 'Elite Rating', home: 'Home', pre: 'Preseason', test: 'Test', player: 'Player', rating: 'Rating', games: 'Games', wl: 'W – L – Lv',
+    ratingHint: 'Conservative rating: Glicko-2 minus two uncertainties (RD)', wlHint: 'Wins – losses – losses by leaving',
+    cal: (k, n) => `calibration ${k}/${n}`, loading: 'Loading…', empty: 'Nobody has played this mode yet.', err: 'Could not load the table.',
+    stats: 'Player stats', howTitle: 'How the rating works',
+    how: [
+      '<b>Glicko-2.</b> After every match your rating goes up for a win and down for a loss. By how much depends on the opponent’s strength and on how sure the system already is about your level: a newcomer’s rating moves fast, a regular’s more calmly.',
+      '<b>What the table shows.</b> A conservative estimate: the rating minus two uncertainties. So a lucky streak of a few wins does not put a newcomer straight on top. 1v1, 2v2 and 3v3 have separate tables; in team games each player is compared with the average rating of the other team.',
+      '<b>Calibration.</b> For your first 5 games in a mode the rating is hidden and the table says “calibration 2/5”. These players are listed below the rated ones, alphabetically.',
+      '<b>Which matches count.</b> Only matches of our automatch in Elite. Launcher rooms, games against the computer and vanilla are not rated.',
+      '<b>Leaving = losing.</b> Quit, crashed or lost the connection before the end — that is a loss, even if your team then won. The leaver’s teammates, if their team lost short-handed, lose only half as much.',
+      '<b>The first 3 minutes.</b> If someone leaves within the first 3 minutes, the match is not rated for anyone. One such leave a day is forgiven; the second and every next one is a loss for the leaver. A match over in less than 3 minutes (a surrender, say) is not rated either. If everyone dropped at once (a server or network failure), the match does not count.',
+      '<b>The same opponents.</b> If the same two players meet in 1v1 more than three times a day, from the 4th match on the rating changes by only a quarter.',
+      '<b>Matchmaking.</b> The automatch looks for an opponent of a similar level: first within 150 points, the window grows by 50 every minute you wait, and after 6 minutes anyone will do, so nobody waits forever. Players in calibration are matched as 1500 with a wider window. Teams are split so that their ratings are as close as possible.',
+      '<b>Preseason.</b> We are testing the rules now. When the season starts, everyone’s rating is reset.' ] } };
+let LANG = (() => {
+  const q = new URLSearchParams(location.search).get('lang'); if (q === 'ru' || q === 'en') return q;
+  try { const v = localStorage.getItem('ladderLang'); if (v === 'ru' || v === 'en') return v; } catch (e) {}
+  return /^(ru|uk|be|kk)/i.test(navigator.language || '') ? 'ru' : 'en';
+})();
+const $ = s => document.querySelector(s), T = k => I18N[LANG][k];
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+let MODE = (() => { const h = location.hash.slice(1); return /^[123]v[123]$/.test(h) && h[0] === h[2] ? h : '1v1'; })();
+let DATA = null, SEQ = 0;
+function applyLang() {
+  document.documentElement.lang = LANG;
+  document.querySelectorAll('[data-t]').forEach(e => { const v = T(e.dataset.t); if (typeof v === 'string') e.textContent = v; });
+  document.querySelectorAll('[data-h]').forEach(e => { e.title = T(e.dataset.h); });
+  document.querySelectorAll('#lang button').forEach(b => b.classList.toggle('on', b.dataset.l === LANG));
+  $('#title').textContent = T('title'); $('#home').textContent = T('home');
+  $('#how').innerHTML = T('how').map(p => `<p>${p}</p>`).join('');
+  document.title = T('title') + ' — Dawn of War II';
+  render();
+}
+function render() {
+  const tb = $('#rows');
+  if (!DATA) return;
+  if (DATA.error) { tb.innerHTML = `<tr><td colspan="5" class="empty">${esc(T('err'))}</td></tr>`; return; }
+  const tag = $('#tag'); tag.hidden = false; tag.textContent = DATA.preseason ? T('pre') : T('test');
+  const rows = DATA.rows || [];
+  if (!rows.length) { tb.innerHTML = `<tr><td colspan="5" class="empty">${esc(T('empty'))}</td></tr>`; return; }
+  let html = '', sep = false;
+  for (const p of rows) {
+    const first = p.calibrating && !sep && html; if (p.calibrating) sep = true;
+    const link = `<a href="/ladder/#elite:${esc(p.steam)}" target="_blank" rel="noopener" title="${esc(T('stats'))}">${esc(p.name || p.steam)}</a>`;
+    const wl = `<span>${p.wins}</span>–<span>${p.losses}</span>–<span class="lv">${p.leaves}</span>`;
+    html += p.calibrating
+      ? `<tr class="calrow${first ? ' firstcal' : ''}"><td class="l n">—</td><td class="l pl">${link}</td><td class="cal">${esc(T('cal')(p.cal_played, p.cal_needed))}</td><td>${p.games}</td><td class="wl hide">${wl}</td></tr>`
+      : `<tr><td class="l n${p.rank <= 3 ? ' t' + p.rank : ''}">${p.rank}</td><td class="l pl">${link}</td><td class="r" title="${esc(p.rating + ' ± ' + p.rd)}">${p.cons}</td><td>${p.games}</td><td class="wl hide">${wl}</td></tr>`;
+  }
+  tb.innerHTML = html;
+}
+async function load() {
+  const my = ++SEQ;
+  if (!DATA) $('#rows').innerHTML = `<tr><td colspan="5" class="empty">${esc(T('loading'))}</td></tr>`;
+  try {
+    const r = await fetch('/ladder/api/own?' + new URLSearchParams({ mode: MODE }));
+    const d = await r.json();
+    if (my !== SEQ) return;
+    DATA = r.ok ? d : { error: true };
+  } catch (e) { if (my === SEQ) DATA = { error: true }; }
+  render();
+}
+$('#modes').addEventListener('click', e => { const b = e.target.closest('button'); if (!b || b.dataset.m === MODE) return; MODE = b.dataset.m;
+  history.replaceState(null, '', '#' + MODE); syncModes(); DATA = null; load(); });
+function syncModes() { document.querySelectorAll('#modes button').forEach(b => b.classList.toggle('on', b.dataset.m === MODE)); }
+$('#lang').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; LANG = b.dataset.l;
+  try { localStorage.setItem('ladderLang', LANG); } catch (er) {} applyLang(); });
+syncModes(); applyLang(); load(); setInterval(load, 60000);
+</script>
+</body>
+</html>

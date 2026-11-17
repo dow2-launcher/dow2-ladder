@@ -36,6 +36,8 @@ ONLINE_SECS = 90
 MM_STATE = None                                     # ladder.py: steam -> 'search' | 'match' | None
 ADMIN_OK = None                                     # ladder.py: admin token -> bool
 STATS = None                                        # ladder.py: steam -> 1v1 stats of the season for the profile
+OWN = None                                          # ladder.py: steam -> the own rating per mode (17.11.2026, docs/OWN_RATING_API.md)
+HOURS = None                                        # ladder.py: steam -> Retribution's hours in Steam or None
 ALIAS = None                                        # ladder.py: steam -> the name the ladder / Relic knows (a Steam profile without a name)
 PREMOD = None                                       # ladder.py: text -> True to block (JEV moderation, same as the feedback chat)
 MODFLAGS = None                                     # ladder.py: () -> {'premod': bool, 'translate': bool, ...}
@@ -259,7 +261,7 @@ def online():
         u = users.get(s, True); st = p['state']
         try: st = (MM_STATE and MM_STATE(s)) or st
         except Exception: pass
-        out.append({'steam': s, 'name': u['name'], 'avatar': u['avatar'], 'state': st, 'rating': u['rating']})
+        out.append({'steam': s, 'name': u['name'], 'avatar': u['avatar'], 'state': st, 'rating': u['rating'], **({'own': u['own']} if u.get('own') else {})})
     out.sort(key=lambda u: u['name'].lower())
     return out
 
@@ -431,12 +433,19 @@ def me(d):
     if not steam: return {'ok': False, 'signed_in': False}
     try: stats = STATS and STATS(steam)
     except Exception: stats = None
-    return dict(_user(steam), ok=True, signed_in=True, rating=users.rating(steam), stats=stats)
+    return dict(_user(steam), ok=True, signed_in=True, rating=users.rating(steam), stats=stats, **_own_extra(steam))
+
+def _own_extra(steam):  # 17.11.2026: our own rating per mode + Retribution's hours in Steam (None when not known)
+    try: own = OWN and OWN(steam)
+    except Exception: own = None
+    try: hours = HOURS and HOURS(steam)
+    except Exception: hours = None
+    return {'own': own or None, 'hours_played': hours if isinstance(hours, (int, float)) else None}
 
 def me_event(steam):  # the stream's own card: rating and the season's 1v1 games
     try: st = (STATS and STATS(steam)) or {}
     except Exception: st = {}
-    return {'rating': users.rating(steam), 'games': st.get('games', 0), 'wins': st.get('wins', 0), 'losses': st.get('losses', 0)}
+    return {'rating': users.rating(steam), 'games': st.get('games', 0), 'wins': st.get('wins', 0), 'losses': st.get('losses', 0), **_own_extra(steam)}
 
 def logout(d):
     with db() as c: c.execute('DELETE FROM sess WHERE token=?', (str(d.get('token', ''))[:80],))
