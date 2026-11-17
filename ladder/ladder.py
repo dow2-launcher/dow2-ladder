@@ -414,12 +414,14 @@ def _rating_for(steam, mode):
         pass
     return None, 1500.0, 350.0, 0, None
 
+_HOURS = {}                                         # steam -> (time, Steam hours or None): filled by _relic_rating (17.11.2026)
 def _relic_rating(steam):
     # запасной вариант: рейтинг Relic от сервиса relicstats (то же число, что LobbyStats показывает в лобби)
     try:
         u = 'http://127.0.0.1:8216/stats/api/lobby?n=' + urllib.parse.quote('/steam/%s' % steam)
         line = urllib.request.urlopen(u, timeout=8).read().decode('utf-8').strip().split('\n')[0].split('\t')
         pid = int(line[5]) if len(line) >= 6 and line[5].isdigit() else None
+        if len(line) >= 6: _HOURS[str(steam)] = (time.time(), int(line[4]) if line[4].isdigit() else None)   # 17.11: Steam hours, for the launcher
         if len(line) >= 2 and line[1].isdigit(): return float(line[1]), None, pid
         return None, None, pid
     except Exception:
@@ -435,6 +437,30 @@ def _rating_info(steam, mode):
     if games: return pid, rating, rd, games, name, 'ladder'
     if rr: return pid, rr, 200.0, 0, name or alias, 'relic'
     return pid, rating, rd, 0, name or alias, 'new'
+
+def _own_mm(steam, mode, game, base):
+    # 17.11.2026 (SirItos: the preseason - matchmaking by OUR rating): with data/own_season.json and an Elite search, (rating, rd, games,
+    # rsrc) from own_ratings (own_matches.mm_rating: the Glicko mean, 1500 + RD in calibration); the Relic / old ladder rating is not
+    # used at all then. Vanilla, or no season file: base (= _rating_info's) untouched
+    if not str(game or '').lower().startswith('elite') or not own_matches.season_cfg(): return base
+    try: return own_matches.mm_rating(steam, mode)
+    except Exception as e: print('mm: own rating of %s: %r' % (steam, e), flush=True); return base
+
+def _own_window(waiting):  # under MM_LOCK: the rating window of a pool (own_matches.mm_window), None = no window (as before 17.11)
+    if not waiting or not str(waiting[0].get('game') or '').lower().startswith('elite') or not own_matches.season_cfg(): return None
+    now = time.time()
+    def ok(g):
+        w = own_matches.mm_window(now - min(p['ts'] for p in g), max(p.get('rd') or 0 for p in g))
+        return w is None or max(p['rating'] for p in g) - min(p['rating'] for p in g) <= w
+    return ok
+
+OWN_RETRY = [0.0]
+def _own_retry(now):  # under MM_LOCK, from the polls: with the window a waiting pool may match later with nobody joining - try again
+    if now - OWN_RETRY[0] < 5 or not own_matches.season_cfg(): return
+    OWN_RETRY[0] = now
+    for mode in MODES:
+        if sum(1 for p in MM.values() if p['state'] == 'searching' and p['mode'] == mode and not p.get('lroom')) >= 2 * TEAM_N[mode]:
+            _try_match(mode)
 
 def _counts():  # вызывать под MM_LOCK
     c = {m: 0 for m in MODES + (WATCH,)}
@@ -529,6 +555,8 @@ def _try_match(mode):  # под MM_LOCK: нестрогий подбор с пр
         # everyone else (compatible, or without the add-on) plays with anybody. Whoever waits longest anchors a match he fits in.
         forced = lambda x: x.get('own') and not x.get('compat')
         fits = lambda g: not any(forced(x) for x in g) or all(x.get('own') for x in g)
+        win = _own_window(waiting)                              # 17.11.2026 preseason: a rating window widening with the wait
+        if win: fits = (lambda f0: lambda g: f0(g) and win(g))(fits)
         grp = None
         for anchor in waiting:
             amaps = set(anchor.get('maps') or [])
@@ -823,6 +851,7 @@ def mm_join(steam, mode, d=None):
     steam = str(steam)
     if mode not in MODES and mode != WATCH: mode = '1v1'
     pid, rating, rd, games, name, rsrc = _rating_info(steam, mode)
+    rating, rd, games, rsrc = _own_mm(steam, mode, _game(d), (rating, rd, games, rsrc))
     maps = [_clean(x, 64) for x in (d.get('maps') or []) if _clean(x, 64)][:200]
     try: max_diff = max(0, min(3000, int(d.get('max_diff') or 0)))
     except Exception: max_diff = 0
@@ -880,6 +909,7 @@ def mm_poll(steam):
                     return {'state': 'playing', 'match': m['id'], **({'native': True, 'lobby': m.get('lobby')} if m.get('native') else {})}
             return {'state': 'idle'}
         p['seen'] = time.time()
+        _own_retry(p['seen'])                              # 17.11.2026: no-op without own_season.json
         return _player_view(p)
 
 def mm_room(steam, room):
@@ -1023,7 +1053,8 @@ def _history_add(m):  # под MM_LOCK, в момент старта: кто, з
         c.execute('INSERT OR IGNORE INTO mm_history (lobby, mid, mode, map, started, players, watchers, kind) VALUES (?,?,?,?,?,?,?,?)',
                   (m['lobby'], m['id'], m['mode'], m.get('map'), int(m['started']), json.dumps(pl, ensure_ascii=False), json.dumps(w, ensure_ascii=False),
                    'room' if m.get('lroom') else None))
-    own_matches.on_start(m, pl)                           # own_matches (storage only, never raises)
+    game = m.get('game') or next(((MM.get(s) or {}).get('game') for s in m['host'] + m['guest'] if (MM.get(s) or {}).get('game')), None)
+    own_matches.on_start(dict(m, game=game) if game else m, pl)   # own_matches (storage only, never raises); 17.11: + the game (Elite/vanilla)
 
 def _local_json(url, timeout=30):
     try:
@@ -1692,6 +1723,7 @@ def nm_join(d):
     h = NM_HINTS.get(steam); h = h['d'] if h and time.time() - h['t'] < 900 else {}
     pid, rating, rd, games, name, rsrc = _rating_info(steam, mode)
     game = _clean(d.get('game'), 24) or 'elite'; group = _clean(h.get('group'), 24) or ''
+    rating, rd, games, rsrc = _own_mm(steam, mode, game, (rating, rd, games, rsrc))
     maps = _nm_wishes(game, mode, h)
     try: max_diff = max(0, min(3000, int(h.get('max_diff') or 0)))
     except Exception: max_diff = 0
@@ -1704,6 +1736,8 @@ def nm_join(d):
     except Exception: gpid = 0
     party = [x for x in (d.get('party') or []) if isinstance(x, dict) and str(x.get('steam') or '').isdigit()][:2]
     prating = {str(x['steam']): _rating_info(str(x['steam']), mode) for x in party}      # outside the lock (Relic's rating: HTTP)
+    for k, v in list(prating.items()):                   # 17.11.2026: his friends by the own rating too (preseason, Elite)
+        r_, rd_, g_, src_ = _own_mm(k, mode, game, (v[1], v[2], v[3], v[5])); prating[k] = (v[0], r_, rd_, g_, v[4], src_)
     now = time.time()
     with MM_LOCK:
         _reap()
@@ -1746,7 +1780,7 @@ def nm_join(d):
 def nm_sync(d):
     now = time.time(); out = {}
     with MM_LOCK:
-        _reap(); _nm_timeouts(now)
+        _reap(); _nm_timeouts(now); _own_retry(now)
         for steam in [str(s) for s in (d.get('steams') or [])][:500]:
             p = MM.get(steam)
             if p and p.get('native'):
@@ -2073,6 +2107,12 @@ class H(BaseHTTPRequestHandler):
                         return self.send_html(f.read())
                 except Exception:
                     return self.send(500, {'error': 'page'})
+            if u.path in ('/ladder/rating', '/ladder/rating/'):  # 17.11.2026: the own rating's table alone (rating.html), not linked yet
+                try:
+                    with open(os.path.dirname(os.path.abspath(__file__)) + '/rating.html', 'rb') as f:
+                        return self.send_html(f.read())
+                except Exception:
+                    return self.send(500, {'error': 'page'})
             if u.path in ('/ladder/chat', '/ladder/chat/'):
                 try:
                     with open(os.path.dirname(os.path.abspath(__file__)) + '/chat.html', 'rb') as f:
@@ -2264,6 +2304,15 @@ def _c_stats(steam):
     if not r: return {'season': season, 'games': 0, 'wins': 0, 'losses': 0, 'rank': None}
     return {'season': season, 'games': r[0], 'wins': r[1], 'losses': r[2], 'rank': None}
 community.STATS = _c_stats
+def _c_hours(steam):
+    # 17.11.2026, the launcher's hours_played: Retribution's hours in Steam from the stats service's lobby line (the same request as
+    # the Relic rating, made in the background by users._ratings - on sign-in and every 30 min for those online; nothing fetched
+    # here). The service knows them only from the public profile's "recently played" (the last 2 weeks, no Steam API key). None = unknown
+    hit = _HOURS.get(str(steam))
+    return hit[1] if hit else None
+community.HOURS = _c_hours
+community.OWN = lambda steam: own_matches.player_own(steam, current_season())     # 17.11.2026: the own rating per mode (docs/OWN_RATING_API.md)
+users.OWN = lambda steam: own_matches.card_own(steam, current_season())           # ... and its short form in the Online block
 community.LIVE = stream.LIVE = live_view
 users.ALIAS = lambda steam: _rating_info(steam, '1v1')[4]
 def _c_mm_state(steam):

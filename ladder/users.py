@@ -11,6 +11,7 @@ import queue, re, sqlite3, threading, time, urllib.request
 DB = None                                           # community.py: the community.sqlite path
 ALIAS = None                                        # ladder.py: steam -> the ladder / Relic name
 RATING = None                                       # ladder.py: steam -> 1v1 rating or None
+OWN = None                                          # ladder.py: steam -> the own rating, short ({mode: {rating, calibrating, cal_played}}, 17.11.2026)
 LAUNCHER_SECS = 120
 PROFILE_SECS = 86400
 RATING_SECS = 1800
@@ -66,13 +67,17 @@ def get(steam, rated=False):
         u = _user(steam, now)
         out = {'steam': steam, 'name': display_name(u), 'avatar': u['avatar'], 'rating': u['rating'], 'banned': u['banned']}
         old, unrated = now - u['avatar_ts'] > PROFILE_SECS, rated and not u['rating_ts']
+    if rated:                                       # the Online block / own card: + the own rating, only the modes he played (cached)
+        try: own = OWN and OWN(steam)
+        except Exception: own = None
+        if own: out['own'] = own
     if old: _enqueue(_pq, _pqueued, steam)
     if unrated: _enqueue(_rq, _rqueued, steam)
     return out
 
 def card(steam):  # what the Online block and the stream show of a person
     u = get(steam, True)
-    return {'name': u['name'], 'avatar': u['avatar'], 'rating': u['rating']}
+    return {'name': u['name'], 'avatar': u['avatar'], 'rating': u['rating'], **({'own': u['own']} if u.get('own') else {})}
 
 def rating(steam):
     return get(steam, True)['rating']

@@ -57,6 +57,26 @@ def _node(m):
     return r if isinstance(r, str) else json.dumps(r)
 
 
+ELITE_MOD = 'Elite'                 # own_matches.modname as Relic's room params have it: 'Elite' / 'DOW2' (vanilla)
+def mod_of(x):
+    """a game / mod name -> 'Elite' / 'DOW2' / None (unknown). Takes the ladder's game ('elite-3.2.1', 'elite', 'vanilla') and the
+    room's modname ('Elite', 'DOW2', ''): the same form in own_matches.modname whichever wrote it (17.11.2026)"""
+    x = str(x or '').strip().lower()
+    if not x: return None
+    if x.startswith('elite'): return ELITE_MOD
+    if x in ('vanilla', 'dow2'): return 'DOW2'
+    return None
+
+
+def _game_of(m):
+    """the match's game: m['game'] (ladder _history_add) or the pool's game part ('group|game[|nm|key]', 'lroom:<id>|group|game...')"""
+    g = mod_of(m.get('game'))
+    if g: return g
+    parts = str(m.get('pool') or '').split('|')
+    if parts and parts[0].startswith('lroom'): parts = parts[1:]
+    return mod_of(parts[1]) if len(parts) > 1 else None
+
+
 def on_start(m, players):
     """_history_add: the match started (players = the mm_history rows: steam, pid, name, team, rating, race, hero)"""
     try:
@@ -66,7 +86,7 @@ def on_start(m, players):
         with _lock, _db() as c:
             c.execute('INSERT OR IGNORE INTO own_matches (sid, lobby, kind, mode, map, modname, season, node, started, flags, updated) '
                       'VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-                      (sid, m['lobby'], 'room' if m.get('lroom') else 'mm', m.get('mode'), m.get('map'), m.get('game'),
+                      (sid, m['lobby'], 'room' if m.get('lroom') else 'mm', m.get('mode'), m.get('map'), _game_of(m),   # 17.11: was m.get('game'), never set since 10.11
                        _season(started), _node(m), started, None, now))
             for p in players:
                 race = p.get('race'); race = race if isinstance(race, int) else None     # the ladder's names; the game's id comes with the reports
@@ -230,7 +250,7 @@ def backfill(c, log=print):
 END_EPS = 5             # s: he left at least this long before the end of the game = he left DURING the game
 END_EPS_EST = 15        # s: the same when the end is only estimated (backfill: the time the ladder stored the match)
 REPORT_WAIT = 90        # s: own_lobby stores a match this long after the first report when someone's report is missing
-EARLY_S = 120           # s from the start: a leave before this = the match did not take place (rated for nobody)
+EARLY_S = 120           # s from the start: a leave before this = the match did not take place (rated for nobody); PRE_EARLY_S in a preseason
 FORGIVE_S = 86400       # ... and the leaver is forgiven his first such leave in this window, every next one is his loss
 ALL_GONE_S = 3          # s: everyone gone within this (before any result) = our node / the network, no rating
 SHORT_W = 0.5           # weight of the loss of a leaver's teammate whose team then lost short-handed
@@ -242,8 +262,13 @@ SHORT_MATCH_S = 240     # s from the start: a match over before this (a surrende
 REPEAT_N = 3            # 1v1: the same pair's rated matches in REPEAT_S before this one - from the (REPEAT_N+1)-th on ...
 REPEAT_S = 86400
 REPEAT_W = 0.25         # ... both players' rating change is scaled by this (anti-abuse 3b, 17.11.2026)
-UNELIGIBLE = ('not_full_teams', 'no_steam', 'room', 'no_history')   # rule 1: a manual winner does not make these rated
+UNELIGIBLE = ('not_full_teams', 'no_steam', 'room', 'no_history', 'not_elite')   # rule 1: a manual winner does not make these rated
 SEASON_FILE = 'own_season.json'   # <data>/own_season.json {"label": "2026-pre", "start": <unix ts>}: the (pre)season of the own rating
+# 17.11.2026 (SirItos: «ливы в первые 2-3 минуты - игра не в рейтинг»): with own_season.json the early-leave window and the short-match
+# threshold are both 3 min, and only Elite matches are rated (a vanilla automatch match stays stored, unrated 'not_elite').
+# Without the file: EARLY_S / SHORT_MATCH_S and every mod, as before.
+PRE_EARLY_S = 180
+PRE_SHORT_S = 180
 
 MIGRATE = [('own_matches', 'notes', 'TEXT'), ('own_matches', 'resolved', 'INTEGER'),
            ('own_match_players', 'weight', 'REAL'), ('own_match_players', 'early_leave', 'INTEGER'),
@@ -317,7 +342,7 @@ def _loads(s, d=None):
 
 def decide(m, ps, early_before=lambda steam: 0, pair_before=lambda a, b: 0):
     """the result of one match. m: {kind, started, end_est (bool), all_gone_s, conflict (bool), override (None or {action: 'void'|'winner',
-    team})}; ps: [{steam, team, rep (1/0/3/-1/None), rep_t, leave (s, his effective leave time or None)}]; pair_before(a, b) = the 1v1
+    team}), and in a preseason early_s / short_s (s) + elite_only with mod ('Elite' / 'DOW2' / None)}; ps: [{steam, team, rep (1/0/3/-1/None), rep_t, leave (s, his effective leave time or None)}]; pair_before(a, b) = the 1v1
     pair's rated matches in REPEAT_S before this one -> {winner_team, result_src, rated, why, notes, players: {steam: (final, weight,
     early, note)}}. Pure: the tests feed it made-up matches. Order: the rules, then the manual decision, then the repeat-pair weight."""
     r = _decide_rules(m, ps, early_before)
@@ -361,6 +386,7 @@ def _decide_rules(m, ps, early_before):
     elif any(not p['steam'] or str(p['steam']).startswith('pid:') for p in ps): why_el = 'no_steam'
     elif m.get('kind') == 'room' and not ROOMS_RATED: why_el = 'room'
     elif m.get('kind') not in ('mm', 'room'): why_el = 'no_history'      # not known to come from our automatch / a room
+    elif m.get('elite_only') and m.get('mod') != ELITE_MOD: why_el = 'not_elite'   # preseason: the Elite table only (vanilla kept, unrated)
     tids = sorted(teams, key=lambda t: (t is None, t))
     def other(t): return tids[1] if t == tids[0] else tids[0]
     def done(why, src=None):
@@ -405,7 +431,7 @@ def _decide_rules(m, ps, early_before):
     if all(p in leavers for p in teams[win]): return done('winners_left', 'check')
     r['winner_team'] = win
     # rule 4, early: a leave before EARLY_S = no match; the leaver loses unless it is his first such in FORGIVE_S
-    early = [p for p in leavers if p['leave'] - started < EARLY_S] if started else []
+    early = [p for p in leavers if p['leave'] - started < m.get('early_s', EARLY_S)] if started else []
     if early:
         for p in early:
             f = fin[p['steam']]; f[2] = 1
@@ -422,7 +448,7 @@ def _decide_rules(m, ps, early_before):
             if nl[p['team']] > nl[other(p['team'])]: f[1] = SHORT_W; f[3] = 'short_handed'
     # anti-abuse 3a: over before SHORT_MATCH_S = a surrender or a leave: unrated (the finals stay for the history; a leaver's loss_leave
     # still counts in recompute_own, as after an early leave)
-    if started and end_t is not None and end_t - started < SHORT_MATCH_S:
+    if started and end_t is not None and end_t - started < m.get('short_s', SHORT_MATCH_S):
         r['notes'].append('short_%ds' % (end_t - started))
         return done('short_match', src)
     return done(None, src)
@@ -430,14 +456,14 @@ def _decide_rules(m, ps, early_before):
 
 def _match_input(c, sid):
     """own_matches + own_match_players rows -> decide()'s m, ps (+ pid by steam)"""
-    row = c.execute('SELECT kind, started, reports, node_log, flags FROM own_matches WHERE sid = ?', (sid,)).fetchone()
+    row = c.execute('SELECT kind, started, reports, node_log, flags, modname FROM own_matches WHERE sid = ?', (sid,)).fetchone()
     if not row: return None, None
-    kind, started, reports, node_log, flags = row
+    kind, started, reports, node_log, flags, modname = row
     rep = _loads(reports, {}) or {}
     logs = _loads(node_log, []) or []
     if not isinstance(logs, list): logs = [logs]
     best = max(logs, key=lambda x: x.get('ticks') or 0) if logs else {}
-    m = dict(kind=kind, started=started, end_est=False, all_gone_s=best.get('all_gone_within_s'), conflict=False)
+    m = dict(kind=kind, started=started, end_est=False, all_gone_s=best.get('all_gone_within_s'), conflict=False, mod=mod_of(modname))
     cols = 'steam, pid, team, report_result, report_t, leave_t, menu_t, ruined_t'
     pl = [dict(zip(cols.split(', '), x)) for x in c.execute('SELECT %s FROM own_match_players WHERE sid = ?' % cols, (sid,))]
     if rep.get('backfill'):                              # 06-09.11: only the first report + the ladder's outcome per pid, no times
@@ -473,6 +499,7 @@ def resolve(sid, c, cfg=None):
     m, ps = _match_input(c, sid)
     if m is None: return None
     m['override'] = override_of(c, sid)
+    if cfg: m.update(early_s=PRE_EARLY_S, short_s=PRE_SHORT_S, elite_only=True)
     st = m['started'] or 0
     def early_before(steam):
         return c.execute('SELECT COUNT(*) FROM own_match_players p JOIN own_matches x ON x.sid = p.sid WHERE p.steam = ? AND p.early_leave = 1 '
@@ -539,6 +566,19 @@ def recompute_own(c, log=print, cfg=None):
     return n
 
 
+def fill_mods(c):
+    """own_matches.modname where on_start wrote none (10-17.11.2026: it took a missing m['game']): the room's modname that own_lobby
+    stored with the match (matches.data, the same id). -> rows filled"""
+    try:
+        rows = c.execute('SELECT o.sid, json_extract(x.data, "$.modname") FROM own_matches o JOIN matches x ON x.id = o.sid '
+                         'WHERE coalesce(o.modname, "") = ""').fetchall()
+    except sqlite3.OperationalError: return 0          # no matches table (a test DB)
+    n = 0
+    for sid, mn in rows:
+        if mod_of(mn): c.execute('UPDATE own_matches SET modname = ? WHERE sid = ?', (mod_of(mn), sid)); n += 1
+    return n
+
+
 def step2(db_path, log=print, cfg='file'):
     """match_log_collect.py: resolve every own match in the order of the start (the forgiveness of the first early leave and the
     repeat-pair count depend on the earlier ones), then recompute_own. cfg: 'file' = own_season.json next to the DB (none = as before),
@@ -549,6 +589,7 @@ def step2(db_path, log=print, cfg='file'):
         try:
             with c:
                 migrate(c)
+                fill_mods(c)
                 c.execute('UPDATE own_match_players SET early_leave = NULL')
                 sids = [r[0] for r in c.execute('SELECT sid FROM own_matches ORDER BY started, sid')]
                 res = {}
@@ -594,7 +635,13 @@ def site_board(mode, season):
         else:
             p.update(rank=len(board) + 1, cons=round(rating - 2 * rd), rating=round(rating), rd=round(rd)); board.append(p)
     cal.sort(key=lambda p: -(p['last'] or 0))
-    return {'mode': mode, 'season': season, 'seasons': seasons, 'cal_games': CAL_GAMES, 'board': board, 'calibrating': cal}
+    # 17.11.2026 (SirItos): one table - the rated players by the shown rating, then those in calibration by name ("калибровка k/5");
+    # the /ladder/rating/ page reads 'rows', the old tab 'board' + 'calibrating' (unchanged)
+    rows = [dict(p, calibrating=False, cal_played=CAL_GAMES, cal_needed=CAL_GAMES) for p in board]
+    rows += [dict(p, calibrating=True, cal_played=p['games'], cal_needed=CAL_GAMES, rank=None)
+             for p in sorted(cal, key=lambda p: (str(p['name']).casefold(), p['steam']))]
+    return {'mode': mode, 'season': season, 'seasons': seasons, 'cal_games': CAL_GAMES, 'board': board, 'calibrating': cal,
+            'rows': rows, 'preseason': bool(season_cfg()), 'mod': ELITE_MOD}
 
 
 def site_player(steam, race_key=lambda rc, modname: None, limit=50):
@@ -627,3 +674,89 @@ def site_player(steam, race_key=lambda rc, modname: None, limit=50):
     ratings = [{'mode': r[0], 'season': r[1], 'games': r[4], 'wins': r[5], 'losses': r[6] - r[7], 'leaves': r[7], 'cal_left': r[8], 'last': r[9],
                 **({} if r[8] > 0 else {'cons': round(r[2] - 2 * r[3]), 'rating': round(r[2]), 'rd': round(r[3])})} for r in rt]
     return {'steam': steam, 'name': name, 'ratings': ratings, 'matches': ms}
+
+
+# ---------- 17.11.2026: the own rating for the matchmaking and the launcher (read only) ----------
+# A copy of own_ratings of one season in memory, read again at most every CACHE_S (the collector rewrites the table every 5 min):
+# the queue (every join) and the launcher's Online block (every second for the stream) never query the DB for it.
+CACHE_S = 60
+_CACHE = {'t': 0, 'season': None, 'rows': {}}
+MODES_ALL = ('1v1', '2v2', '3v3')
+
+
+def _season_rows(season):
+    """{steam: {mode: (rating, rd, games, wins, losses, leaves, cal_left)}} of a season, cached CACHE_S"""
+    now = time.time()
+    if _CACHE['season'] == season and now - _CACHE['t'] < CACHE_S: return _CACHE['rows']
+    rows = {}
+    try:
+        with _db() as c:
+            for steam, mode, r, rd, g, w, l, lv, cl in c.execute('SELECT steam, mode, rating, rd, games, wins, losses, leaves, cal_left '
+                                                                   'FROM own_ratings WHERE season = ?', (season,)):
+                rows.setdefault(str(steam), {})[mode] = (r, rd, g, w, l, lv, cl)
+    except Exception as e:
+        if not isinstance(e, sqlite3.OperationalError): _log('own cache', e)
+        rows = _CACHE['rows'] if _CACHE['season'] == season else {}
+    _CACHE.update(t=now, season=season, rows=rows)
+    return rows
+
+
+def api_season(quarter=None):
+    """the season the launcher and the queue use: the preseason's label, else the given quarter (ladder current_season())"""
+    cfg = season_cfg()
+    return (cfg['label'] if cfg else quarter), bool(cfg)
+
+
+def own_mode(row):
+    """one mode of a player for the API (docs/OWN_RATING_API.md): the rating is hidden (None) while he calibrates"""
+    if not row:
+        return {'rating': None, 'rd': None, 'conservative': None, 'games': 0, 'wins': 0, 'losses': 0, 'leaves': 0,
+                'calibrating': True, 'cal_played': 0, 'cal_needed': CAL_GAMES}
+    r, rd, g, w, l, lv, cl = row
+    cal = cl > 0
+    return {'rating': None if cal else round(r), 'rd': None if cal else round(rd), 'conservative': None if cal else round(r - 2 * rd),
+            'games': g, 'wins': w, 'losses': l - lv, 'leaves': lv, 'calibrating': cal, 'cal_played': min(g, CAL_GAMES), 'cal_needed': CAL_GAMES}
+
+
+def player_own(steam, quarter=None):
+    """the launcher's own object: {season, preseason, mod, modes: {1v1/2v2/3v3: own_mode}}"""
+    season, pre = api_season(quarter)
+    rows = _season_rows(season).get(str(steam), {}) if season else {}
+    return {'season': season, 'preseason': pre, 'mod': ELITE_MOD, 'modes': {m: own_mode(rows.get(m)) for m in MODES_ALL}}
+
+
+def card_own(steam, quarter=None):
+    """the Online block (users.card): only the modes he has played, {mode: {rating (conservative or None), calibrating, cal_played}}"""
+    season, _ = api_season(quarter)
+    rows = _season_rows(season).get(str(steam), {}) if season else {}
+    out = {}
+    for m in MODES_ALL:
+        if m in rows:
+            x = own_mode(rows[m]); out[m] = {'rating': x['conservative'], 'calibrating': x['calibrating'], 'cal_played': x['cal_played']}
+    return out
+
+
+# the matchmaking by the own rating (ladder._own_mm / _own_window), only with own_season.json and only for Elite:
+MM_NEW = (1500.0, 350.0)      # a player with no game in the season (Glicko's start)
+MM_WIN_BASE = 150             # the window of rating spread in a match: this ...
+MM_WIN_PER_MIN = 50           # ... + this per minute the longest waiting of them has waited ...
+MM_WIN_FREE_S = 360           # ... and none after this: nobody waits more than 6 min because of the rating
+MM_WIN_RD = 100               # an uncertain player (RD over this - in calibration, after a long break) widens it by the excess
+
+
+def mm_rating(steam, mode):
+    """-> (rating, rd, games, rsrc) for the queue: a rated player his Glicko mean (not rating-2RD: the match must be even, the
+    conservative number only orders the table), a player in calibration 1500 with his RD (his hidden rating must not reach the
+    lobby or the queue's list), a new one 1500/350"""
+    season, _ = api_season()
+    row = _season_rows(season).get(str(steam), {}).get(mode) if season else None
+    if not row: return MM_NEW[0], MM_NEW[1], 0, 'own_new'
+    r, rd, g = row[0], row[1], row[2]
+    if row[6] > 0: return MM_NEW[0], rd, g, 'own_cal'
+    return r, rd, g, 'own'
+
+
+def mm_window(wait_s, rd_max=0.0):
+    """the largest rating spread allowed in a match whose longest waiting player has waited wait_s; None = any"""
+    if wait_s >= MM_WIN_FREE_S: return None
+    return MM_WIN_BASE + MM_WIN_PER_MIN * max(0.0, wait_s) / 60.0 + max(0.0, (rd_max or 0) - MM_WIN_RD)

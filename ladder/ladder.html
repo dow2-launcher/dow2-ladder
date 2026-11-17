@@ -577,7 +577,8 @@ const OI = {
     note: { early_forgiven: 'первый ранний выход за сутки — прощён', left_first: 'вышел до конца матча', short_handed: 'играл в меньшинстве',
       repeat_pair: 'тот же соперник 4-й раз за сутки — четверть изменения', manual_winner: 'итог исправлен вручную' },
     pre: { tabOwn: 'Elite — предсезон', testTag: '',
-      noteText: 'Предсезон: проверяем правила, к началу сезона результаты обнулятся. Вылет или выход до конца матча — поражение. Первые 5 игр — калибровка.' } },
+      noteText: 'Предсезон: проверяем правила, к началу сезона результаты обнулятся. Вылет или выход до конца матча — поражение. Первые 5 игр — калибровка.',
+      why: { early_leave: 'выход в первые 3 минуты', short_match: 'матч короче 3 минут (сдача или выход)', not_elite: 'не Elite (ваниль)' } } },
   en: { tabLadder: 'Ladder', tabOwn: 'Elite (test)', testTag: 'Test', loading: 'Loading…', player: 'Player', rating: 'Rating', games: 'Games', last: 'Last game',
     noteText: 'A new rating from the matches of our automatch. A disconnect or leaving before the end is a loss. The first 5 games are calibration. A test for now: it affects nothing.',
     ratingHint: 'Conservative rating: Glicko-2 minus 2·RD', rdHint: 'Glicko-2 and its uncertainty (RD)', wlHint: 'Wins – losses – losses by leaving',
@@ -591,7 +592,8 @@ const OI = {
     note: { early_forgiven: 'the first early leave in a day, forgiven', left_first: 'left before the end', short_handed: 'played short-handed',
       repeat_pair: 'the same opponent a 4th time in a day: a quarter of the change', manual_winner: 'result corrected by an admin' },
     pre: { tabOwn: 'Elite — preseason', testTag: '',
-      noteText: 'Preseason: we are checking the rules, the results will be reset before the season. A disconnect or leaving before the end is a loss. The first 5 games are calibration.' } } };
+      noteText: 'Preseason: we are checking the rules, the results will be reset before the season. A disconnect or leaving before the end is a loss. The first 5 games are calibration.',
+      why: { early_leave: 'a leave in the first 3 minutes', short_match: 'shorter than 3 minutes (a surrender or a leave)', not_elite: 'not Elite (vanilla)' } } } };
 let PRE = false;   // the server's own_season.json exists: the preseason texts
 const q = s => document.querySelector(s), L = () => OI[LANG] || OI.en, t = k => (PRE && k in L().pre) ? L().pre[k] : L()[k];
 let mode = '1v1', season = '', view = 'ladder';
@@ -624,7 +626,8 @@ function oMatch(m) {
   const notes = (me.note || '').split(',').filter(n => L().note[n]);
   notes.forEach(n => why.push(L().note[n]));
   if (me.weight != null && me.weight < 1 && m.rated && !notes.includes('repeat_pair')) why.push(t('half'));
-  if (!m.rated && !((m.why === 'early_leave' || m.why === 'short_match') && f === 'loss_leave')) why.push(t('unrated') + ': ' + ((m.why && L().why[m.why]) || m.why || '—'));
+  const whyT = k => (PRE && L().pre.why && L().pre.why[k]) || L().why[k];   // 17.11.2026: the preseason's 3-minute texts
+  if (!m.rated && !((m.why === 'early_leave' || m.why === 'short_match') && f === 'loss_leave')) why.push(t('unrated') + ': ' + ((m.why && whyT(m.why)) || m.why || '—'));
   return `<div class="ohm"><div class="hd"><b>${hDate(m.started)}</b><span>${esc(m.mode || '')}</span><span>${mapTitle(mapKey({ map: m.map, mode: m.mode }))}</span></div>
     <div class="teams">${teams}</div><div class="ores"><b class="${f}">${(L().fin[f]) || esc(f)}</b>${why.length ? ' <span>· ' + why.map(esc).join(' · ') + '</span>' : ''}</div></div>`;
 }
