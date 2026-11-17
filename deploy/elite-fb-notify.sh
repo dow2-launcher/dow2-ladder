@@ -25,6 +25,8 @@ sqlite3 -separator $'\t' "$DB" \
     [ -n "$steam" ] && nick=$(sqlite3 "$LADDER" "SELECT alias FROM profiles WHERE steam='$steam' LIMIT 1" 2>/dev/null)
     who=${nick:-${name:-anon}}
     safe=$(printf '%s' "$text" | tr -d '_*`[]')
+    # Telegram режет сообщения длиннее 4096 символов: обрезаем, иначе очередь встаёт
+    if [ "${#safe}" -gt 3500 ]; then safe="${safe:0:3500}… [обрезано, всего ${#text} симв. — полностью в fb-admin]"; fi
     whos=$(printf '%s' "$who" | tr -d '_*`[]')
     cap="💬 Ответ игрока «$whos»${steam:+ · steam $steam} · чат ${uid:0:8} — ответить: rts.fintebtc.de/ladder/fb-admin
 $safe"
