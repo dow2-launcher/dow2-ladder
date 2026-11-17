@@ -2125,7 +2125,8 @@ class H(BaseHTTPRequestHandler):
                 except Exception:
                     return self.send(500, {'error': 'page'})
             if u.path in ('/ladder/rating', '/ladder/rating/'):  # 17.11.2026: the table moved to /ladder/table (SirItos) - old links follow
-                self.send_response(301); self.send_header('Location', '/ladder/table' + ('?' + u.query if u.query else ''))
+                keep = {k: qs[k][0] for k in ('mode', 'lang') if qs.get(k) and re.fullmatch(r'[a-z0-9]{2,3}', qs[k][0])}   # nothing raw into a header
+                self.send_response(301); self.send_header('Location', '/ladder/table' + ('?' + urllib.parse.urlencode(keep) if keep else ''))
                 self.send_header('Content-Length', '0'); self.send_header('Cache-Control', 'public, max-age=3600'); self.end_headers(); return
             # 17.11.2026 (SirItos): /ladder/table = the Elite rating's table, /ladder/player/<steam> = a player's page; one page (rating.html)
             # draws both by its path. /ladder/ stays the list of games
