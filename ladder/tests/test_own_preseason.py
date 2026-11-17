@@ -155,15 +155,27 @@ ok('... applied by the next step2', q('SELECT why_unrated FROM own_matches WHERE
 
 # ---------- the site: default season, player history, /own/season ----------
 o.setup(lambda: sqlite3.connect(fn), __import__('threading').Lock(), lambda t: '2027-Q1', data_dir=T + '/d1')
-ok('site_season without the file', o.site_season() == {'preseason': False, 'label': None, 'start': None})
+ok('site_season without the file', o.site_season() == {'preseason': False, 'label': None, 'start': None, 'info': None})
 ok('default_season without the file -> None (the API takes the quarter)', o.default_season() is None)
 ok('site_player: every match without the file', len(o.site_player('x')['matches']) == 7)
 cfgfile(T + '/d1', json.dumps({'label': '2027-pre', 'start': S + 3 * H})); o.step2(fn, log=quiet)
-ok('site_season with the file', o.site_season() == {'preseason': True, 'label': '2027-pre', 'start': S + 3 * H})
+ok('site_season with the file', o.site_season() == {'preseason': True, 'label': '2027-pre', 'start': S + 3 * H, 'info': None})
+cfgfile(T + '/d1', json.dumps({'label': '2027-pre', 'start': S + 3 * H, 'info': 'https://example.org/elite#preseason'}))
+ok('season_cfg: info kept (https)', o.season_cfg(T + '/d1', quiet).get('info') == 'https://example.org/elite#preseason')
+cfgfile(T + '/d1', json.dumps({'label': '2027-pre', 'start': S + 3 * H, 'info': 'javascript:alert(1)'}))
+ok('season_cfg: info not https -> dropped, the season kept', 'info' not in o.season_cfg(T + '/d1', quiet) and o.season_cfg(T + '/d1', quiet)['label'] == '2027-pre')
+cfgfile(T + '/d1', json.dumps({'label': '2027-pre', 'start': S + 3 * H}))
 ok('default_season -> the label', o.default_season() == '2027-pre')
 b = o.site_board('1v1', o.default_season())
 ok('site_board of the preseason', b['seasons'] == ['2027-pre'] and b['season'] == '2027-pre' and len(b['calibrating']) + len(b['board']) > 0)
 ok('site_player: only the preseason matches', sorted(m['sid'] for m in o.site_player('x')['matches']) == [103, 104, 105, 106])
+# /own/all (launcher 1.6.20): every player of the season, every mode; the number and the place as the site's table, none while calibrating
+a = o.site_all(o.default_season()); b1 = o.site_board('1v1', o.default_season())
+ok('site_all: the season and the calibration length', a['season'] == '2027-pre' and a['cal_games'] == o.CAL_GAMES)
+ok('site_all: the same players as the 1v1 board', {s for s, m in a['players'].items() if '1v1' in m} == {p['steam'] for p in b1['board'] + b1['calibrating']})
+ok('site_all: c / rank as the board', all(a['players'][p['steam']]['1v1'].get('c') == p['cons'] and a['players'][p['steam']]['1v1'].get('rank') == p['rank'] for p in b1['board']))
+ok('site_all: calibrating - games left, no number', all('c' not in a['players'][p['steam']]['1v1'] and a['players'][p['steam']]['1v1']['cal'] == p['cal_left'] for p in b1['calibrating']))
+ok('site_all: an unknown season - empty', o.site_all('1999-Q1')['players'] == {})
 shutil.rmtree(T + '/d1')
 
 # ---------- the live copy ----------

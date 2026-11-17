@@ -1237,11 +1237,15 @@ def _obs_seats(sl, observer_slot, cap):
     return {'obs_open': free + taken, 'obs_free': free, 'obs_taken': taken}
 
 def _room_rating(steam):
+    # 17.11.2026 (owner, launcher 1.6.20: "the rating everywhere true and the same"): the Relic rating only - the number the
+    # launcher's Online, its own lobbies and LobbyStats show. Was _rating_info('1v1'): the season ladder's rating after one game
+    # of the season, else Relic - two scales in one card and in one team average (rating.md 1.5 p.4). The Elite rating of the
+    # lobby's mode the launcher takes from /ladder/api/own/all itself.
     hit = _ROOM_RATING.get(steam)
     if hit and time.time() - hit[0] < 600: return hit[1], hit[2]
-    try: _pid, rating, _rd, _g, _n, src = _rating_info(steam, '1v1')
-    except Exception: rating, src = None, 'new'
-    r = (round(rating) if rating and src != 'new' else None, src)
+    try: rating = _relic_rating(steam)[0]
+    except Exception: rating = None
+    r = (round(rating) if rating else None, 'relic' if rating else 'new')
     _ROOM_RATING[steam] = (time.time(), r[0], r[1])
     return r
 
@@ -2190,6 +2194,9 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, own_matches.site_board(mode, season), cache=60)
             if u.path == '/ladder/api/own/season':                # 17.11.2026: preseason or not (own_season.json) - the tab's texts
                 return self.send(200, own_matches.site_season(), cache=60)
+            if u.path == '/ladder/api/own/all':                   # 17.11.2026, launcher 1.6.20: every player's Elite rating, all modes
+                cfg = own_matches.season_cfg() or {}; season = cfg.get('label') or current_season()
+                return self.send(200, dict(own_matches.site_all(season), preseason=bool(cfg), info=cfg.get('info')), cache=60)
             if u.path == '/ladder/api/own/player':                # own rating: a player's own matches
                 steam = qs.get('steam', [''])[0]
                 if not re.fullmatch(r'\d{5,20}', steam): return self.send(400, {'error': 'steam'})
