@@ -29,6 +29,11 @@
 # 16.11.2026 (owner, launcher 1.6.17): the lobby's chat - the general chat in a room of its own for the lobby's people (verb say,
 # see "the lobby's chat" below), its feed carries who came in, left and moved; a player goes into the observers (verb seat with
 # slot "obs"; never the owner - the match is started from his game).
+# 17.11.2026 (SirItos, team lead): the countdown is 5 s (was 10; CD below - the launchers draw it from the view's cd_end), and a room
+# is CLOSED once its match has started (on_match_started: ladder nm_started, the host's game pressed Start): it leaves the list
+# ("lroom_gone" with why "started"), its players and observers are free for another room at once. Before, the room stayed in the
+# list as "playing" until the match's end (then back to its lobby: "played"), or 3 h (PLAY_KEEP), or 15 min without the launchers.
+# What a launcher shows of the running match comes from the ladder's matches (c/live "ingame": the match says "lroom" = the id).
 import json, random, re, secrets, string, threading, time
 
 L = None                    # the ladder module (ladder.py sets it right after the import)
@@ -43,7 +48,7 @@ INV_SENT = {}               # steam -> the times of his invitations of the last 
 PING_GAP = 30               # s between two pings of one kind in one room
 PING_TTL = 30               # s the pinged player has to answer (the launcher's window)
 INVITE_TTL = 180            # s an invitation stays on the invited player's screen
-CD = 10                     # s of the countdown once everybody is ready (as the game's lobby)
+CD = 5                      # s of the countdown once everybody is ready (17.11.2026 SirItos: 5, was 10 as the game's lobby)
 GO_EARLY = float(__import__('os').environ.get('LROOM_GO_EARLY', '1.5'))   # s: a game's search this much before the countdown's end launches the room (go_at)
 HERE_GONE = 45              # s without a heartbeat from his launcher: out of the room (only while it is in its lobby)
 LAUNCH_WAIT = int(__import__('os').environ.get('LROOM_LAUNCH_WAIT', '150'))   # s from the end of the countdown to every game in the search
@@ -629,12 +634,13 @@ def on_match_room(m, room):
 
 
 def on_match_started(m):
+    """the room's match runs (the host's game pressed Start): the room is closed (17.11.2026 SirItos) - out of the list and of
+    every launcher ("lroom_gone", why "started"), its players and observers free for another room; nothing of the match is kept
+    here (the ladder has it in MM_PLAYING, its end goes on as for any native match - on_match_over finds no room then)"""
     r = ROOMS.get(m.get('lroom') or '')
     if r and r.get('launch'):
-        r['state'] = 'playing'; r['launch']['started'] = time.time(); r['note'] = None
-        for s in r['slots']: s['gst'] = 'playing'; s['gst_t'] = time.time(); s['ready'] = False
-        for o in r.setdefault('obs', []): o['gst'] = 'playing' if o['steam'] in m.get('watchers', []) else ''
-        log('room %s: match %s started' % (r['id'], m['id'])); _pub(r)
+        log('room %s: match %s started' % (r['id'], m['id']))
+        _close(r, 'started')
 
 
 def on_match_over(m):
