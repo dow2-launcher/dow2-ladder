@@ -1,8 +1,9 @@
 // The site's mirrors in the header of every page (owner 17.11.2026): a mirror icon, then each mirror as its country's flag and
 // its number there - Germany 1 = rts, Germany 2 = dow2, Russia 1 = dow2ru (Moscow, a proxy of the same site). The one in use is
 // lit; a click opens this very page (path, query, #part) on the other. A page puts <span data-mirrors></span> in its header;
-// without one the switcher sits in the top right corner.
+// without one the switcher is a thin line of its own on top of the page, on the right.
 (function () {
+  if (window.eliteMirrors) return; window.eliteMirrors = 1;   // loaded twice (a page's tag and a shared script): drawn once
   var M = [['rts.fintebtc.de', 'de', 1], ['dow2.fintebtc.de', 'de', 2], ['dow2ru.fintebtc.de', 'ru', 1]];
   var F = { de: ['#111', '#d00', '#fc0'], ru: ['#fff', '#1c57c9', '#d52b1e'] };
   var flag = function (c) {
@@ -14,11 +15,11 @@
     + '.mirrors a{display:inline-flex;align-items:center;gap:2px;padding:2px 3px;border-radius:3px;color:inherit;text-decoration:none;opacity:.65}'
     + '.mirrors a:hover{opacity:1}.mirrors a.on{opacity:1;box-shadow:inset 0 0 0 1px currentColor}.mirrors svg{display:block}'
     + '.mirrors svg[viewBox="0 0 9 6"]{box-shadow:0 0 0 .5px rgba(128,128,128,.6)}'
-    + '.mirrors-float{position:absolute;top:3px;right:6px;z-index:60}';
+    + '.mirrors.mirrors-bar{display:flex;justify-content:flex-end;padding:3px 10px 0;opacity:.7}';
   function draw() {
     var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
     var box = document.querySelector('[data-mirrors]');
-    if (!box) { box = document.createElement('div'); box.className = 'mirrors-float'; document.body.appendChild(box); }
+    if (!box) { box = document.createElement('div'); box.className = 'mirrors-bar'; document.body.insertBefore(box, document.body.firstChild); }
     box.classList.add('mirrors');
     var here = location.hostname.toLowerCase();
     box.innerHTML = '<span title="Mirrors / Зеркала">' + icon + '</span>' + M.map(function (m) {
