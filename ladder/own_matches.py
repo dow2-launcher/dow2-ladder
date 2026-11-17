@@ -27,6 +27,17 @@ _db = _lock = _season = None
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')   # ladder.py sets its own in setup()
 
 
+# 17.11.2026 (SirItos: "the ladder API gives the hours"): ladder.py sets HOURS = steam -> Retribution's hours in Steam or None (the
+# stats service's lobby line, the same as c/me's hours_played); the site's answers carry them as hours_played (null = not known)
+HOURS = None
+
+
+def hours_of(steam):
+    try: h = HOURS(str(steam)) if HOURS else None
+    except Exception: h = None
+    return h if isinstance(h, (int, float)) and not isinstance(h, bool) else None
+
+
 def _log(what, e):
     print('own_matches: %s failed: %r %s' % (what, e, traceback.format_exc(limit=2).replace('\n', ' | ')), flush=True)
 
@@ -643,7 +654,7 @@ def site_board(mode, season):
     board, cal = [], []
     for steam, rating, rd, games, wins, losses, leaves, cal_left, last in rows:
         p = {'steam': steam, 'name': nm.get(steam) or steam, 'games': games, 'wins': wins,
-             'losses': losses - leaves, 'leaves': leaves, 'last': last}
+             'losses': losses - leaves, 'leaves': leaves, 'last': last, 'hours_played': hours_of(steam)}
         if cal_left > 0: p['cal_left'] = cal_left; cal.append(p)
         else:
             p.update(rank=len(board) + 1, cons=round(rating - 2 * rd), rating=round(rating), rd=round(rd)); board.append(p)
@@ -660,7 +671,7 @@ def site_board(mode, season):
 def site_all(season):
     """/ladder/api/own/all (launcher 1.6.20, 17.11.2026): the whole table of a season in one answer - every player, every mode -
     for the launcher, which shows the Elite rating of any player it lists (Online, the lobbies, the tips) without asking per player.
-    players: {steam: {mode: {c, g, w, l, lv, cal, rank}}} - c = the number of the site's table (cons = rating - 2*RD, absent while
+    players: {steam: {mode: {c, g, w, l, lv, cal, rank}, hours_played}} - c = the number of the site's table (cons = rating - 2*RD, absent while
     calibrating), rank = the place among the calibrated of that mode (the site's order: cons, then games), cal = calibration games left;
     the losses without the leaves, as site_board"""
     with _db() as c:
@@ -674,7 +685,7 @@ def site_all(season):
         if cal_left <= 0:
             place[mode] = place.get(mode, 0) + 1
             p.update(c=round(rating - 2 * rd), rank=place[mode])
-        players.setdefault(steam, {})[mode] = p
+        players.setdefault(steam, {'hours_played': hours_of(steam)})[mode] = p   # 17.11.2026: + his hours (null = not known)
     return {'season': season, 'cal_games': CAL_GAMES, 'players': players}
 
 
@@ -714,7 +725,7 @@ def site_player(steam, race_key=lambda rc, modname: None, limit=50):
                                                     '(cons > ? OR (cons = ? AND games > ?))', (r[0], r[1], r[2] - 2 * r[3], r[2] - 2 * r[3], r[4])).fetchone()[0]
     ratings = [{'mode': r[0], 'season': r[1], 'games': r[4], 'wins': r[5], 'losses': r[6] - r[7], 'leaves': r[7], 'cal_left': r[8], 'last': r[9],
                 **({} if r[8] > 0 else {'cons': round(r[2] - 2 * r[3]), 'rating': round(r[2]), 'rd': round(r[3]), 'rank': ranks.get((r[0], r[1]))})} for r in rt]
-    return {'steam': steam, 'name': name, 'ratings': ratings, 'matches': ms}
+    return {'steam': steam, 'name': name, 'ratings': ratings, 'matches': ms, 'hours_played': hours_of(steam)}
 
 
 # ---------- 17.11.2026: the own rating for the matchmaking and the launcher (read only) ----------

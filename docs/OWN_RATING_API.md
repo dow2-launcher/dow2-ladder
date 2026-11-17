@@ -50,7 +50,7 @@ These get two new fields. Everything that was there before stays the same: `rati
 - `rating` is the Glicko-2 mean and `rd` its uncertainty. `conservative` = rating − 2·RD is **the number the site's table shows and sorts by**. Show `conservative` as "the rating".
 - While `calibrating` (fewer than 5 games in the mode), `rating`, `rd` and `conservative` are null. The rating is hidden. Show "calibration `cal_played`/`cal_needed`".
 - `losses` does not include losses by leaving; those are counted in `leaves`.
-- `hours_played` is Retribution's total hours in Steam, a whole number. It comes from the stats service's lobby line, the same line LobbyStats shows, which the ladder fetches in the background with the Relic rating: on sign-in and every 30 min while the player is online. So right after the first sign-in it can still be `null`. The stats service only knows it for a public Steam profile **that played in the last 2 weeks**: it reads "recently played" and has no Steam Web API key. Otherwise it is `null`.
+- `hours_played` is Retribution's total hours in Steam, a whole number. It comes from the stats service's lobby line, the same line LobbyStats shows, which the ladder fetches in the background with the Relic rating: on sign-in and every 30 min while the player is online, and (since 17.11.2026) for every player of the season's table every 6 h, one request per 2 s. So right after the first sign-in or a ladder restart it can still be `null`. The stats service only knows it for a public Steam profile **that played in the last 2 weeks**: it reads "recently played" and has no Steam Web API key. Otherwise it is `null`. The site's answers below carry the same number from the same source (`hours_played`).
 
 ### Online block: `GET /ladder/api/c/online`, `POST /ladder/api/c/hello` (`online`), the stream's `user` events
 
@@ -67,12 +67,12 @@ Here `rating` is the conservative number, or null while he is calibrating. The R
 
 Same as before (`board`, `calibrating`, `seasons`, `cal_games`), plus:
 
-- `rows`: one list. First the rated players by `cons` (with `rank`, `cons`, `rating`, `rd`). Then the players in calibration, alphabetically, with `rank` null and no rating. Every row has `steam, name, games, wins, losses, leaves, last, calibrating, cal_played, cal_needed`.
+- `rows`: one list. First the rated players by `cons` (with `rank`, `cons`, `rating`, `rd`). Then the players in calibration, alphabetically, with `rank` null and no rating. Every row has `steam, name, games, wins, losses, leaves, last, calibrating, cal_played, cal_needed, hours_played` (`hours_played`: Retribution's hours in Steam, as in `c/me`; `null` = not known).
 - `preseason` (bool), `mod` ("Elite").
 
-The page `/ladder/table` shows exactly `rows` (`?mode=2v2`, `?lang=ru|en`; `#how` opens "How the rating works"); `/ladder/rating/` redirects there. A player's page is `/ladder/player/<steam>` (`GET /ladder/api/own/player?steam=`; the old `/ladder/#elite:<steam>` goes there).
+The site's ladder page (17.11.2026, one page in the launcher's look) shows exactly `rows` as its main view at `/ladder/` and at `/ladder/table` (the launcher's links; `?mode=2v2`, `?lang=ru|en`; `#how` opens "How the rating works"); `/ladder/rating/` redirects to `/ladder/table`. The match history is its tab `/ladder/?view=history` (also the old `/ladder/#history`), the queue and the open lobbies `/ladder/?view=live`. A player's page is `/ladder/player/<steam>` (`GET /ladder/api/own/player?steam=`; the old `/ladder/#elite:<steam>` goes there).
 
-`/ladder/api/own/player` also gives `season` (the one the page shows), `preseason`, `avatar` (Steam, when he has played) and, per match, in `me`: `c` = the table's number after the match, `d` = its change (both `null` while he calibrates; on the 5th game `c` without `d`), `n` = his games of that mode in the season after it (`null` = the match did not move his rating). Each calibrated `ratings` row has `rank`.
+`/ladder/api/own/player` also gives `season` (the one the page shows), `preseason`, `hours_played` (as above), `avatar` (Steam, when he has played) and, per match, in `me`: `c` = the table's number after the match, `d` = its change (both `null` while he calibrates; on the 5th game `c` without `d`), `n` = his games of that mode in the season after it (`null` = the match did not move his rating). Each calibrated `ratings` row has `rank`.
 
 ## Matchmaking: what the queue shows
 
@@ -85,8 +85,11 @@ Launcher 1.6.20 shows the Elite rating of anyone it lists (Online, the lobby car
 ```json
 {"season": "2026-pre", "preseason": true, "cal_games": 5, "info": "https://..." ,
  "players": {"7656...": {"1v1": {"c": 1584, "rank": 1, "g": 9, "w": 6, "l": 2, "lv": 1, "cal": 0},
-                         "2v2": {"g": 2, "w": 1, "l": 1, "lv": 0, "cal": 3}}}}
+                         "2v2": {"g": 2, "w": 1, "l": 1, "lv": 0, "cal": 3},
+                         "hours_played": 1234}}}
 ```
+
+- `hours_played` (17.11.2026): Retribution's hours in Steam, the same number and source as `c/me`'s `hours_played`; `null` when not known (private profile, not played in the last 2 weeks, not fetched yet). It sits next to the modes: a reader that walks a player's keys takes only `1v1` / `2v2` / `3v3` as modes (LobbyStats 0.12 and launcher 1.6.20 skip any other key).
 
 - `c` is the conservative number (rating − 2·RD), the same as the table's; `rank` is the place in that mode's table. Both are absent while calibrating (`cal` = games left).
 - `l` is without the leaves (`lv`), as in the table.

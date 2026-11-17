@@ -1,0 +1,4 @@
+Cinzel, Spectral and Roboto Condensed are licensed under the SIL Open Font License, Version 1.1.
+Copyright: Cinzel - Natanael Gama; Spectral - Production Type;
+Roboto Condensed - The Roboto Condensed Project Authors. The license text: https://openfontlicense.org/open-font-license-official-text/
+The woff2 files are the latin, latin-ext, cyrillic and cyrillic-ext subsets as Google Fonts serves them.
