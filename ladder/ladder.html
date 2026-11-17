@@ -258,7 +258,7 @@ input[type=checkbox] { accent-color: var(--gd); }
 .mc .cv { font: 700 32px/1.2 var(--fh); color: var(--el); margin: 4px 0 2px; text-shadow: 0 0 12px rgba(69, 224, 192, .5); font-variant-numeric: lining-nums tabular-nums; }
 .mc .cv.cal { font: 400 15px/2.1 var(--fb); color: var(--sf); text-shadow: none; }
 .mc .cal { justify-content: flex-start; font-size: 16px; }
-.mc .cal .sk { width: 12px; height: 15px; }
+.mc .cal .csk { width: 12px; height: 15px; }
 .mc .cv.none { color: var(--dim); text-shadow: none; }
 .mc .cs { color: var(--mu); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .prk { display: inline-flex; align-items: center; gap: 4px; font: 700 15px var(--fh); color: var(--gd2); letter-spacing: 0; text-transform: none; }
@@ -301,7 +301,7 @@ input[type=checkbox] { accent-color: var(--gd); }
   .tb { --cols: 30px minmax(0, 1fr) 82px 42px 60px; }
   .tr > * { padding: 0 6px; }
   .nm { font-size: 15px; } .top .nm { font-size: 16px; } .rv { font-size: 18px; } .top .rv { font-size: 19px; }
-  .cal { font-size: 12.5px; gap: 4px; } .cal .sk { width: 8px; height: 11px; } .cal .sks { gap: 1px; }
+  .cal { font-size: 12.5px; gap: 4px; } .cal .csk { width: 8px; height: 11px; } .cal .csks { gap: 1px; }
   .th { font-size: 10.5px; letter-spacing: .04em; }
   .hm { grid-template-columns: 60px minmax(0, 1fr); } .mini { width: 60px; height: 60px; }
   .act { grid-column: 1 / -1; flex-direction: row; justify-content: flex-end; align-items: center; }
@@ -310,7 +310,7 @@ input[type=checkbox] { accent-color: var(--gd); }
   .rooms-grid { grid-template-columns: 1fr; } .room { grid-template-columns: 60px minmax(0, 1fr); } .room .mmap { width: 60px; height: 60px; }
   .pp-h h1 { font-size: 23px; } .av { width: 56px; height: 56px; }
   .cards { gap: 6px; } .mc { padding: 4px 6px 6px; } .mc .cv { font-size: 23px; } .mc .cv.cal { font-size: 13px; line-height: 1.6; }
-  .mc .cs { font-size: 12px; white-space: normal; } .mc .cal { font-size: 14px; gap: 3px; } .mc .cal .sk { width: 9px; height: 12px; } .mc .cal .sks { gap: 1px; } .mc .cm { font-size: 11.5px; letter-spacing: .04em; }
+  .mc .cs { font-size: 12px; white-space: normal; } .mc .cal { font-size: 14px; gap: 3px; } .mc .cal .csk { width: 9px; height: 12px; } .mc .cal .csks { gap: 1px; } .mc .cm { font-size: 11.5px; letter-spacing: .04em; }
   .m { grid-template-columns: 1fr auto; gap: 4px 10px; padding: 10px 2px; }
   .m .res2 { grid-column: 1; } .m .dl { grid-column: 2; grid-row: 1; } .m .mid { grid-column: 1 / 3; }
   .m .res2 small { display: inline; margin-left: 6px; }
@@ -593,7 +593,7 @@ window.addEventListener('popstate', () => { if (PSTEAM) return; const q = new UR
   MODE = okMode(q.get('mode')) || '1v1'; syncModes(); showView(okView(q.get('view')) || 'table'); if (VIEW === 'table') { DATA = null; loadTable(); } });
 
 // ---------- the table ----------
-const skulls = (k, n) => `<span class="sks" aria-hidden="true">${Array.from({ length: n }, (_, i) => `<i class="sk${i < k ? ' on' : ''}"></i>`).join('')}</span>`;
+const skulls = (k, n) => `<span class="csks" aria-hidden="true">${Array.from({ length: n }, (_, i) => `<i class="csk${i < k ? ' on' : ''}"></i>`).join('')}</span>`;
 const calCell = (k, n) => `${skulls(k, n)}<span>${Math.min(k, n)}/${n}</span>`;
 const badge = (rank, m) => rank && rank <= 3 ? `<i class="rt-b m${m} r${rank}" title="${esc(T('place')(rank) + ' · ' + m)}"></i>` : '';
 function render() {

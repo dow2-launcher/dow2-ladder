@@ -16,6 +16,6 @@
 .rt-b.m2v2{--sig:var(--sig-militarum);width:36px;height:13px;vertical-align:-1px}
 .rt-b.m3v3{--sig:var(--sig-orks);width:19px}
 /* the calibration's progress: a skull per game, dim until played */
-.sks{display:inline-flex;align-items:center;gap:2px;vertical-align:-1px}
-.sk{display:inline-block;width:10px;height:13px;background:currentColor;color:rgba(134,161,155,.32);-webkit-mask:var(--sig-skull) center/contain no-repeat;mask:var(--sig-skull) center/contain no-repeat}
-.sk.on{color:#bff7e8;filter:drop-shadow(0 0 3px rgba(69,224,192,.75))}
+.csks{display:inline-flex;align-items:center;gap:2px;vertical-align:-1px}
+.csk{display:inline-block;width:10px;height:13px;background:currentColor;color:rgba(134,161,155,.32);-webkit-mask:var(--sig-skull) center/contain no-repeat;mask:var(--sig-skull) center/contain no-repeat}
+.csk.on{color:#bff7e8;filter:drop-shadow(0 0 3px rgba(69,224,192,.75))}
