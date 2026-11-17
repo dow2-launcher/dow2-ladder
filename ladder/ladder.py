@@ -2118,7 +2118,11 @@ class H(BaseHTTPRequestHandler):
         try:
             if u.path.startswith('/ladder/api/c/'): return community.handle(self, 'GET', u, None)
             if u.path == '/ladder/inbox' or u.path.startswith('/ladder/api/inbox/'): return inbox.handle_get(self, u, qs)
-            if u.path in ('/ladder', '/ladder/', '/ladder/index.html'):
+            # 17.11.2026 (SirItos, the preseason): one page in the launcher's look - /ladder/ = the Elite rating's table (?mode=, #how =
+            # the rules open), the match history and the live queue in its tabs (?view=history|live); /ladder/table (the launcher's
+            # links) is the same table, /ladder/player/<steam> a player's page. The page draws each by its path and query
+            if (u.path in ('/ladder', '/ladder/', '/ladder/index.html', '/ladder/table', '/ladder/table/')
+                    or re.fullmatch(r'/ladder/player/\d{5,20}/?', u.path)):
                 try:
                     with open(os.path.dirname(os.path.abspath(__file__)) + '/ladder.html', 'rb') as f:
                         return self.send_html(f.read())
@@ -2128,14 +2132,6 @@ class H(BaseHTTPRequestHandler):
                 keep = {k: qs[k][0] for k in ('mode', 'lang') if qs.get(k) and re.fullmatch(r'[a-z0-9]{2,3}', qs[k][0])}   # nothing raw into a header
                 self.send_response(301); self.send_header('Location', '/ladder/table' + ('?' + urllib.parse.urlencode(keep) if keep else ''))
                 self.send_header('Content-Length', '0'); self.send_header('Cache-Control', 'public, max-age=3600'); self.end_headers(); return
-            # 17.11.2026 (SirItos): /ladder/table = the Elite rating's table, /ladder/player/<steam> = a player's page; one page (rating.html)
-            # draws both by its path. /ladder/ stays the list of games
-            if u.path in ('/ladder/table', '/ladder/table/') or re.fullmatch(r'/ladder/player/\d{5,20}/?', u.path):
-                try:
-                    with open(os.path.dirname(os.path.abspath(__file__)) + '/rating.html', 'rb') as f:
-                        return self.send_html(f.read())
-                except Exception:
-                    return self.send(500, {'error': 'page'})
             if u.path in ('/ladder/chat', '/ladder/chat/'):
                 try:
                     with open(os.path.dirname(os.path.abspath(__file__)) + '/chat.html', 'rb') as f:
@@ -2342,6 +2338,23 @@ def _c_hours(steam):
     hit = _HOURS.get(str(steam))
     return hit[1] if hit else None
 community.HOURS = _c_hours
+own_matches.HOURS = _c_hours                         # ... and the site's own-rating answers (/own/all, /own, /own/player): hours_played
+_HOURS_TRY = {}                                     # steam -> when the warm-up last asked the stats service for him
+def _hours_warm():
+    # 17.11.2026: the hours of the season's players who are not online (c/me's lobby-line fetch covers only the launcher's users):
+    # every 10 min, those not asked for 6 h, one lobby line per 2 s - the same request as the Relic rating's (_relic_rating)
+    while True:
+        try:
+            season = own_matches.default_season() or current_season()
+            now = time.time()
+            for steam in list(own_matches._season_rows(season)):
+                if not re.fullmatch(r'\d{5,20}', steam): continue
+                hit = _HOURS.get(steam)
+                if (hit and now - hit[0] < 6 * 3600) or now - _HOURS_TRY.get(steam, 0) < 6 * 3600: continue
+                _HOURS_TRY[steam] = now; _relic_rating(steam); time.sleep(2)
+        except Exception as e:
+            print('ladder: hours warm-up: %r' % e, flush=True)
+        time.sleep(600)
 community.OWN = lambda steam: own_matches.player_own(steam, current_season())     # 17.11.2026: the own rating per mode (docs/OWN_RATING_API.md)
 users.OWN = lambda steam: own_matches.card_own(steam, current_season())           # ... and its short form in the Online block
 community.LIVE = stream.LIVE = live_view
@@ -2366,6 +2379,7 @@ if __name__ == '__main__':
         threading.Thread(target=crawler, daemon=True).start()
         threading.Thread(target=_rooms_loop, daemon=True).start()
         threading.Thread(target=_history_resolver, daemon=True).start()
+        threading.Thread(target=_hours_warm, daemon=True).start()
     threading.Thread(target=_seasons_refresher, daemon=True).start()
     threading.Thread(target=stream.publisher, daemon=True).start()
     threading.Thread(target=lroom.ticker, daemon=True).start()
