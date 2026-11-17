@@ -402,8 +402,10 @@ def player(pid):
     }
 
 def lobby_line(name):
-    """Одна строка для DLL лобби: ключ, рейтинг, победы, поражения, часы, profile_id.
-    Ключ — ник или /steam/<SteamID64> (точнее: тёзки и переименования не мешают). Тёзок по нику выбираем по свежести игры."""
+    """Одна строка для DLL лобби: ключ, рейтинг, победы, поражения, часы, profile_id, SteamID64.
+    Ключ — ник или /steam/<SteamID64> (точнее: тёзки и переименования не мешают). Тёзок по нику выбираем по свежести игры.
+    SteamID64 (7-е поле, 17.11.2026, LobbyStats 0.12.0 Rating=own): по нему DLL находит игрока в /ladder/api/own/all — в слотах лобби
+    игра даёт ID профиля Relic, не SteamID; '-' если не знаем. Старые читатели берут поля 0..5 и 7-е не замечают."""
     if re.fullmatch(r'/steam/7656119\d{10}', name): cands = lookup(profile_names=[name])
     else: cands = [c for c in lookup(aliases=[name]) if c['alias'] == name] or lookup(aliases=[name])
     if not cands: return name + '\t-'
@@ -419,7 +421,9 @@ def lobby_line(name):
             x = next((x for x in m.get('matchhistorymember', []) if x['profile_id'] == pid), None)
             if x and m.get('matchtype_id') != 5 and x.get('newrating'): rating = str(x['newrating']); break
     h = steam_hours(c.get('steam', '')).get('hours')
-    return '\t'.join([name, rating or '-', str(cust.get('wins', 0)), str(cust.get('losses', 0)), str(int(h)) if h is not None else '-', str(pid)])
+    steam = c.get('steam') or ''
+    return '\t'.join([name, rating or '-', str(cust.get('wins', 0)), str(cust.get('losses', 0)), str(int(h)) if h is not None else '-', str(pid),
+                      steam if re.fullmatch(r'7656119\d{10}', steam) else '-'])
 
 def meta():
     return {'races': {k: {'key': v[0], 'en': v[1], 'ru': v[2], 'heroes': [{'img': h[0], 'en': h[1], 'ru': h[2]} for h in v[3]]} for k, v in RACES.items()}}
