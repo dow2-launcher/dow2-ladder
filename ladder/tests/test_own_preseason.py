@@ -158,6 +158,7 @@ o.setup(lambda: sqlite3.connect(fn), __import__('threading').Lock(), lambda t: '
 ok('site_season without the file', o.site_season() == {'preseason': False, 'label': None, 'start': None, 'info': None})
 ok('default_season without the file -> None (the API takes the quarter)', o.default_season() is None)
 ok('site_player: every match without the file', len(o.site_player('x')['matches']) == 7)
+ok('site_player without the file: no previous season, no roster', o.site_player('x')['prev'] is None and o.site_player('x')['cal_modes'] == [])
 cfgfile(T + '/d1', json.dumps({'label': '2027-pre', 'start': S + 3 * H})); o.step2(fn, log=quiet)
 ok('site_season with the file', o.site_season() == {'preseason': True, 'label': '2027-pre', 'start': S + 3 * H, 'info': None})
 cfgfile(T + '/d1', json.dumps({'label': '2027-pre', 'start': S + 3 * H, 'info': 'https://example.org/elite#preseason'}))
@@ -176,6 +177,21 @@ ok('site_all: the same players as the 1v1 board', {s for s, m in a['players'].it
 ok('site_all: c / rank as the board', all(a['players'][p['steam']]['1v1'].get('c') == p['cons'] and a['players'][p['steam']]['1v1'].get('rank') == p['rank'] for p in b1['board']))
 ok('site_all: calibrating - games left, no number', all('c' not in a['players'][p['steam']]['1v1'] and a['players'][p['steam']]['1v1']['cal'] == p['cal_left'] for p in b1['calibrating']))
 ok('site_all: an unknown season - empty', o.site_all('1999-Q1')['players'] == {})
+# 17.11.2026 (SirItos): the test's players stay in the preseason's table (calibration 0/5), the profile shows the previous season
+c = sqlite3.connect(fn); add(c, 99, S - 5 * H, [('w', 1, 1), ('x', 2, 0)]); c.commit(); c.close(); o.step2(fn, log=quiet); c = sqlite3.connect(fn)
+b = o.site_board('1v1', o.default_season()); rw = {p['steam']: p for p in b['rows']}
+ok('roster: w (a rated Elite match before the start only) in calibration 0/5', 'w' in rw and rw['w']['calibrating'] and
+   (rw['w']['cal_played'], rw['w']['games'], rw['w']['wins'], rw['w']['cal_left']) == (0, 0, 0, o.CAL_GAMES) and rw['w']['rank'] is None)
+ok('roster: the rated players unchanged, each once', [p['steam'] for p in b['rows']].count('x') == 1 and all(p['steam'] != 'w' for p in b['board']))
+ok('roster: not in another mode', all(p['steam'] != 'w' for p in o.site_board('2v2', o.default_season())['rows']))
+ok('roster: not in an old season\'s board', all(p['steam'] != 'w' for p in o.site_board('1v1', '2027-Q1')['rows']))
+ok('roster: own_ratings still the preseason only, w not in it; /own/all without him', q('SELECT DISTINCT season FROM own_ratings') == [('2027-pre',)]
+   and q('SELECT COUNT(*) FROM own_ratings WHERE steam = "w"') == [(0,)] and 'w' not in o.site_all(o.default_season())['players'])
+pw, px = o.site_player('w'), o.site_player('x')
+ok('previous season: w 1v1 1 game (calibrating), cal_modes 1v1', pw['prev'] and pw['prev']['season'] == '2027-Q1' and
+   [(r['mode'], r['games'], r['wins'], r['cal_left']) for r in pw['prev']['ratings']] == [('1v1', 1, 1, o.CAL_GAMES - 1)] and pw['cal_modes'] == ['1v1'] and pw['ratings'] == [])
+ok('previous season: x 4 games before the start (99-102), 3 wins', [(r['games'], r['wins'], r['losses']) for r in px['prev']['ratings']] == [(4, 3, 1)])
+ok('previous season: old rules (the quarter season), the preseason number apart', q('SELECT DISTINCT season FROM own_ratings_prev') == [('2027-Q1',)]); c.close()
 shutil.rmtree(T + '/d1')
 
 # ---------- the live copy ----------

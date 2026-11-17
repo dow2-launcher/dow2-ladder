@@ -2217,7 +2217,7 @@ class H(BaseHTTPRequestHandler):
                 if not re.fullmatch(r'\d{5,20}', steam): return self.send(400, {'error': 'steam'})
                 d = own_matches.site_player(steam, own_race_key)
                 d['season'] = own_matches.default_season() or current_season(); d['preseason'] = bool(own_matches.season_cfg())
-                if d['ratings'] or d['matches']:                  # 17.11.2026, the player page: his Steam avatar (no lookups of random ids)
+                if d['ratings'] or d['matches'] or d.get('prev'):   # 17.11.2026, the player page: his Steam avatar (no lookups of random ids)
                     try: d['avatar'] = users.get(steam)['avatar'] or ''
                     except Exception: d['avatar'] = ''
                 return self.send(200, d, cache=60)

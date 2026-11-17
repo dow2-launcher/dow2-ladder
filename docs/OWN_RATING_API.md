@@ -74,6 +74,10 @@ The site's ladder page (17.11.2026, one page in the launcher's look) shows exact
 
 `/ladder/api/own/player` also gives `season` (the one the page shows), `preseason`, `hours_played` (as above), `avatar` (Steam, when he has played) and, per match, in `me`: `c` = the table's number after the match, `d` = its change (both `null` while he calibrates; on the 5th game `c` without `d`), `n` = his games of that mode in the season after it (`null` = the match did not move his rating). Each calibrated `ratings` row has `rank`.
 
+In the preseason (17.11.2026, SirItos: the table is not wiped) `rows` / `calibrating` of the preseason's season also list every player who played a rated Elite match of that mode before the preseason started and has no preseason game yet: `calibrating: true`, `cal_played: 0`, `games: 0`, `last: null`. Their rating is reset like everyone's; `/ladder/api/own/all` and the queue do not list them (no preseason row).
+
+`/ladder/api/own/player` in the preseason also gives `cal_modes` (the modes he is in that roster of) and `prev` = `{"season": "2026-Q4", "ratings": [...]}`: the previous season - the test before the preseason, his own matches before its start by the test's rules, in its quarter season (the same row fields as `ratings`, `rank` among that season's calibrated). `null` without a preseason or with no game before it. These rows live in `own_ratings_prev`, apart from `own_ratings`.
+
 ## Matchmaking: what the queue shows
 
 With the season file and an Elite search, the `rating` the queue hands out is the matching rating described above. That covers `mm/poll` allies and enemies, and `/ladder/api/mm/live`, where `rsrc` is `own` / `own_cal` / `own_new`. A player in calibration always shows 1500, so his hidden rating never leaks there.

@@ -51,6 +51,27 @@ st, h, b = get('/ladder/rating?mode=%0d%0aSet-Cookie:x')
 check('... a raw value is dropped', (st, h.get('Location')), (301, '/ladder/table'))
 check('the old rating.html is gone from the repo', os.path.exists(REPO + '/ladder/rating.html'), False)
 
+# 17.11.2026 (SirItos: "with a bad connection the frame pictures do not load"): some Russian ISPs' DPI freezes any single answer over
+# ~30 KB - every file the page loads stays under 30 KB uncompressed, fonts under 20 KB, pictures under 12 KB (only textures: the
+# frames are CSS), and every file it names exists in site/
+import re as _re
+LIM = 30000
+check('ladder.html <= 30 KB', len(page) <= LIM, True)
+refs = set(_re.findall(r'/elite/((?:ui|fonts)/[\w.-]+)', page.decode('utf-8')))
+for css in [r for r in refs if r.endswith('.css')]:
+    refs |= set(_re.findall(r'/elite/((?:ui|fonts)/[\w.-]+)', open(REPO + '/site/' + css, encoding='utf-8').read()))
+check('the page loads its style, script and fonts from /elite/', {'ui/ladder.css', 'ui/ladder-x.css', 'ui/ladder-t.js', 'ui/ladder.js', 'ui/ladder-x.js',
+      'fonts/rc400.woff2', 'fonts/rc700.woff2', 'fonts/sp600.woff2', 'fonts/cinzel-logo.woff2'} <= refs, True)
+for r in sorted(refs):
+    fn = REPO + '/site/' + r; n = os.path.getsize(fn) if os.path.exists(fn) else -1
+    lim = 20000 if r.startswith('fonts/') else 12000 if _re.search(r'\.(png|jpe?g|webp)$', r) else LIM
+    check('/elite/%s exists, %d <= %d' % (r, n, lim), 0 <= n <= lim, True)
+idx = json.load(open(REPO + '/site/assets/index.json', encoding='utf-8'))
+miss = [m['minimap'] for m in idx['maps'].values() if _re.fullmatch(r'maps/[\w.-]+\.png', m.get('minimap') or '')
+        and not os.path.exists(REPO + '/site/assets/maps_s/' + m['minimap'][5:-4] + '.webp')]
+check('every minimap has its webp thumb (assets/maps_s/, <= 12 KB)', (miss, max(os.path.getsize(REPO + '/site/assets/maps_s/' + f)
+      for f in os.listdir(REPO + '/site/assets/maps_s')) <= 12000), ([], True))
+
 o._CACHE.update(t=0)
 d = json.loads(get('/ladder/api/own/all')[2])
 pl = d['players']
