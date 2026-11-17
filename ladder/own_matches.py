@@ -37,7 +37,7 @@ def setup(db_fn, lock, season_fn, data_dir=None):
     _db, _lock, _season = db_fn, lock, season_fn
     if data_dir: DATA_DIR = data_dir
     try:
-        with _db() as c: c.executescript(SCHEMA)
+        with _db() as c: migrate(c)          # 17.11.2026: the columns too (own_c / own_d of the player page) - not only at the next step2
     except Exception as e: _log('setup', e)
 
 
@@ -272,7 +272,11 @@ PRE_SHORT_S = 180
 
 MIGRATE = [('own_matches', 'notes', 'TEXT'), ('own_matches', 'resolved', 'INTEGER'),
            ('own_match_players', 'weight', 'REAL'), ('own_match_players', 'early_leave', 'INTEGER'),
-           ('own_match_players', 'note', 'TEXT')]
+           ('own_match_players', 'note', 'TEXT'),
+           # 17.11.2026 (the player page /ladder/player/<steam>): what this match did to the number of the table (recompute_own) -
+           # own_c = his conservative rating (rating - 2*RD) after it, NULL while he still calibrates; own_d = its change, only when he
+           # was out of calibration before it too (the hidden rating never leaks); own_n = his games in the mode/season after it
+           ('own_match_players', 'own_c', 'REAL'), ('own_match_players', 'own_d', 'REAL'), ('own_match_players', 'own_n', 'INTEGER')]
 RATINGS_SCHEMA = '''
 CREATE TABLE IF NOT EXISTS own_ratings (
   steam TEXT, mode TEXT, season TEXT, rating REAL, rd REAL, vol REAL, games INTEGER, wins INTEGER, losses INTEGER,
@@ -535,7 +539,7 @@ def recompute_own(c, log=print, cfg=None):
     ms = c.execute('SELECT sid, started, season, rated, why_unrated, winner_team FROM own_matches '
                    'WHERE (rated = 1 OR why_unrated IN (?, ?)) AND coalesce(started, 0) >= ? '
                    'ORDER BY started, sid', ('early_leave', 'short_match', cfg['start'] if cfg else -1)).fetchall()
-    n = 0
+    n, marks = 0, []
     for sid, started, season, rated, why, win in ms:
         if cfg: season = cfg['label']
         ps = c.execute('SELECT steam, team, final, coalesce(weight, 1) FROM own_match_players WHERE sid = ?', (sid,)).fetchall()
@@ -555,11 +559,16 @@ def recompute_own(c, log=print, cfg=None):
                 if final not in ('win', 'loss', 'loss_leave') or (not rated and final != 'loss_leave'): continue
                 st = get(steam, mode, season); s = 1.0 if final == 'win' else 0.0
                 nr, nrd, nv = g2(st[0], st[1], st[2], [(avg[ot][0], avg[ot][1], s)])
-                upd.append((st, st[0] + w * (nr - st[0]), nrd, nv, final, started))
-        for st, nr, nrd, nv, final, t in upd:
+                upd.append((st, st[0] + w * (nr - st[0]), nrd, nv, final, started, steam))
+        for st, nr, nrd, nv, final, t, steam in upd:
+            before = st[0] - 2 * st[1] if st[3] >= CAL_GAMES else None
             st[0], st[1], st[2] = nr, nrd, nv
             st[3] += 1; st[4] += final == 'win'; st[5] += final != 'win'; st[6] += final == 'loss_leave'; st[7] = t
+            after = st[0] - 2 * st[1] if st[3] >= CAL_GAMES else None
+            marks.append((after, after - before if after is not None and before is not None else None, st[3], sid, steam))
         n += 1
+    c.execute('UPDATE own_match_players SET own_c = NULL, own_d = NULL, own_n = NULL WHERE own_n IS NOT NULL')
+    c.executemany('UPDATE own_match_players SET own_c = ?, own_d = ?, own_n = ? WHERE sid = ? AND steam = ?', marks)
     c.execute('DELETE FROM own_ratings')
     for (steam, mode, season), st in R.items():
         if not st[3]: continue
@@ -686,18 +695,25 @@ def site_player(steam, race_key=lambda rc, modname: None, limit=50):
             m = c.execute('SELECT kind, mode, map, modname, started, ended, winner_team, rated, why_unrated FROM own_matches WHERE sid = ?',
                           (sid,)).fetchone()
             if not m: continue
-            ps = c.execute('SELECT steam, name, team, race, final, note, weight FROM own_match_players WHERE sid = ? ORDER BY team, pid',
-                           (sid,)).fetchall()
+            ps = c.execute('SELECT steam, name, team, race, final, note, weight, own_c, own_d, own_n FROM own_match_players '
+                           'WHERE sid = ? ORDER BY team, pid', (sid,)).fetchall()
             teams, me = {}, None
-            for s, name, team, race, final, note, w in ps:
+            for s, name, team, race, final, note, w, oc, od, on in ps:
                 p = {'steam': s, 'name': name or s, 'team': team, 'race': race_key(race, m[3]), 'final': final}
                 teams.setdefault(team, []).append(p)
-                if s == steam: me = {'team': team, 'final': final, 'note': note, 'weight': w}
+                if s == steam:   # 17.11.2026: + the table's number after this match and its change (None in calibration), games after it
+                    me = {'team': team, 'final': final, 'note': note, 'weight': w,
+                          'c': None if oc is None else round(oc), 'd': None if od is None else round(od), 'n': on}
             ms.append({'sid': sid, 'kind': m[0], 'mode': m[1], 'map': m[2], 'started': m[4], 'ended': m[5], 'winner_team': m[6],
                        'rated': bool(m[7]), 'why': m[8], 'me': me, 'teams': [teams[k] for k in sorted(teams, key=lambda t: (t is None, t))]})
         name = _names(c, [steam]).get(steam) or ''
+        ranks = {}                 # 17.11.2026: his place in each calibrated mode (the board's order: cons, then games)
+        for r in rt:
+            if r[8] <= 0:
+                ranks[(r[0], r[1])] = 1 + c.execute('SELECT COUNT(*) FROM own_ratings WHERE mode = ? AND season = ? AND cal_left <= 0 AND '
+                                                    '(cons > ? OR (cons = ? AND games > ?))', (r[0], r[1], r[2] - 2 * r[3], r[2] - 2 * r[3], r[4])).fetchone()[0]
     ratings = [{'mode': r[0], 'season': r[1], 'games': r[4], 'wins': r[5], 'losses': r[6] - r[7], 'leaves': r[7], 'cal_left': r[8], 'last': r[9],
-                **({} if r[8] > 0 else {'cons': round(r[2] - 2 * r[3]), 'rating': round(r[2]), 'rd': round(r[3])})} for r in rt]
+                **({} if r[8] > 0 else {'cons': round(r[2] - 2 * r[3]), 'rating': round(r[2]), 'rd': round(r[3]), 'rank': ranks.get((r[0], r[1]))})} for r in rt]
     return {'steam': steam, 'name': name, 'ratings': ratings, 'matches': ms}
 
 

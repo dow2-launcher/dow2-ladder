@@ -70,7 +70,9 @@ Same as before (`board`, `calibrating`, `seasons`, `cal_games`), plus:
 - `rows`: one list. First the rated players by `cons` (with `rank`, `cons`, `rating`, `rd`). Then the players in calibration, alphabetically, with `rank` null and no rating. Every row has `steam, name, games, wins, losses, leaves, last, calibrating, cal_played, cal_needed`.
 - `preseason` (bool), `mod` ("Elite").
 
-The page `/ladder/rating/` shows exactly `rows`. A player's matches are at `/ladder/#elite:<steam>` (`GET /ladder/api/own/player?steam=`).
+The page `/ladder/table` shows exactly `rows` (`?mode=2v2`, `?lang=ru|en`; `#how` opens "How the rating works"); `/ladder/rating/` redirects there. A player's page is `/ladder/player/<steam>` (`GET /ladder/api/own/player?steam=`; the old `/ladder/#elite:<steam>` goes there).
+
+`/ladder/api/own/player` also gives `season` (the one the page shows), `preseason`, `avatar` (Steam, when he has played) and, per match, in `me`: `c` = the table's number after the match, `d` = its change (both `null` while he calibrates; on the 5th game `c` without `d`), `n` = his games of that mode in the season after it (`null` = the match did not move his rating). Each calibrated `ratings` row has `rank`.
 
 ## Matchmaking: what the queue shows
 

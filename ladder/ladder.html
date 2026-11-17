@@ -647,13 +647,15 @@ async function oPlayer(steam) {
 }
 function route() {
   const h = decodeURIComponent(location.hash.slice(1)); const m = h.match(/^elite(?:[:/](\d{5,20}))?$/);
+  // 17.11.2026 (SirItos): the Elite rating has its own pages - the table /ladder/table, a player /ladder/player/<steam>; old links follow
+  if (m) { location.replace(m[1] ? '/ladder/player/' + m[1] + '?lang=' + LANG : '/ladder/table?lang=' + LANG); return; }
   view = m ? 'elite' : 'ladder'; document.body.classList.toggle('ownv', !!m);
   document.querySelectorAll('#vtabs button').forEach(b => b.classList.toggle('on', b.dataset.v === view));
   if (!m) return;
   if (m[1]) oPlayer(m[1]); else { OS = ''; q('#o-player-v').hidden = true; q('#o-board-v').hidden = false; oBoard(); }
 }
 q('#vtabs').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return;
-  if (b.dataset.v === 'elite') location.hash = 'elite'; else history.pushState(null, '', location.pathname + location.search), route(); });
+  if (b.dataset.v === 'elite') location.href = '/ladder/table?lang=' + LANG; else history.pushState(null, '', location.pathname + location.search), route(); });
 q('#o-modes').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; mode = b.dataset.mode;
   document.querySelectorAll('#o-modes button').forEach(x => x.classList.toggle('on', x === b)); oBoard(); });
 q('#o-season').addEventListener('change', e => { season = e.target.value; oBoard(); });
