@@ -29,6 +29,17 @@
 # 16.11.2026 (owner, launcher 1.6.17): the lobby's chat - the general chat in a room of its own for the lobby's people (verb say,
 # see "the lobby's chat" below), its feed carries who came in, left and moved; a player goes into the observers (verb seat with
 # slot "obs"; never the owner - the match is started from his game).
+# 17.11.2026 (SirItos, team lead): the countdown is 5 s (was 10; CD below - the launchers draw it from the view's cd_end), and a room
+# is CLOSED once its match has really started. SirItos' review of PR #28: not at the start message, only when the games are in it -
+# (1) the ladder's nm_started (own_lobby sent MatchStartMessage to every game: the match record is in MM_PLAYING) and then (2) EVERY
+# seated player's game confirmed it is loading this match: its MMFind's "loading" (the loading screen of the match) through his
+# launcher (verb game) or its own mm/alive (MMFind sends it from the loading screen on, straight to the ladder: the match's
+# "alive"). These are the last signals the ladder gets from a game before the battle; there is no later one (live.py only knows
+# the node and the time). Until both, the room stays "launching" and anything that goes wrong - a game's failure, a Cancel, a
+# player leaving, the match dropped or over, START_CONFIRM s without every game loading - calls the launch off and the room is
+# back in its lobby with the reason, as before. Confirmed: the room leaves the list and every launcher ("lroom_gone", why
+# "started"), its players and observers are free for another room at once; no "back in the room after the match" any more.
+# What a launcher shows of the running match comes from the ladder's matches (c/live "ingame": the match says "lroom" = the id).
 import json, random, re, secrets, string, threading, time
 
 L = None                    # the ladder module (ladder.py sets it right after the import)
@@ -43,10 +54,11 @@ INV_SENT = {}               # steam -> the times of his invitations of the last 
 PING_GAP = 30               # s between two pings of one kind in one room
 PING_TTL = 30               # s the pinged player has to answer (the launcher's window)
 INVITE_TTL = 180            # s an invitation stays on the invited player's screen
-CD = 10                     # s of the countdown once everybody is ready (as the game's lobby)
+CD = 5                      # s of the countdown once everybody is ready (17.11.2026 SirItos: 5, was 10 as the game's lobby)
 GO_EARLY = float(__import__('os').environ.get('LROOM_GO_EARLY', '1.5'))   # s: a game's search this much before the countdown's end launches the room (go_at)
 HERE_GONE = 45              # s without a heartbeat from his launcher: out of the room (only while it is in its lobby)
 LAUNCH_WAIT = int(__import__('os').environ.get('LROOM_LAUNCH_WAIT', '150'))   # s from the end of the countdown to every game in the search
+START_CONFIRM = int(__import__('os').environ.get('LROOM_START_CONFIRM', '90'))   # s from nm_started for every player's game to say "loading"
 PLAY_KEEP = 3 * 3600        # s a room stays "playing" without a word of the match's end
 MAX_ROOMS = 300
 SPOIL_KINDS = ('late', 'version', 'race', 'left_search', 'game_failed', 'match', 'left')   # a start called off because of these players
@@ -225,7 +237,7 @@ def view(r):
             'slots': slots, 'obs': obs, 'obs_cap': _obs_cap(r), 'obs_free': max(0, _obs_cap(r) - len(obs)), 'net': _net(r), 'note': r.get('note'), 'seq': r['seq'],
             'hs': bool(r.get('hs')), 'all_ready': _all_ready(r, now), 'ping': _ping_view(r, now), 'cseq': r.get('cseq', 0),
             'launch': {'t': int(la.get('t', 0)), 'deadline': int(la.get('deadline', 0)), 'host': la.get('host'), 'relay': la.get('relay'),
-                       'match': la.get('match'), 'room': la.get('room'), 'map': la.get('map'),
+                       'match': la.get('match'), 'room': la.get('room'), 'map': la.get('map'), 'started': int(la.get('started') or 0),
                        'map_name': (cat.get(la.get('map')) or {}).get('name') or la.get('map')} if la else None}
 
 
@@ -629,16 +641,38 @@ def on_match_room(m, room):
 
 
 def on_match_started(m):
+    """own_lobby sent the start to every game of the room's match (ladder nm_started, the match is in MM_PLAYING): the room waits,
+    still "launching", until every seated player's game says it loads this match (_confirm_started); then it is closed"""
     r = ROOMS.get(m.get('lroom') or '')
-    if r and r.get('launch'):
-        r['state'] = 'playing'; r['launch']['started'] = time.time(); r['note'] = None
-        for s in r['slots']: s['gst'] = 'playing'; s['gst_t'] = time.time(); s['ready'] = False
-        for o in r.setdefault('obs', []): o['gst'] = 'playing' if o['steam'] in m.get('watchers', []) else ''
-        log('room %s: match %s started' % (r['id'], m['id'])); _pub(r)
+    if r and r.get('launch') and r['launch'].get('match') == m['id']:
+        r['launch']['started'] = time.time(); r['note'] = None
+        log('room %s: match %s started - waiting for every game to load it' % (r['id'], m['id']))
+        if not _confirm_started(r): _pub(r)
+
+
+def _loaded(r, s, m):
+    """his game loads / plays the room's match: MMFind's "loading" through his launcher, or its own mm/alive to that match"""
+    return s['gst'] in ('loading', 'playing') or s['steam'] in ((m or {}).get('alive') or {})
+
+
+def _confirm_started(r):
+    """17.11.2026 (SirItos): the start message sent and every seated player's game in the match - the room is closed (out of the
+    list and of every launcher: "lroom_gone" why "started"; its people free). True when closed."""
+    la = r.get('launch') or {}
+    if r['state'] != 'launching' or not la.get('started'): return False
+    m = L.MM_PLAYING.get(la.get('match') or '')
+    if not m or not all(_loaded(r, s, m) for s in r['slots'] if s): return False
+    log('room %s: every game loads the match %s (%.1f s after the start) - the room is closed' % (r['id'], m['id'], time.time() - la['started']))
+    _close(r, 'started')
+    return True
 
 
 def on_match_over(m):
     r = ROOMS.get(m.get('lroom') or '')
+    if r and r['state'] == 'launching' and (r.get('launch') or {}).get('match') == m['id']:   # over before every game loaded it
+        pl = [s['steam'] for s in r['slots'] if s and not _loaded(r, s, m)]
+        _cancel_launch(r, 'match', pl, why='the match ended before every game loaded it'); _pub(r)
+        return
     if r and r['state'] == 'playing' and (r.get('launch') or {}).get('match') == m['id']:
         r['state'] = 'lobby'; r['launch'] = None
         for s in r['slots']:
@@ -665,6 +699,14 @@ def tick(now):
             if r['id'] not in ROOMS: continue
             ch |= _check_ready(r, now)
             if r['state'] == 'countdown' and now >= r['cd']: _launch(r, now); ch = True
+        elif r['state'] == 'launching' and r['launch'].get('started'):         # started: every game loading closes it, else the time runs out
+            if _confirm_started(r): continue
+            m = L.MM_PLAYING.get(r['launch']['match'])
+            if not m:
+                _cancel_launch(r, 'match', why='the match is gone before every game loaded it'); ch = True
+            elif now - r['launch']['started'] > START_CONFIRM:
+                late = [s['steam'] for s in r['slots'] if s and not _loaded(r, s, m)]
+                _cancel_launch(r, 'match', late, why='no loading from every game in %d s after the start' % START_CONFIRM); ch = True
         elif r['state'] == 'launching' and not r['launch'].get('match') and now > r['launch']['deadline']:
             late = [s for s in _members(r) if not (L.MM.get(s) or {}).get('lroom') == r['id']]
             _cancel_launch(r, 'late', late, secs=LAUNCH_WAIT); ch = True
@@ -812,6 +854,7 @@ def api(verb, steam, d):
             if ev == 'failed':
                 why = _clean(d.get('reason'), 40) or 'error'
                 _cancel_launch(r, 'game_failed', [steam], why=why)
+            elif _confirm_started(r): return {'ok': True}                     # the last game loading the started match: closed
         _pub(r); return {'ok': True}
     if verb == 'pings':                                                     # his launcher's measurements of our servers
         p = {}
