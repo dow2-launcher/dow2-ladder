@@ -75,3 +75,22 @@ The page `/ladder/rating/` shows exactly `rows`. A player's matches are at `/lad
 ## Matchmaking: what the queue shows
 
 With the season file and an Elite search, the `rating` the queue hands out is the matching rating described above. That covers `mm/poll` allies and enemies, and `/ladder/api/mm/live`, where `rsrc` is `own` / `own_cal` / `own_new`. A player in calibration always shows 1500, so his hidden rating never leaks there.
+
+## Every player at once: `GET /ladder/api/own/all`
+
+Launcher 1.6.20 shows the Elite rating of anyone it lists (Online, the lobby cards, the own lobby, the chat's authors, the tips) and the badges of the top 3 of each mode. It reads the whole season in one answer, every 120 s, instead of asking per player:
+
+```json
+{"season": "2026-pre", "preseason": true, "cal_games": 5, "info": "https://..." ,
+ "players": {"7656...": {"1v1": {"c": 1584, "rank": 1, "g": 9, "w": 6, "l": 2, "lv": 1, "cal": 0},
+                         "2v2": {"g": 2, "w": 1, "l": 1, "lv": 0, "cal": 3}}}}
+```
+
+- `c` is the conservative number (rating − 2·RD), the same as the table's; `rank` is the place in that mode's table. Both are absent while calibrating (`cal` = games left).
+- `l` is without the leaves (`lv`), as in the table.
+- `info` is the optional `"info": "https://..."` of `own_season.json`: the page the launcher's (i) by "preseason" opens. Anything but an https address is dropped (logged).
+- The season is the preseason's label, else the current quarter. Cached 60 s.
+
+## The launcher's notice: `site/notice.json`
+
+`/elite/notice.json` (deployed with `site/`) is the "incoming message" launcher 1.6.20 shows once per `id` after the update strip is closed: `{"id": "...", "ru": {"title", "short", "full"}, "en": {...}}`. `full` takes paragraphs, `- ` lists, `**bold**`, `[text](https://...)` and `{badge:<1v1|2v2|3v3>:<1|2|3>}` (the badge of that place). A new `id` shows again to everyone. No file (404) = no notice.

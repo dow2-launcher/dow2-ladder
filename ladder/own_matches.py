@@ -263,7 +263,7 @@ REPEAT_N = 3            # 1v1: the same pair's rated matches in REPEAT_S before 
 REPEAT_S = 86400
 REPEAT_W = 0.25         # ... both players' rating change is scaled by this (anti-abuse 3b, 17.11.2026)
 UNELIGIBLE = ('not_full_teams', 'no_steam', 'room', 'no_history', 'not_elite')   # rule 1: a manual winner does not make these rated
-SEASON_FILE = 'own_season.json'   # <data>/own_season.json {"label": "2026-pre", "start": <unix ts>}: the (pre)season of the own rating
+SEASON_FILE = 'own_season.json'   # <data>/own_season.json {"label": "2026-pre", "start": <unix ts>, "info": "https://..." (optional)}: the (pre)season of the own rating
 # 17.11.2026 (SirItos: «ливы в первые 2-3 минуты - игра не в рейтинг»): with own_season.json the early-leave window and the short-match
 # threshold are both 3 min, and only Elite matches are rated (a vanilla automatch match stays stored, unrated 'not_elite').
 # Without the file: EARLY_S / SHORT_MATCH_S and every mod, as before.
@@ -301,7 +301,11 @@ def season_cfg(data_dir=None, log=print):
     label, start = d.get('label') if isinstance(d, dict) else None, d.get('start') if isinstance(d, dict) else None
     if not (isinstance(label, str) and re.fullmatch(r'[\w.-]{1,9}', label) and isinstance(start, (int, float)) and not isinstance(start, bool)):
         log('own_matches: %s: want {"label": "<=9 chars", "start": <unix ts>}, got %r' % (fn, d)); return None
-    return {'label': label, 'start': int(start)}
+    out = {'label': label, 'start': int(start)}
+    info = d.get('info')                         # 17.11.2026, launcher 1.6.20: the page about the (pre)season, its (i) in the profile
+    if isinstance(info, str) and re.fullmatch(r'https://[^\s"<>]{1,300}', info): out['info'] = info
+    elif info is not None: log('own_matches: %s: "info" must be an https:// address, got %r' % (fn, info))
+    return out
 
 
 def default_season(data_dir=None):
@@ -606,7 +610,7 @@ def step2(db_path, log=print, cfg='file'):
 def site_season():
     """/ladder/api/own/season: the page's texts follow it (preseason or the old test)"""
     cfg = season_cfg()
-    return {'preseason': bool(cfg), 'label': cfg['label'] if cfg else None, 'start': cfg['start'] if cfg else None}
+    return {'preseason': bool(cfg), 'label': cfg['label'] if cfg else None, 'start': cfg['start'] if cfg else None, 'info': (cfg or {}).get('info')}
 
 
 def _names(c, steams):
@@ -642,6 +646,27 @@ def site_board(mode, season):
              for p in sorted(cal, key=lambda p: (str(p['name']).casefold(), p['steam']))]
     return {'mode': mode, 'season': season, 'seasons': seasons, 'cal_games': CAL_GAMES, 'board': board, 'calibrating': cal,
             'rows': rows, 'preseason': bool(season_cfg()), 'mod': ELITE_MOD}
+
+
+def site_all(season):
+    """/ladder/api/own/all (launcher 1.6.20, 17.11.2026): the whole table of a season in one answer - every player, every mode -
+    for the launcher, which shows the Elite rating of any player it lists (Online, the lobbies, the tips) without asking per player.
+    players: {steam: {mode: {c, g, w, l, lv, cal, rank}}} - c = the number of the site's table (cons = rating - 2*RD, absent while
+    calibrating), rank = the place among the calibrated of that mode (the site's order: cons, then games), cal = calibration games left;
+    the losses without the leaves, as site_board"""
+    with _db() as c:
+        try:
+            rows = c.execute('SELECT steam, mode, rating, rd, games, wins, losses, leaves, cal_left FROM own_ratings '
+                             'WHERE season = ? ORDER BY mode, cons DESC, games DESC', (season,)).fetchall()
+        except sqlite3.OperationalError: rows = []          # no own_ratings yet (step 2 not run)
+    players, place = {}, {}
+    for steam, mode, rating, rd, games, wins, losses, leaves, cal_left in rows:
+        p = {'g': games, 'w': wins, 'l': losses - leaves, 'lv': leaves, 'cal': cal_left}
+        if cal_left <= 0:
+            place[mode] = place.get(mode, 0) + 1
+            p.update(c=round(rating - 2 * rd), rank=place[mode])
+        players.setdefault(steam, {})[mode] = p
+    return {'season': season, 'cal_games': CAL_GAMES, 'players': players}
 
 
 def site_player(steam, race_key=lambda rc, modname: None, limit=50):
