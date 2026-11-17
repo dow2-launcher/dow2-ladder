@@ -114,7 +114,7 @@ button, select, input { font: inherit; color: inherit; }
 .empty { padding: 26px 12px; text-align: center; color: var(--mu); }
 
 /* ---------- the table: rows as the launcher's cards; the top three in the game's plate with their medal's glow ---------- */
-.tb { --cols: 56px minmax(0, 1fr) 132px 64px 112px 72px; }
+.tb { --cols: 56px minmax(0, 1fr) 150px 84px 120px; }
 .tr { display: grid; grid-template-columns: var(--cols); align-items: center; min-height: 46px; }
 .tr > * { padding: 0 10px; text-align: right; white-space: nowrap; font-variant-numeric: lining-nums tabular-nums; }
 .tr > .l { text-align: left; }
@@ -139,10 +139,7 @@ button, select, input { font: inherit; color: inherit; }
 .top .rv { font-size: 21px; color: #dffff6; text-shadow: 0 0 12px rgba(69, 224, 192, .6); }
 .wl { color: var(--sf); } .wl .w { color: var(--ok); } .wl .lo { color: var(--bd); } .wl .lv { color: var(--wa); }
 .hr { color: var(--sf); }
-.cal { display: inline-flex; align-items: center; gap: 8px; justify-content: flex-end; font: 400 13.5px var(--fb); color: var(--mu); }
-.pips { display: inline-flex; gap: 3px; }
-.pips i { width: 7px; height: 7px; border: 1px solid var(--ln2); transform: rotate(45deg); }
-.pips i.on { background: var(--gd); border-color: var(--gd); box-shadow: 0 0 5px rgba(69, 224, 192, .7); }
+.cal { display: inline-flex; align-items: center; gap: 7px; justify-content: flex-end; font: 600 14px var(--fb); color: var(--sf); font-variant-numeric: tabular-nums; }
 .calh { display: flex; align-items: center; gap: 10px; margin: 16px 0 2px; font: 700 12px var(--fb); letter-spacing: .12em; text-transform: uppercase; color: var(--mu); }
 .calh::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, var(--ln2), transparent); }
 .tr.cr .nm { color: var(--sf); font-weight: 400; }
@@ -260,6 +257,8 @@ input[type=checkbox] { accent-color: var(--gd); }
 .mc .cm { display: flex; justify-content: space-between; align-items: center; gap: 6px; font: 700 13px var(--fb); letter-spacing: .08em; text-transform: uppercase; color: var(--sf); }
 .mc .cv { font: 700 32px/1.2 var(--fh); color: var(--el); margin: 4px 0 2px; text-shadow: 0 0 12px rgba(69, 224, 192, .5); font-variant-numeric: lining-nums tabular-nums; }
 .mc .cv.cal { font: 400 15px/2.1 var(--fb); color: var(--sf); text-shadow: none; }
+.mc .cal { justify-content: flex-start; font-size: 16px; }
+.mc .cal .sk { width: 12px; height: 15px; }
 .mc .cv.none { color: var(--dim); text-shadow: none; }
 .mc .cs { color: var(--mu); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .prk { display: inline-flex; align-items: center; gap: 4px; font: 700 15px var(--fh); color: var(--gd2); letter-spacing: 0; text-transform: none; }
@@ -299,11 +298,10 @@ input[type=checkbox] { accent-color: var(--gd); }
   .panel { padding: 6px 8px 10px; }
   .h { font-size: 20px; }
   .ph .seg { flex-basis: 100%; } .ph .seg button { flex: 1; }
-  .tb { --cols: 34px minmax(0, 1fr) 96px 44px; }
+  .tb { --cols: 30px minmax(0, 1fr) 82px 42px 60px; }
   .tr > * { padding: 0 6px; }
-  .tr .x { display: none; }
   .nm { font-size: 15px; } .top .nm { font-size: 16px; } .rv { font-size: 18px; } .top .rv { font-size: 19px; }
-  .cal { font-size: 12.5px; gap: 5px; } .cal .pips { display: none; }
+  .cal { font-size: 12.5px; gap: 4px; } .cal .sk { width: 8px; height: 11px; } .cal .sks { gap: 1px; }
   .th { font-size: 10.5px; letter-spacing: .04em; }
   .hm { grid-template-columns: 60px minmax(0, 1fr); } .mini { width: 60px; height: 60px; }
   .act { grid-column: 1 / -1; flex-direction: row; justify-content: flex-end; align-items: center; }
@@ -312,7 +310,7 @@ input[type=checkbox] { accent-color: var(--gd); }
   .rooms-grid { grid-template-columns: 1fr; } .room { grid-template-columns: 60px minmax(0, 1fr); } .room .mmap { width: 60px; height: 60px; }
   .pp-h h1 { font-size: 23px; } .av { width: 56px; height: 56px; }
   .cards { gap: 6px; } .mc { padding: 4px 6px 6px; } .mc .cv { font-size: 23px; } .mc .cv.cal { font-size: 13px; line-height: 1.6; }
-  .mc .cs { font-size: 12px; white-space: normal; } .mc .cm { font-size: 11.5px; letter-spacing: .04em; }
+  .mc .cs { font-size: 12px; white-space: normal; } .mc .cal { font-size: 14px; gap: 3px; } .mc .cal .sk { width: 9px; height: 12px; } .mc .cal .sks { gap: 1px; } .mc .cm { font-size: 11.5px; letter-spacing: .04em; }
   .m { grid-template-columns: 1fr auto; gap: 4px 10px; padding: 10px 2px; }
   .m .res2 { grid-column: 1; } .m .dl { grid-column: 2; grid-row: 1; } .m .mid { grid-column: 1 / 3; }
   .m .res2 small { display: inline; margin-left: 6px; }
@@ -338,7 +336,7 @@ input[type=checkbox] { accent-color: var(--gd); }
       <div class="ph"><h1 class="h" data-t="title"></h1><span class="tag pre" id="tag" hidden></span><span class="muted" id="seasonL"></span><span class="sp"></span>
         <div class="seg" id="modes"><button data-m="1v1" class="on">1 vs 1</button><button data-m="2v2">2 vs 2</button><button data-m="3v3">3 vs 3</button></div></div>
       <div class="tb" id="tb">
-        <div class="tr th"><span class="l">#</span><span class="l" data-t="player"></span><span data-t="rating" data-h="ratingHint"></span><span data-t="games"></span><span class="x" data-t="wl" data-h="wlHint"></span><span class="x" data-t="hoursCol" data-h="hoursHint"></span></div>
+        <div class="tr th"><span class="l">#</span><span class="l" data-t="player"></span><span data-t="rating" data-h="ratingHint"></span><span data-t="gamesCol"></span><span data-t="wlCol" data-h="wlHint2"></span></div>
         <div id="rows"><div class="empty" data-t="loading"></div></div>
       </div>
       <p class="tnote" data-t="tableNote"></p>
@@ -514,12 +512,12 @@ const LI = {
 // ---------- texts: this page's own ----------
 const UI = {
   ru: { tabTable: 'Рейтинг', tabHistory: 'Матчи', tabLive: 'Сейчас', chatLink: 'Чат', dlLauncher: 'Скачать лаунчер', back: '← К таблице',
-    hoursCol: 'Часы', hoursHint: 'Часов в Retribution (Steam); видно, если профиль Steam открыт', hoursLine: h => `${fmtN(h)} ч в Retribution`,
+    gamesCol: 'Игры', wlCol: 'W–L', wlHint2: 'Победы – поражения (уход до конца матча — тоже поражение)', calT: (k, n) => `калибровка: сыграно ${k} из ${n}`, leavesT: n => `из них уходов: ${n}`, hoursHint: 'Часов в Retribution (Steam); видно, если профиль Steam открыт', hoursLine: h => `${fmtN(h)} ч в Retribution`,
     calHead: 'Калибровка', seasonL: s => `сезон ${s}`, foot: 'Dawn of War II: Retribution · рейтинг Elite по матчам нашего автоматча',
     tableNote: 'Нажмите на игрока — его страница: рейтинг в каждом режиме и матчи с изменением за каждый.',
     hTitle: 'История матчей — Elite Ladder', lTitle: 'Сейчас — Elite Ladder' },
   en: { tabTable: 'Rating', tabHistory: 'Matches', tabLive: 'Live', chatLink: 'Chat', dlLauncher: 'Download launcher', back: '← Back to the table',
-    hoursCol: 'Hours', hoursHint: 'Hours in Retribution (Steam); shown when the Steam profile is public', hoursLine: h => `${fmtN(h)} h in Retribution`,
+    gamesCol: 'Games', wlCol: 'W–L', wlHint2: 'Wins – losses (leaving before the end is a loss too)', calT: (k, n) => `calibration: ${k} of ${n} played`, leavesT: n => `leaves among them: ${n}`, hoursHint: 'Hours in Retribution (Steam); shown when the Steam profile is public', hoursLine: h => `${fmtN(h)} h in Retribution`,
     calHead: 'Calibration', seasonL: s => `season ${s}`, foot: 'Dawn of War II: Retribution · the Elite rating of our automatch',
     tableNote: 'Click a player for his page: his rating in every mode and his matches with the change of each.',
     hTitle: 'Match history — Elite Ladder', lTitle: 'Live — Elite Ladder' } };
@@ -595,8 +593,9 @@ window.addEventListener('popstate', () => { if (PSTEAM) return; const q = new UR
   MODE = okMode(q.get('mode')) || '1v1'; syncModes(); showView(okView(q.get('view')) || 'table'); if (VIEW === 'table') { DATA = null; loadTable(); } });
 
 // ---------- the table ----------
-const pips = (k, n) => `<span class="pips">${Array.from({ length: n }, (_, i) => `<i${i < k ? ' class="on"' : ''}></i>`).join('')}</span>`;
-const badge = (rank, m) => rank && rank <= 3 ? `<i class="rt-b m${m} r${rank}" aria-hidden="true"></i>` : '';
+const skulls = (k, n) => `<span class="sks" aria-hidden="true">${Array.from({ length: n }, (_, i) => `<i class="sk${i < k ? ' on' : ''}"></i>`).join('')}</span>`;
+const calCell = (k, n) => `${skulls(k, n)}<span>${Math.min(k, n)}/${n}</span>`;
+const badge = (rank, m) => rank && rank <= 3 ? `<i class="rt-b m${m} r${rank}" title="${esc(T('place')(rank) + ' · ' + m)}"></i>` : '';
 function render() {
   if (VIEW !== 'table' || !DATA) return;
   const tb = $('#rows');
@@ -607,13 +606,14 @@ function render() {
   let html = '', sep = false;
   for (const p of rows) {
     if (p.calibrating && !sep) { sep = true; html += `<div class="calh">${esc(T('calHead'))}</div>`; }
-    const wl = `<span class="w">${p.wins}</span>–<span class="lo">${p.losses}</span>–<span class="lv">${p.leaves}</span>`;
-    const hrs = p.hours_played != null ? fmtN(p.hours_played) : '—';
+    const lost = p.losses + p.leaves;              // a leave is a loss (SirItos: W–L only)
+    const wl = `<span class="wl" title="${esc(T('wlHint2') + (p.leaves ? ' · ' + T('leavesT')(p.leaves) : ''))}"><span class="w">${p.wins}</span>–<span class="lo">${lost}</span></span>`;
+    const tip = esc(T('stats') + (p.hours_played != null ? ' · ' + T('hoursLine')(p.hours_played) : ''));
     const name = `<span class="nm"><span>${esc(p.name || p.steam)}</span>${badge(p.rank, DATA.mode || MODE)}</span>`;
     const href = esc(playerUrl(p.steam, DATA.mode || MODE));
     html += p.calibrating
-      ? `<a class="tr p cr" href="${href}" title="${esc(T('stats'))}"><span class="l rk">—</span><span class="l">${name}</span><span class="cal">${pips(p.cal_played, p.cal_needed)}${esc(T('cal')(p.cal_played, p.cal_needed))}</span><span>${p.games}</span><span class="x wl">${wl}</span><span class="x hr">${hrs}</span></a>`
-      : `<a class="tr p${p.rank <= 3 ? ' top top' + p.rank : ''}" href="${href}" title="${esc(T('stats'))}"><span class="l rk">${p.rank}</span><span class="l">${name}</span><span class="rv" title="${esc(p.rating + ' ± ' + p.rd)}">${p.cons}</span><span>${p.games}</span><span class="x wl">${wl}</span><span class="x hr">${hrs}</span></a>`;
+      ? `<a class="tr p cr" href="${href}" title="${tip}"><span class="l rk">—</span><span class="l">${name}</span><span class="cal" title="${esc(T('calT')(p.cal_played, p.cal_needed))}">${calCell(p.cal_played, p.cal_needed)}</span><span>${p.games}</span>${wl}</a>`
+      : `<a class="tr p${p.rank <= 3 ? ' top top' + p.rank : ''}" href="${href}" title="${tip}"><span class="l rk">${p.rank}</span><span class="l">${name}</span><span class="rv" title="${esc(p.rating + ' ± ' + p.rd)}">${p.cons}</span><span>${p.games}</span>${wl}</a>`;
   }
   tb.innerHTML = html;
 }
@@ -649,8 +649,8 @@ function card(m) {
   if (!r) v = `<div class="cv none">—</div>`, s1 = esc(T('noGames'));
   else {
     if (r.cons != null) v = `<div class="cv" title="${esc(r.rating + ' ± ' + r.rd)}">${r.cons}</div>`, s1 = `${esc(r.rating)} ± ${esc(r.rd)}`;
-    else v = `<div class="cv cal">${pips(r.games, PDATA.cal_games || 5)} ${esc(T('cal')(r.games, PDATA.cal_games || 5))}</div>`;
-    s2 = `<span title="${esc(T('wlHint'))}">${r.wins}–${r.losses}–<span style="color:var(--wa)">${r.leaves}</span></span> · ${esc(T('gamesN')(r.games))}`;
+    else v = `<div class="cv cal" title="${esc(T('calT')(r.games, PDATA.cal_games || 5))}"><span class="cal">${calCell(r.games, PDATA.cal_games || 5)}</span></div>`;
+    s2 = `<span title="${esc(T('wlHint2') + (r.leaves ? ' · ' + T('leavesT')(r.leaves) : ''))}">W–L ${r.wins}–${r.losses + r.leaves}</span> · ${esc(T('gamesN')(r.games))}`;
   }
   const rk = r && r.rank ? `<span class="prk${r.rank <= 3 ? ' t' + r.rank : ''}">${badge(r.rank, m)}${esc(T('place')(r.rank))}</span>` : '';
   return `<button class="mc card${PMODE === m ? ' on' : ''}" data-m="${m}"><div class="cm"><span>${m.replace('v', ' vs ')}</span>${rk}</div>${v}
