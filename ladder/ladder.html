@@ -570,8 +570,10 @@ function setTitle() {
 }
 function setTag(pre, season) {
   if (pre !== PRE) { PRE = pre; $('#howText').innerHTML = T('how')(PRE); }
-  const tag = $('#tag'); tag.hidden = false; tag.textContent = PRE ? T('pre') : T('test');
-  if (season) $('#seasonL').textContent = T('seasonL')(season);
+  const tag = $('#tag'); tag.hidden = !!PRE; tag.textContent = PRE ? T('pre') : T('test');
+  // the preseason (SirItos 17.11): no tag, the header says "Предсезон 2027" (the year from the season's label, e.g. 2027-pre)
+  if (PRE) { const y = String(season || '').match(/\d{4}/); $('#seasonL').textContent = T('pre') + (y ? ' ' + y[0] : ''); }
+  else if (season) $('#seasonL').textContent = T('seasonL')(season);
 }
 
 // ---------- the views (tabs) ----------
