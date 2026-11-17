@@ -45,7 +45,7 @@ ladder/"; else
     # hand edits on the server (another session, a quick fix) are not overwritten: a live file that differs from what the
     # last deploy put there stops the ladder part until the edit is in the repo (29.10: a deploy wiped the owner's edits)
     manual=""
-    for f in ladder/*.py ladder/ladder.html ladder/fb_admin.html ladder/maps.txt; do
+    for f in ladder/*.py ladder/ladder.html ladder/rating.html ladder/fb_admin.html ladder/maps.txt; do
       live=/srv/ladder/app/$(basename $f); [ -f "$live" ] || continue
       if [ -n "$OLD" ] && git cat-file -e "$OLD:$f" 2>/dev/null && ! git show "$OLD:$f" | cmp -s - "$live" && ! git show "$NEW:$f" | cmp -s - "$live"; then manual="$manual $(basename $f)"; fi
     done
@@ -56,7 +56,7 @@ ladder/"; else
 ladder/"
     else
     B=/srv/ladder/app.prev; rm -rf $B; cp -a /srv/ladder/app $B
-    install -o root -g root -m 644 ladder/*.py ladder/ladder.html ladder/chat.html ladder/fb_admin.html ladder/maps.txt /srv/ladder/app/
+    install -o root -g root -m 644 ladder/*.py ladder/ladder.html ladder/rating.html ladder/chat.html ladder/fb_admin.html ladder/maps.txt /srv/ladder/app/
     rm -f /srv/ladder/app/guess_from_replays.py; install -o root -g root -m 644 ladder/guess_from_replays.py /srv/ladder/
     systemctl restart dow2-ladder; ok=""
     for i in 1 2 3 4 5 6 7 8 9 10; do sleep 2; curl -sf -m 5 http://127.0.0.1:8217/ladder/api/mm/status >/dev/null && { ok=1; break; }; done

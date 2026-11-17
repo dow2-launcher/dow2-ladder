@@ -1963,15 +1963,28 @@ def fb_send(d, author='player'):
         finally:
             c.close()
     return {'ok': True}
-def fb_thread(uid, after=0):
+FB_THREAD_MAX = 200
+def fb_thread(uid, after=0, limit=None):
+    """the dev chat's thread of a launcher: the messages after the id `after`; 17.11.2026 (Malum): `limit` = only the last n of them
+    (1..FB_THREAD_MAX) - the launcher loads the last ~20 on open, then only the new ones by `after`; 'more' = older ones were left out"""
     uid = _fb_uid(uid)
     if not uid: return {'error': 'uid'}
+    try: after = max(0, int(after or 0))
+    except (TypeError, ValueError): return {'error': 'after'}
+    try: limit = min(FB_THREAD_MAX, max(1, int(limit))) if limit not in (None, '') else None
+    except (TypeError, ValueError): return {'error': 'limit'}
     c = fb_db()
     try:
-        rows = c.execute('SELECT * FROM fb WHERE uid=? AND id>? ORDER BY id', (uid, int(after or 0))).fetchall()
+        if limit:
+            rows = c.execute('SELECT * FROM fb WHERE uid=? AND id>? ORDER BY id DESC LIMIT ?', (uid, after, limit + 1)).fetchall()
+            more = len(rows) > limit; rows = rows[:limit][::-1]
+        else:
+            rows = c.execute('SELECT * FROM fb WHERE uid=? AND id>? ORDER BY id', (uid, after)).fetchall(); more = False
     finally:
         c.close()
-    return {'messages': [_fb_msg(r) for r in rows]}
+    out = {'messages': [_fb_msg(r) for r in rows]}
+    if limit: out['more'] = more
+    return out
 def fb_admin_list():
     _mod = fb_mod_load()
     c = fb_db()
@@ -2111,7 +2124,13 @@ class H(BaseHTTPRequestHandler):
                         return self.send_html(f.read())
                 except Exception:
                     return self.send(500, {'error': 'page'})
-            if u.path in ('/ladder/rating', '/ladder/rating/'):  # 17.11.2026: the own rating's table alone (rating.html), not linked yet
+            if u.path in ('/ladder/rating', '/ladder/rating/'):  # 17.11.2026: the table moved to /ladder/table (SirItos) - old links follow
+                keep = {k: qs[k][0] for k in ('mode', 'lang') if qs.get(k) and re.fullmatch(r'[a-z0-9]{2,3}', qs[k][0])}   # nothing raw into a header
+                self.send_response(301); self.send_header('Location', '/ladder/table' + ('?' + urllib.parse.urlencode(keep) if keep else ''))
+                self.send_header('Content-Length', '0'); self.send_header('Cache-Control', 'public, max-age=3600'); self.end_headers(); return
+            # 17.11.2026 (SirItos): /ladder/table = the Elite rating's table, /ladder/player/<steam> = a player's page; one page (rating.html)
+            # draws both by its path. /ladder/ stays the list of games
+            if u.path in ('/ladder/table', '/ladder/table/') or re.fullmatch(r'/ladder/player/\d{5,20}/?', u.path):
                 try:
                     with open(os.path.dirname(os.path.abspath(__file__)) + '/rating.html', 'rb') as f:
                         return self.send_html(f.read())
@@ -2154,7 +2173,7 @@ class H(BaseHTTPRequestHandler):
             if u.path == '/ladder/api/history':
                 g = lambda k: qs.get(k, [''])[0]
                 return self.send(200, history(g('q')[:64], g('mode')[:8], g('map')[:64], g('race')[:32], g('page') or 0, g('n') or 30, g('off')), cache=10)
-            if u.path == '/ladder/api/fb/thread': return self.send(200, fb_thread(qs.get('uid', [''])[0], qs.get('after', ['0'])[0]), cache=0)
+            if u.path == '/ladder/api/fb/thread': return self.send(200, fb_thread(qs.get('uid', [''])[0], qs.get('after', ['0'])[0], qs.get('limit', [''])[0]), cache=0)
             if u.path.startswith('/ladder/api/fb/img/'):
                 fn = u.path.rsplit('/', 1)[-1]; uid = _fb_uid(qs.get('uid', [''])[0]); tok = qs.get('token', [''])[0]
                 if not re.fullmatch(r'[0-9]+_[0-9a-f]{8}\.(png|jpg|gif|webp)', fn): return self.send(404, {'error': 'img'})
@@ -2200,7 +2219,12 @@ class H(BaseHTTPRequestHandler):
             if u.path == '/ladder/api/own/player':                # own rating: a player's own matches
                 steam = qs.get('steam', [''])[0]
                 if not re.fullmatch(r'\d{5,20}', steam): return self.send(400, {'error': 'steam'})
-                return self.send(200, own_matches.site_player(steam, own_race_key), cache=60)
+                d = own_matches.site_player(steam, own_race_key)
+                d['season'] = own_matches.default_season() or current_season(); d['preseason'] = bool(own_matches.season_cfg())
+                if d['ratings'] or d['matches']:                  # 17.11.2026, the player page: his Steam avatar (no lookups of random ids)
+                    try: d['avatar'] = users.get(steam)['avatar'] or ''
+                    except Exception: d['avatar'] = ''
+                return self.send(200, d, cache=60)
             if u.path == '/ladder/api/board':
                 season = (qs.get('season', [current_season()])[0])[:9]
                 mode = qs.get('mode', ['1v1'])[0]
