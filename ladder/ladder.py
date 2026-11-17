@@ -1004,7 +1004,7 @@ with db() as c:
     ''')
     try: c.execute('ALTER TABLE mm_history ADD COLUMN kind TEXT')   # 05.11.2026: 'room' = a match from a launcher room (agreed, never rated)
     except sqlite3.OperationalError: pass
-own_matches.setup(db, _db_lock, season_of)
+own_matches.setup(db, _db_lock, season_of, os.path.dirname(DB))   # data_dir: own_season.json (the preseason) next to the DB
 
 def _history_add(m):  # под MM_LOCK, в момент старта: кто, за какую сторону, рейтинг на входе
     if not m.get('lobby') or m.get('bots'):                # тесты против компьютера (TestBots) — не матчи ладдера
@@ -2146,8 +2146,10 @@ class H(BaseHTTPRequestHandler):
             if u.path == '/ladder/api/own':                       # own rating (test, 10.11.2026): the table of a mode/season
                 mode = qs.get('mode', ['1v1'])[0]
                 if mode not in MODES: mode = '1v1'
-                season = (qs.get('season', [''])[0] or current_season())[:9]
+                season = (qs.get('season', [''])[0] or own_matches.default_season() or current_season())[:9]   # the preseason's label if any
                 return self.send(200, own_matches.site_board(mode, season), cache=60)
+            if u.path == '/ladder/api/own/season':                # 17.11.2026: preseason or not (own_season.json) - the tab's texts
+                return self.send(200, own_matches.site_season(), cache=60)
             if u.path == '/ladder/api/own/player':                # own rating: a player's own matches
                 steam = qs.get('steam', [''])[0]
                 if not re.fullmatch(r'\d{5,20}', steam): return self.send(400, {'error': 'steam'})

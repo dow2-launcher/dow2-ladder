@@ -215,7 +215,7 @@ body.ownv .wrap > :not(header):not(.vtabs):not(#own) { display: none !important;
   <div class="ostabs vtabs" id="vtabs"><button data-v="ladder" class="on" data-o="tabLadder">Ладдер</button><button data-v="elite" data-o="tabOwn">Elite (тест)</button></div>
 
   <div id="own">
-    <div class="onote"><b data-o="testTag">Тест</b> <span data-o="noteText"></span></div>
+    <div class="onote"><b data-o="testTag" id="o-test-tag">Тест</b> <span data-o="noteText"></span></div>
     <div id="o-board-v">
       <div class="ocontrols">
         <div class="ostabs" id="o-modes"><button data-mode="1v1" class="on">1 vs 1</button><button data-mode="2v2">2 vs 2</button><button data-mode="3v3">3 vs 3</button></div>
@@ -561,6 +561,7 @@ applyLang();
 </script>
 <script>
 // own rating, "Elite (test)" tab (10.11.2026): /ladder/api/own, /ladder/api/own/player. Read only, the other tabs untouched.
+// 17.11.2026: with the server's own_season.json (/ladder/api/own/season preseason=true) the "pre" texts: "Elite - preseason", no "Test" tag.
 (() => {
 const OI = {
   ru: { tabLadder: 'Ладдер', tabOwn: 'Elite (тест)', testTag: 'Тест', loading: 'Загрузка…', player: 'Игрок', rating: 'Рейтинг', games: 'Игр', last: 'Последний',
@@ -571,8 +572,12 @@ const OI = {
     fin: { win: 'Победа', loss: 'Поражение', loss_leave: 'Поражение за уход', none: 'Без итога' }, unrated: 'без рейтинга', half: 'половина изменения',
     why: { room: 'комната лаунчера, не автоматч', early_leave: 'выход в первые 2 минуты', no_winner: 'итог не определён', no_data: 'нет данных о выходе игроков',
       no_history: 'нет записи автоматча', all_gone: 'все вышли разом (сбой сети или сервера)', reports_disagree: 'отчёты игр расходятся, на проверке',
-      winners_left: 'победители вышли до конца, на проверке', not_full_teams: 'неполные команды', no_steam: 'нет Steam ID' },
-    note: { early_forgiven: 'первый ранний выход за сутки — прощён', left_first: 'вышел до конца матча', short_handed: 'играл в меньшинстве' } },
+      winners_left: 'победители вышли до конца, на проверке', not_full_teams: 'неполные команды', no_steam: 'нет Steam ID',
+      short_match: 'матч короче 4 минут (сдача или выход)', void: 'аннулирован вручную' },
+    note: { early_forgiven: 'первый ранний выход за сутки — прощён', left_first: 'вышел до конца матча', short_handed: 'играл в меньшинстве',
+      repeat_pair: 'тот же соперник 4-й раз за сутки — четверть изменения', manual_winner: 'итог исправлен вручную' },
+    pre: { tabOwn: 'Elite — предсезон', testTag: '',
+      noteText: 'Предсезон: проверяем правила, к началу сезона результаты обнулятся. Вылет или выход до конца матча — поражение. Первые 5 игр — калибровка.' } },
   en: { tabLadder: 'Ladder', tabOwn: 'Elite (test)', testTag: 'Test', loading: 'Loading…', player: 'Player', rating: 'Rating', games: 'Games', last: 'Last game',
     noteText: 'A new rating from the matches of our automatch. A disconnect or leaving before the end is a loss. The first 5 games are calibration. A test for now: it affects nothing.',
     ratingHint: 'Conservative rating: Glicko-2 minus 2·RD', rdHint: 'Glicko-2 and its uncertainty (RD)', wlHint: 'Wins – losses – losses by leaving',
@@ -581,12 +586,18 @@ const OI = {
     fin: { win: 'Win', loss: 'Loss', loss_leave: 'Loss by leaving', none: 'No result' }, unrated: 'unrated', half: 'half the change',
     why: { room: 'a launcher room, not the automatch', early_leave: 'a leave in the first 2 minutes', no_winner: 'no result', no_data: 'no data on the leaves',
       no_history: 'no automatch record', all_gone: 'everyone left at once (network or server)', reports_disagree: 'the game reports disagree, under review',
-      winners_left: 'the winners left before the end, under review', not_full_teams: 'teams not full', no_steam: 'no Steam ID' },
-    note: { early_forgiven: 'the first early leave in a day, forgiven', left_first: 'left before the end', short_handed: 'played short-handed' } } };
-const q = s => document.querySelector(s), L = () => OI[LANG] || OI.en, t = k => L()[k];
+      winners_left: 'the winners left before the end, under review', not_full_teams: 'teams not full', no_steam: 'no Steam ID',
+      short_match: 'shorter than 4 minutes (a surrender or a leave)', void: 'voided by an admin' },
+    note: { early_forgiven: 'the first early leave in a day, forgiven', left_first: 'left before the end', short_handed: 'played short-handed',
+      repeat_pair: 'the same opponent a 4th time in a day: a quarter of the change', manual_winner: 'result corrected by an admin' },
+    pre: { tabOwn: 'Elite — preseason', testTag: '',
+      noteText: 'Preseason: we are checking the rules, the results will be reset before the season. A disconnect or leaving before the end is a loss. The first 5 games are calibration.' } } };
+let PRE = false;   // the server's own_season.json exists: the preseason texts
+const q = s => document.querySelector(s), L = () => OI[LANG] || OI.en, t = k => (PRE && k in L().pre) ? L().pre[k] : L()[k];
 let mode = '1v1', season = '', view = 'ladder';
 function oLang() {
   document.querySelectorAll('[data-o]').forEach(e => { const v = t(e.dataset.o); if (typeof v === 'string') e.textContent = v; });
+  q('#o-test-tag').hidden = PRE;
   document.querySelectorAll('[data-ot]').forEach(e => { e.title = t(e.dataset.ot); });
 }
 const ago = s => s ? (typeof humanAgo === 'function' ? humanAgo(s) : hDate(s)) : '—';
@@ -610,9 +621,10 @@ function oMatch(m) {
   const side = (tm, i) => `<div class="side${wt != null && tm[0] && tm[0].team === wt ? ' win' : ''}">${tm.map(p => `<div class="opl${p.steam === OS ? ' me' : ''}">${p.race ? heroImg({ race: p.race }) : ''}${pn(p)}</div>`).join('')}</div>`;
   const teams = ti.length === 2 ? side(ti[0], 0) + '<div class="vsx">vs</div>' + side(ti[1], 1) : ti.map(side).join('');
   const f = me.final || 'none', why = [];
-  if (me.note && L().note[me.note]) why.push(L().note[me.note]);
-  if (me.weight != null && me.weight < 1 && m.rated) why.push(t('half'));
-  if (!m.rated && !(m.why === 'early_leave' && f === 'loss_leave')) why.push(t('unrated') + ': ' + ((m.why && L().why[m.why]) || m.why || '—'));
+  const notes = (me.note || '').split(',').filter(n => L().note[n]);
+  notes.forEach(n => why.push(L().note[n]));
+  if (me.weight != null && me.weight < 1 && m.rated && !notes.includes('repeat_pair')) why.push(t('half'));
+  if (!m.rated && !((m.why === 'early_leave' || m.why === 'short_match') && f === 'loss_leave')) why.push(t('unrated') + ': ' + ((m.why && L().why[m.why]) || m.why || '—'));
   return `<div class="ohm"><div class="hd"><b>${hDate(m.started)}</b><span>${esc(m.mode || '')}</span><span>${mapTitle(mapKey({ map: m.map, mode: m.mode }))}</span></div>
     <div class="teams">${teams}</div><div class="ores"><b class="${f}">${(L().fin[f]) || esc(f)}</b>${why.length ? ' <span>· ' + why.map(esc).join(' · ') + '</span>' : ''}</div></div>`;
 }
@@ -647,6 +659,7 @@ q('#own').addEventListener('click', e => { if (e.target.closest('[data-back]')) 
 q('#lang').addEventListener('click', () => setTimeout(() => { oLang(); if (view === 'elite') route(); }, 0));
 window.addEventListener('hashchange', route);
 oLang(); route();
+fetch('/ladder/api/own/season').then(r => r.json()).then(d => { if (d && d.preseason) { PRE = true; oLang(); } }).catch(() => {});
 })();
 </script>
 <script>

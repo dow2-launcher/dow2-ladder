@@ -6,7 +6,7 @@ Writers: ladder.py _history_add (the players at the start, rating before), mm_en
 NM- lobbies (ruined_t: his game fell while loading), nm/report from own_lobby (every game's report + who never reported).
 The columns of step 2 (final, winner_team, result_src, rated...) are filled by the step 2 part at the end (shadow only). Plan: reports/rating_plan/STEP1_DATA_RU.md 3.3.
 """
-import json, sqlite3, time, traceback
+import json, os, re, sqlite3, time, traceback
 
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS own_matches (
@@ -24,16 +24,18 @@ CREATE INDEX IF NOT EXISTS own_mp_steam ON own_match_players (steam, sid);
 MENU_WINDOW = 6 * 3600          # mm/ended after a match: his latest own match started within this
 
 _db = _lock = _season = None
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')   # ladder.py sets its own in setup()
 
 
 def _log(what, e):
     print('own_matches: %s failed: %r %s' % (what, e, traceback.format_exc(limit=2).replace('\n', ' | ')), flush=True)
 
 
-def setup(db_fn, lock, season_fn):
-    """db_fn() -> sqlite3 connection, lock = the ladder's write lock, season_fn(start) -> '2026-Q4'"""
-    global _db, _lock, _season
+def setup(db_fn, lock, season_fn, data_dir=None):
+    """db_fn() -> sqlite3 connection, lock = the ladder's write lock, season_fn(start) -> '2026-Q4', data_dir = where own_season.json is"""
+    global _db, _lock, _season, DATA_DIR
     _db, _lock, _season = db_fn, lock, season_fn
+    if data_dir: DATA_DIR = data_dir
     try:
         with _db() as c: c.executescript(SCHEMA)
     except Exception as e: _log('setup', e)
@@ -235,6 +237,13 @@ SHORT_W = 0.5           # weight of the loss of a leaver's teammate whose team t
 ROOMS_RATED = False     # launcher rooms: there is no "rated" tick yet (rule 1) -> unrated 'room'
 CAL_GAMES = 5           # the first games of a player in a mode+season: calibration (cal_left)
 MODES_N = {1: '1v1', 2: '2v2', 3: '3v3'}
+SHORT_MATCH_S = 240     # s from the start: a match over before this (a surrender or a leave - nothing else ends a game so fast) is
+                        # unrated for all; a leaver in it still gets his loss (17.11.2026, anti-abuse 3a; EARLY_S keeps its own rule)
+REPEAT_N = 3            # 1v1: the same pair's rated matches in REPEAT_S before this one - from the (REPEAT_N+1)-th on ...
+REPEAT_S = 86400
+REPEAT_W = 0.25         # ... both players' rating change is scaled by this (anti-abuse 3b, 17.11.2026)
+UNELIGIBLE = ('not_full_teams', 'no_steam', 'room', 'no_history')   # rule 1: a manual winner does not make these rated
+SEASON_FILE = 'own_season.json'   # <data>/own_season.json {"label": "2026-pre", "start": <unix ts>}: the (pre)season of the own rating
 
 MIGRATE = [('own_matches', 'notes', 'TEXT'), ('own_matches', 'resolved', 'INTEGER'),
            ('own_match_players', 'weight', 'REAL'), ('own_match_players', 'early_leave', 'INTEGER'),
@@ -243,14 +252,45 @@ RATINGS_SCHEMA = '''
 CREATE TABLE IF NOT EXISTS own_ratings (
   steam TEXT, mode TEXT, season TEXT, rating REAL, rd REAL, vol REAL, games INTEGER, wins INTEGER, losses INTEGER,
   leaves INTEGER, cal_left INTEGER, cons REAL, last INTEGER, PRIMARY KEY (steam, mode, season));
+CREATE TABLE IF NOT EXISTS own_overrides (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, match_id INTEGER, action TEXT, team INTEGER, note TEXT, ts INTEGER);
+CREATE INDEX IF NOT EXISTS own_overrides_mid ON own_overrides (match_id, id);
 '''
 
 
 def migrate(c):
-    c.executescript(SCHEMA + RATINGS_SCHEMA)
+    c.executescript(SCHEMA + RATINGS_SCHEMA)       # own_overrides: the manual decisions (own_admin.py), a log - rows are never deleted
     for t, col, typ in MIGRATE:
         if col not in [r[1] for r in c.execute('PRAGMA table_info(%s)' % t)]:
             c.execute('ALTER TABLE %s ADD COLUMN %s %s' % (t, col, typ))
+
+
+def season_cfg(data_dir=None, log=print):
+    """<data>/own_season.json -> {'label', 'start'} or None (no file = no preseason: every match, the quarter season as before).
+    A broken file is logged and treated as no file."""
+    fn = os.path.join(data_dir or DATA_DIR, SEASON_FILE)
+    try:
+        with open(fn, encoding='utf-8') as f: d = json.load(f)
+    except FileNotFoundError: return None
+    except Exception as e: log('own_matches: %s unreadable: %r' % (fn, e)); return None
+    label, start = d.get('label') if isinstance(d, dict) else None, d.get('start') if isinstance(d, dict) else None
+    if not (isinstance(label, str) and re.fullmatch(r'[\w.-]{1,9}', label) and isinstance(start, (int, float)) and not isinstance(start, bool)):
+        log('own_matches: %s: want {"label": "<=9 chars", "start": <unix ts>}, got %r' % (fn, d)); return None
+    return {'label': label, 'start': int(start)}
+
+
+def default_season(data_dir=None):
+    """the API's default season of the own rating: the preseason's label when own_season.json exists, else None (the caller's quarter)"""
+    cfg = season_cfg(data_dir)
+    return cfg['label'] if cfg else None
+
+
+def override_of(c, sid):
+    """the latest manual decision for a match: {'action': 'void'|'winner', 'team', 'note'} or None ('clear' = back to the rules)"""
+    try: row = c.execute('SELECT action, team, note FROM own_overrides WHERE match_id = ? ORDER BY id DESC LIMIT 1', (sid,)).fetchone()
+    except sqlite3.OperationalError: return None      # no table yet
+    if not row or row[0] not in ('void', 'winner'): return None
+    return {'action': row[0], 'team': row[1], 'note': row[2]}
 
 
 _LADDER_FN = {}
@@ -275,10 +315,42 @@ def _loads(s, d=None):
     except Exception: return d
 
 
-def decide(m, ps, early_before=lambda steam: 0):
-    """the result of one match. m: {kind, started, end_est (bool), all_gone_s, conflict (bool)}; ps: [{steam, team, rep (1/0/3/-1/None),
-    rep_t, leave (s, his effective leave time or None)}] -> {winner_team, result_src, rated, why, notes, players: {steam: (final, weight,
-    early, note)}}. Pure: the tests feed it made-up matches."""
+def decide(m, ps, early_before=lambda steam: 0, pair_before=lambda a, b: 0):
+    """the result of one match. m: {kind, started, end_est (bool), all_gone_s, conflict (bool), override (None or {action: 'void'|'winner',
+    team})}; ps: [{steam, team, rep (1/0/3/-1/None), rep_t, leave (s, his effective leave time or None)}]; pair_before(a, b) = the 1v1
+    pair's rated matches in REPEAT_S before this one -> {winner_team, result_src, rated, why, notes, players: {steam: (final, weight,
+    early, note)}}. Pure: the tests feed it made-up matches. Order: the rules, then the manual decision, then the repeat-pair weight."""
+    r = _decide_rules(m, ps, early_before)
+    if m.get('override'): _apply_override(r, ps, m['override'])
+    if r['rated'] and r['why'] is None and len(ps) == 2:          # anti-abuse 3b: the same 1v1 pair again and again in a day
+        n = pair_before(ps[0]['steam'], ps[1]['steam'])
+        if n >= REPEAT_N:
+            r['notes'].append('repeat_pair_%d' % (n + 1))
+            for f in r['players'].values():
+                f[1] *= REPEAT_W; f[3] = 'repeat_pair' if not f[3] else f[3] + ',repeat_pair'
+    return r
+
+
+def _apply_override(r, ps, ov):
+    """a manual decision (own_admin.py) on top of decide()'s rules: 'void' = unrated for all (finals kept for the history, an early
+    leave in it not counted); 'winner' = that team won, rated unless rule 1 says no (a leaver of the losing team keeps loss_leave)"""
+    teams = {p['team'] for p in ps}
+    if ov.get('action') == 'void':
+        r.update(why='void', rated=0, result_src='manual'); r['notes'].append('manual_void')
+        for f in r['players'].values(): f[2] = 0
+    elif ov.get('action') == 'winner':
+        w = ov.get('team')
+        if len(teams) != 2 or w not in teams: r['notes'].append('manual_bad_team'); return
+        why = r['why'] if r['why'] in UNELIGIBLE else None
+        r.update(winner_team=w, result_src='manual', why=why, rated=0 if why else 1); r['notes'].append('manual_winner')
+        for p in ps:
+            f = r['players'][p['steam']]
+            if p['team'] == w: f[:] = ['win', 1.0, 0, 'manual_winner']
+            elif f[0] != 'loss_leave': f[:] = ['loss', 1.0, 0, 'manual_winner']
+
+
+def _decide_rules(m, ps, early_before):
+    """decide() without the manual decision and the repeat-pair weight: rules 1, 4, 5 + the short match (3a)"""
     fin = {p['steam']: ['none', 1.0, 0, None] for p in ps}
     r = dict(winner_team=None, result_src=None, rated=0, why=None, notes=[], players=fin)
     teams = {}
@@ -329,7 +401,7 @@ def decide(m, ps, early_before=lambda steam: 0):
         stay = [p['leave'] for p in teams[win] if p['leave'] > t_lost]
         if not stay or min(stay) - t_lost <= ALL_GONE_S: return done('all_gone', 'node')
         leavers = [p for p in gone if p['leave'] <= t_lost]
-        src = 'node'
+        src = 'node'; end_t = t_lost                     # the game ended for the team that left
     if all(p in leavers for p in teams[win]): return done('winners_left', 'check')
     r['winner_team'] = win
     # rule 4, early: a leave before EARLY_S = no match; the leaver loses unless it is his first such in FORGIVE_S
@@ -348,6 +420,11 @@ def decide(m, ps, early_before=lambda steam: 0):
         else:
             f[0] = 'loss'
             if nl[p['team']] > nl[other(p['team'])]: f[1] = SHORT_W; f[3] = 'short_handed'
+    # anti-abuse 3a: over before SHORT_MATCH_S = a surrender or a leave: unrated (the finals stay for the history; a leaver's loss_leave
+    # still counts in recompute_own, as after an early leave)
+    if started and end_t is not None and end_t - started < SHORT_MATCH_S:
+        r['notes'].append('short_%ds' % (end_t - started))
+        return done('short_match', src)
     return done(None, src)
 
 
@@ -390,14 +467,23 @@ def _match_input(c, sid):
     return m, ps
 
 
-def resolve(sid, c):
-    """decide() on the stored data and write it: own_matches winner_team/result_src/rated/why_unrated/notes, players final/weight/early_leave/note"""
+def resolve(sid, c, cfg=None):
+    """decide() on the stored data and write it: own_matches winner_team/result_src/rated/why_unrated/notes, players final/weight/early_leave/note.
+    The manual decision from own_overrides; cfg = season_cfg(): the repeat-pair count looks only at the preseason's matches"""
     m, ps = _match_input(c, sid)
     if m is None: return None
+    m['override'] = override_of(c, sid)
+    st = m['started'] or 0
     def early_before(steam):
         return c.execute('SELECT COUNT(*) FROM own_match_players p JOIN own_matches x ON x.sid = p.sid WHERE p.steam = ? AND p.early_leave = 1 '
-                         'AND p.sid != ? AND x.started >= ? AND x.started < ?', (steam, sid, (m['started'] or 0) - FORGIVE_S, m['started'] or 0)).fetchone()[0]
-    r = decide(m, ps, early_before)
+                         'AND p.sid != ? AND x.started >= ? AND x.started < ?', (steam, sid, st - FORGIVE_S, st)).fetchone()[0]
+    def pair_before(a, b):                               # the earlier rated 1v1 matches of exactly these two (resolved before this one)
+        return c.execute('SELECT COUNT(*) FROM own_matches x WHERE x.rated = 1 AND x.sid != ? AND x.started >= ? AND '
+                         '(x.started < ? OR (x.started = ? AND x.sid < ?)) AND '
+                         '(SELECT COUNT(*) FROM own_match_players p WHERE p.sid = x.sid) = 2 AND '
+                         '(SELECT COUNT(*) FROM own_match_players p WHERE p.sid = x.sid AND p.steam IN (?, ?)) = 2',
+                         (sid, max(st - REPEAT_S, cfg['start'] if cfg else 0), st, st, sid, a, b)).fetchone()[0]
+    r = decide(m, ps, early_before, pair_before)
     c.execute('UPDATE own_matches SET winner_team = ?, result_src = ?, rated = ?, why_unrated = ?, notes = ?, resolved = ? WHERE sid = ?',
               (r['winner_team'], r['result_src'], r['rated'], r['why'], ','.join(r['notes']) or None, int(time.time()), sid))
     for steam, (final, w, early, note) in r['players'].items():
@@ -406,17 +492,21 @@ def resolve(sid, c):
     return r
 
 
-def recompute_own(c, log=print):
-    """the shadow rating from scratch: Glicko-2 of the ladder over own_matches rated=1 (+ the leaver's own loss in an 'early_leave'
-    match), in the order of the start; one match = one period, against the other team's average (as ladder.recompute); the weight
-    w < 1 scales his rating change. -> own_ratings (cons = rating - 2*RD, cal_left = calibration games left)"""
+def recompute_own(c, log=print, cfg=None):
+    """the shadow rating from scratch: Glicko-2 of the ladder over own_matches rated=1 (+ the leaver's own loss in an 'early_leave' /
+    'short_match' match), in the order of the start; one match = one period, against the other team's average (as ladder.recompute);
+    the weight w < 1 scales his rating change. -> own_ratings (cons = rating - 2*RD, cal_left = calibration games left).
+    cfg = season_cfg() (the preseason): only the matches started at/after cfg['start'], all under cfg['label']; None = every match,
+    its own quarter season (as before 17.11.2026)"""
     L = ladder_fn(); g2 = L['glicko']
     R = {}
     def get(steam, mode, season): return R.setdefault((steam, mode, season), [1500.0, 350.0, 0.06, 0, 0, 0, 0, 0])
-    ms = c.execute('SELECT sid, started, season, rated, why_unrated, winner_team FROM own_matches WHERE rated = 1 OR why_unrated = "early_leave" '
-                   'ORDER BY started, sid').fetchall()
+    ms = c.execute('SELECT sid, started, season, rated, why_unrated, winner_team FROM own_matches '
+                   'WHERE (rated = 1 OR why_unrated IN (?, ?)) AND coalesce(started, 0) >= ? '
+                   'ORDER BY started, sid', ('early_leave', 'short_match', cfg['start'] if cfg else -1)).fetchall()
     n = 0
     for sid, started, season, rated, why, win in ms:
+        if cfg: season = cfg['label']
         ps = c.execute('SELECT steam, team, final, coalesce(weight, 1) FROM own_match_players WHERE sid = ?', (sid,)).fetchall()
         teams = {}
         for p in ps: teams.setdefault(p[1], []).append(p)
@@ -444,14 +534,17 @@ def recompute_own(c, log=print):
         if not st[3]: continue
         c.execute('INSERT INTO own_ratings VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
                   (steam, mode, season, st[0], st[1], st[2], st[3], st[4], st[5], st[6], max(0, CAL_GAMES - st[3]), st[0] - 2 * st[1], st[7]))
-    log('own_matches: shadow rating from %d matches, %d player rows' % (n, sum(1 for v in R.values() if v[3])))
+    log('own_matches: shadow rating from %d matches, %d player rows%s' % (n, sum(1 for v in R.values() if v[3]),
+                                                                     ' (season %s from %d)' % (cfg['label'], cfg['start']) if cfg else ''))
     return n
 
 
-def step2(db_path, log=print):
-    """match_log_collect.py: resolve every own match in the order of the start (the forgiveness of the first early leave depends on
-    the earlier ones), then recompute_own. Its own connection; any error -> one log line, nothing raised"""
+def step2(db_path, log=print, cfg='file'):
+    """match_log_collect.py: resolve every own match in the order of the start (the forgiveness of the first early leave and the
+    repeat-pair count depend on the earlier ones), then recompute_own. cfg: 'file' = own_season.json next to the DB (none = as before),
+    or a dict / None given by a test. Its own connection; any error -> one log line, nothing raised"""
     try:
+        if cfg == 'file': cfg = season_cfg(os.path.dirname(os.path.abspath(db_path)), log)
         c = sqlite3.connect(db_path, timeout=30)
         try:
             with c:
@@ -460,15 +553,21 @@ def step2(db_path, log=print):
                 sids = [r[0] for r in c.execute('SELECT sid FROM own_matches ORDER BY started, sid')]
                 res = {}
                 for sid in sids:
-                    r = resolve(sid, c); k = (r or {}).get('why') or 'rated'; res[k] = res.get(k, 0) + 1
+                    r = resolve(sid, c, cfg); k = (r or {}).get('why') or 'rated'; res[k] = res.get(k, 0) + 1
                 log('own_matches: resolved %d: %s' % (len(sids), json.dumps(res, sort_keys=True)))
-                recompute_own(c, log)
+                recompute_own(c, log, cfg)
         finally: c.close()
         return True
     except Exception as e: _log('step2', e); return False
 
 
-# ---------- step 3: the site (/ladder/ "Elite (test)" tab), read only (10.11.2026) ----------
+# ---------- step 3: the site (/ladder/ "Elite (test)" tab, "Elite - preseason" with own_season.json), read only (10.11.2026) ----------
+def site_season():
+    """/ladder/api/own/season: the page's texts follow it (preseason or the old test)"""
+    cfg = season_cfg()
+    return {'preseason': bool(cfg), 'label': cfg['label'] if cfg else None, 'start': cfg['start'] if cfg else None}
+
+
 def _names(c, steams):
     """steam -> his latest name in our matches (own_mp_steam index)"""
     out = {}
@@ -499,13 +598,17 @@ def site_board(mode, season):
 
 
 def site_player(steam, race_key=lambda rc, modname: None, limit=50):
-    """/ladder/api/own/player: his ratings and his latest own matches (teams, his final with the reason)"""
+    """/ladder/api/own/player: his ratings and his latest own matches (teams, his final with the reason); in a preseason
+    (own_season.json) only the matches from its start - the earlier ones are in no rating"""
+    cfg = season_cfg()
     with _db() as c:
         try:
             rt = c.execute('SELECT mode, season, rating, rd, games, wins, losses, leaves, cal_left, last FROM own_ratings '
                            'WHERE steam = ? ORDER BY season DESC, mode', (steam,)).fetchall()
         except sqlite3.OperationalError: rt = []
-        sids = [r[0] for r in c.execute('SELECT sid FROM own_match_players WHERE steam = ? ORDER BY sid DESC LIMIT ?', (steam, limit))]
+        sids = [r[0] for r in c.execute('SELECT p.sid FROM own_match_players p JOIN own_matches m ON m.sid = p.sid '
+                                        'WHERE p.steam = ? AND coalesce(m.started, 0) >= ? ORDER BY p.sid DESC LIMIT ?',
+                                        (steam, cfg['start'] if cfg else -1, limit))]
         ms = []
         for sid in sids:
             m = c.execute('SELECT kind, mode, map, modname, started, ended, winner_team, rated, why_unrated FROM own_matches WHERE sid = ?',
