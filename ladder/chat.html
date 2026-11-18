@@ -9,108 +9,12 @@
 <title>Чат — Elite Mod</title>
 <meta name="description" content="Общий чат игроков Dawn of War II: Retribution (Elite). Вход через Steam.">
 <!-- 18.11.2026 (SirItos: one header on every ladder page): the ladder's header on top - "Чат" its active item, the mirrors as buttons,
-     the phone's drawer (ladder-hdr.css + ladder-hdr.js, everything under .hdr); the chat below keeps its own look -->
-<link rel="stylesheet" href="/elite/ui/ladder-hdr.css?v=20261118c">
-<style>
-@font-face { font-family: Cinzel; src: url(/elite/fonts/cinzel-700.ttf); font-weight: 700; font-display: swap; }
-@font-face { font-family: Cinzel; src: url(/elite/fonts/cinzel-900.ttf); font-weight: 900; font-display: swap; }
-@font-face { font-family: Spectral; src: url(/elite/fonts/spectral-400.ttf); font-weight: 400; font-display: swap; }
-@font-face { font-family: Spectral; src: url(/elite/fonts/spectral-600.ttf); font-weight: 600; font-display: swap; }
-:root {
-  --bg:#0d0b09; --panel:#16130f; --panel2:#1c1813; --line:#3a3124; --gold:#d9b25f; --gold2:#f0d48f;
-  --text:#e6dccb; --muted:#a39782; --red:#c42a24; --green:#6fae53;
-}
-* { box-sizing:border-box; }
-html, body { margin:0; height:100%; }
-body { display:flex; flex-direction:column; background:var(--bg); color:var(--text); font:16px/1.5 Spectral,Georgia,serif;
-  background-image:radial-gradient(ellipse at 50% -10%, #2a1d0933 0%, transparent 60%); -webkit-text-size-adjust:100%; }
-a { color:var(--gold2); text-decoration:none; }
-.wrap { width:100%; max-width:760px; margin:0 auto; flex:1 1 0; display:flex; flex-direction:column; padding:0 14px; }
-.wrap > header { display:flex; align-items:center; gap:12px; padding:16px 2px 10px; flex-wrap:wrap; }
-h1 { margin:0; font:900 clamp(22px,5vw,30px) Cinzel,serif; letter-spacing:.04em; color:var(--gold2); text-shadow:0 2px 0 #5a3f12; }
-.lv { font:700 12px Cinzel,serif; letter-spacing:.04em; color:var(--muted); text-decoration:none; border:1px solid var(--line); border-radius:5px; padding:3px 8px; white-space:nowrap; }
-.lv:hover { color:var(--gold2); border-color:var(--gold2); }
-.me { display:flex; align-items:center; gap:10px; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:8px 12px; margin-bottom:10px; }
-.me img { width:36px; height:36px; border-radius:4px; object-fit:cover; background:#000; }
-.me .nm { font-weight:600; color:var(--gold2); }
-.me .rt { color:var(--muted); font-size:14px; }
-.me .out { margin-left:auto; background:none; border:1px solid var(--line); color:var(--muted); border-radius:4px; padding:6px 12px; cursor:pointer; font:inherit; }
-.me .out:hover { color:var(--text); border-color:#5a4a2e; }
-.online { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:8px 10px; margin-bottom:10px; }
-.ohdr { font:700 13px Cinzel,serif; letter-spacing:.04em; color:var(--gold2); margin-bottom:7px; display:flex; align-items:center; gap:7px; }
-.ohdr .dot { width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 6px var(--green); flex:none; }
-.olist { display:flex; flex-wrap:wrap; gap:6px; max-height:96px; overflow-y:auto; }
-.ou { display:inline-flex; align-items:center; gap:6px; background:var(--panel2); border:1px solid #2c2619; border-radius:20px; padding:3px 11px 3px 3px; font-size:13px; max-width:100%; }
-.ou img { width:22px; height:22px; border-radius:50%; object-fit:cover; background:#000; flex:none; }
-.ou .on { color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:150px; }
-.ou .rt { color:var(--muted); font-size:12px; flex:none; }
-.ou.in { border-color:#3a5a2e; }
-.ou.in .on { color:#a7d389; }
-.nk { cursor:pointer; }
-.nk:hover { text-decoration:underline; color:var(--gold2); }
-.ou { cursor:pointer; }
-.ou:hover { border-color:#5a4a2e; }
-.rooms { display:flex; gap:0; border:1px solid #5a4a2e; border-radius:5px; overflow:hidden; width:max-content; margin-bottom:10px; }
-.rooms button { font:700 14px Cinzel,serif; letter-spacing:.05em; color:var(--muted); background:#0e0c09; border:0; padding:8px 20px; cursor:pointer; }
-.rooms button + button { border-left:1px solid #3a3124; }
-.rooms button.on { background:linear-gradient(#3a2a12,#22190c); color:var(--gold2); box-shadow:inset 0 -2px 0 var(--gold); }
-.msgs { flex:1; min-height:240px; overflow-y:auto; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:12px; }
-.m { display:flex; gap:10px; padding:7px 0; }
-.m + .m { border-top:1px solid #241f17; }
-.m img { width:34px; height:34px; border-radius:4px; object-fit:cover; background:#000; flex:none; }
-.m .b { min-width:0; }
-.m .h { font-size:13px; color:var(--muted); margin-bottom:1px; }
-.m .h b { color:var(--gold2); font-weight:600; }
-.m .t { overflow-wrap:anywhere; white-space:pre-wrap; }
-.m .t .at { color:var(--gold2); }
-.empty { color:var(--muted); text-align:center; padding:30px 0; }
-.older { color:var(--muted); text-align:center; font-size:12px; padding:2px 0 8px; opacity:.7; }
-.foot { padding:10px 0 18px; position:sticky; bottom:0; background:linear-gradient(transparent, var(--bg) 24px); }
-.send { display:flex; gap:8px; }
-.send textarea { flex:1; resize:none; font:16px/1.4 Spectral,serif; color:var(--text); background:var(--panel2); border:1px solid #5a4a2e; border-radius:5px; padding:10px 12px; }
-.send button { font:700 14px Cinzel,serif; letter-spacing:.04em; color:#1a1206; background:linear-gradient(var(--gold2),var(--gold)); border:1px solid #c79b44; border-radius:5px; padding:0 20px; cursor:pointer; }
-.send button:disabled { opacity:.5; cursor:default; }
-.signin { text-align:center; padding:14px; background:var(--panel); border:1px solid var(--line); border-radius:6px; }
-.signin p { margin:0 0 10px; color:var(--muted); }
-.steam { display:inline-flex; align-items:center; gap:9px; font:700 15px Cinzel,serif; letter-spacing:.04em; color:#dfe7ef;
-  background:linear-gradient(#2a4155,#1b2b38); border:1px solid #3d5266; border-radius:5px; padding:11px 22px; cursor:pointer; }
-.steam:hover { border-color:#5b7a93; filter:brightness(1.08); }
-.steam svg { width:18px; height:18px; fill:currentColor; }
-.toast { position:fixed; left:50%; bottom:84px; transform:translateX(-50%); background:#2a1813; border:1px solid var(--red);
-  color:#f3d9b7; padding:10px 16px; border-radius:6px; max-width:90%; text-align:center; opacity:0; transition:opacity .2s; pointer-events:none; z-index:10; }
-.toast.on { opacity:1; }
-.toast.ok { border-color:var(--green); }
-/* Reply (13.11.2026, as in the launcher 1.6.3, variant A): the arrow after the name and the time, seen on hover of a message; the
-   quote of the original over a reply's text; "Ответ <name>: ..." over the input */
-.m .h { display:flex; align-items:center; flex-wrap:wrap; }
-.m .h b { margin-right:4px; }
-.m .rpl { display:inline-grid; place-items:center; height:20px; padding:0 4px; margin-left:6px; border:0; background:none; color:var(--muted);
-  cursor:pointer; opacity:0; transition:opacity .12s, color .12s, filter .12s; }
-.m .rpl svg, .rbar svg { width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
-.m:hover .rpl, .m .rpl:focus-visible { opacity:1; }
-.m .rpl:hover, .m .rpl:focus-visible { color:var(--gold2); filter:drop-shadow(0 0 4px rgba(217,178,95,.7)); outline:none; }
-@media (hover:none) { .m .rpl { opacity:.6; } }
-.m .rq { display:flex; flex-direction:column; gap:1px; max-width:100%; margin:3px 0 2px; padding:2px 8px; border-left:2px solid var(--gold);
-  background:rgba(217,178,95,.07); cursor:pointer; font-size:13px; line-height:1.35; }
-.m .rq b { color:var(--gold2); font-weight:600; }
-.m .rq i { font-style:normal; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.m .rq:hover, .m .rq:focus-visible { background:rgba(217,178,95,.14); outline:none; }
-.m .rq.del { cursor:default; border-left-color:var(--line); }
-.m .rq.del i { font-style:italic; }
-.m.tome { box-shadow:inset 2px 0 0 var(--gold); background:rgba(217,178,95,.05); padding-left:8px; }
-.m.flash { animation:chflash 1.4s ease; }
-@keyframes chflash { 0%,40% { background:rgba(217,178,95,.22); } 100% { background:transparent; } }
-@media (prefers-reduced-motion:reduce) { .m.flash { animation:none; } }
-.rbar { display:flex; align-items:center; gap:8px; padding:5px 10px; border:1px solid #5a4a2e; border-bottom:0; border-radius:5px 5px 0 0;
-  background:var(--panel2); font-size:14px; }
-.rbar svg { flex:none; stroke:var(--gold); width:15px; height:15px; }
-.rbar .rb-t { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--muted); }
-.rbar .rb-t b { color:var(--gold2); font-weight:600; }
-.rbar button { border:0; background:none; color:var(--muted); font-size:18px; line-height:1; cursor:pointer; padding:0 2px; }
-.rbar button:hover { color:var(--text); }
-</style>
-<script defer src="/elite/ui/ladder-hdr.js?v=20261118c"></script>
-<script defer src="/elite/ui/mirrors.js?v=20261118c"></script>
+     the phone's drawer (ladder-hdr.css + ladder-hdr.js, everything under .hdr). 18.11.2026 (SirItos: "the chat must not stand out"):
+     the chat itself in the site's look too (ladder-chat.css: the steel frame, the plates, the slate and teal; ids and classes as before) -->
+<link rel="stylesheet" href="/elite/ui/ladder-hdr.css?v=20261118e">
+<link rel="stylesheet" href="/elite/ui/ladder-chat.css?v=20261118e">
+<script defer src="/elite/ui/ladder-hdr.js?v=20261118e"></script>
+<script defer src="/elite/ui/mirrors.js?v=20261118e"></script>
 </head>
 <body>
 <header class="hdr">
