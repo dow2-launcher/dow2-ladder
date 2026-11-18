@@ -8,6 +8,8 @@ Input: the per-second dumps of the headless replay runner (fastbench on prod_gpu
                               second + how the match ended (win: reason, conceded; hq: an HQ killed) - from 15.11.2026 on
 and the replay itself (names, teams, races, heroes, chat, the map size from DATASDSC).
 Output: <STORE>/<rid>/sim.json.gz - what the page plays back: positions, economy, points held, deaths, fights, heat maps, chat.
+Game versions (18.11.2026): Elite 3.2 / 3.2.1 and vanilla Retribution 3.19 (vhash 161d19dd: the runner plays it without the mod; vanilla's
+wincondition.scar keeps the score in the same WinCondition_VPData, its blueprints / heroes / maps resolve through the same assets).
 
 The minimap of the game covers the whole terrain: width x height from DATASDSC, centred at 0, +z up.
 Engine player ids (1000..) are NOT the lobby slot order: matched by the hero squad (race + hero choice), then by team.

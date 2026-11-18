@@ -516,7 +516,7 @@ def analyse(rid):
 # puts <rid>.csv.gz / .players.csv.gz / .points.csv.gz into ROOT/sim and writes <rid>.done (or <rid>.fail with the reason);
 # here a thread turns .done into data/<rid>/sim.json.gz (sim_view.py). No emulator on this server.
 SIMQ = ROOT + '/simq'; SIMDIR = ROOT + '/sim'
-SIM_VERSIONS = {'819567f8', 'd6805b7d'}     # Elite 3.2.1, 3.2: the runner has their game data
+SIM_VERSIONS = {'819567f8', 'd6805b7d', '161d19dd'}     # Elite 3.2.1, 3.2, vanilla Retribution (18.11): the runner has their game data
 SIM_MAXQ = 40
 def sim_state(rid):
     if os.path.exists(f'{STORE}/{rid}/sim.json.gz'): return 'ready', None
