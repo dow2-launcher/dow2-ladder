@@ -526,6 +526,7 @@ def _common_maps(grp):  # пересечение желаемых карт гр�
 def _group_ok(grp):  # ограничения: карты пересекаются, разброс рейтинга в пределах max_diff каждого
     spread = grp[-1]['rating'] - grp[0]['rating']
     if any(p.get('max_diff') and spread > p['max_diff'] for p in grp): return False
+    if _season_pool(grp[0].get('game'), grp[0].get('mode')): return True   # 18.11.2026 (SirItos): a season pool (Elite) - map wishes do not count
     c = _common_maps(grp)
     return c is None or bool(c)
 
@@ -558,10 +559,13 @@ def _try_match(mode):  # под MM_LOCK: нестрогий подбор с пр
         win = _own_window(waiting)                              # 17.11.2026 preseason: a rating window widening with the wait
         if win: fits = (lambda f0: lambda g: f0(g) and win(g))(fits)
         grp = None
+        # 18.11.2026 (SirItos): Elite with a season pool (own_season.json "maps", _season_pool) - the players' map wishes neither
+        # steer the grouping nor the pick: the map is one of the pool at random (a native match: _nm_pick_map, the same pool)
+        spool = _season_pool(waiting[0].get('game'), mode)
         for anchor in waiting:
-            amaps = set(anchor.get('maps') or [])
+            amaps = set() if spool else set(anchor.get('maps') or [])
             def score(q):
-                qm = set(q.get('maps') or [])
+                qm = set() if spool else set(q.get('maps') or [])
                 no_common = 1 if (amaps and qm and not (amaps & qm)) else 0
                 diff = abs(q['rating'] - anchor['rating'])
                 over = 1 if any(x.get('max_diff') and diff > x['max_diff'] for x in (anchor, q)) else 0
@@ -579,8 +583,9 @@ def _try_match(mode):  # под MM_LOCK: нестрогий подбор с пр
             if len(g) == need: grp = g; break
         if not grp: break
         grp.sort(key=lambda p: p['rating'])
-        cm = _common_maps(grp)
-        if cm: pool = sorted(cm)
+        cm = None if spool else _common_maps(grp)
+        if spool: pool = list(spool)
+        elif cm: pool = sorted(cm)
         elif amaps: pool = sorted(amaps)
         else: pool = sorted(set().union(*[set(p.get('maps') or []) for p in grp]))
         mmap = random.choice(pool) if pool else None
@@ -1602,10 +1607,30 @@ def _catalog():
         except Exception: pass
     return CATALOG
 
+def _season_pool(game, mode):
+    """18.11.2026 (SirItos): the season's map pool of the Elite automatch - own_season.json "maps" {"1v1": [keys], ...}, the keys the
+    catalog knows with the mode's size, in the file's order. None = the old rules (vanilla, no season file, no "maps" for this mode)"""
+    if game == 'vanilla': return None
+    n = 2 * TEAM_N.get(mode, 1); cat = _catalog()
+    keys = [k for k in (((own_matches.season_cfg() or {}).get('maps') or {}).get(mode) or []) if (cat.get(k) or {}).get('maxplayers') == n]
+    return keys or None
+
+def _season_maps_view():
+    """/ladder/api/own/season "maps" (18.11.2026, the site's "Season maps"): {mode: [{key, name, minimap}]} - exactly the pool the
+    Elite automatch gets (_nm_maps); {} = no season pool. minimap: the catalog's path under /elite/assets/ (the site shows maps_s/ thumbs)"""
+    cat = _catalog(); out = {}
+    for mode in MODES:
+        keys = _season_pool('elite', mode)
+        if keys: out[mode] = [{'key': k, 'name': cat[k].get('name') or k, 'minimap': cat[k].get('minimap') or ''} for k in keys]
+    return out
+
 def _nm_maps(game, mode, wishes=None):
     """map keys for a native match of this game and mode: data/nm_maps.json {"elite": {"1v1": [keys]}, "vanilla": {...}} when there is
     one, else every map of the mode's size (vanilla: the vanilla maps only). Wishes (MMFind's Map Preferences, the names as the game
-    lists them, or keys) narrow it; wishes that leave nothing are ignored"""
+    lists them, or keys) narrow it; wishes that leave nothing are ignored.
+    18.11.2026 (SirItos): Elite with a season pool (own_season.json "maps") - exactly that pool, wishes ignored"""
+    sp = _season_pool(game, mode)
+    if sp: return sp
     n = 2 * TEAM_N.get(mode, 1); kind = 'vanilla' if game == 'vanilla' else 'elite'; cat = _catalog()
     try:
         with open(ROOT + '/data/nm_maps.json', encoding='utf-8') as f: pool = list(json.load(f).get(kind, {}).get(mode) or [])
@@ -1628,7 +1653,9 @@ def _map_keys(names):
 
 def _nm_wishes(game, mode, h):
     """a player's maps for the matcher (h: his MMFind's mm/native body): the mode's maps without his bans (MMFind 0.49 "bans"), or
-    older MMFind's wishes (the maps he left checked); [] = any map"""
+    older MMFind's wishes (the maps he left checked); [] = any map.
+    18.11.2026 (SirItos): a season pool (Elite) ignores bans and wishes - any of its maps, the server picks at random"""
+    if _season_pool(game, mode): return []
     if isinstance(h.get('bans'), list):
         bans = _map_keys([_clean(x, 64) for x in h['bans'][:50] if _clean(x, 64)])
         full = _nm_maps(game, mode); left = [k for k in full if k not in bans]
@@ -2208,7 +2235,8 @@ class H(BaseHTTPRequestHandler):
                 season = (qs.get('season', [''])[0] or own_matches.default_season() or current_season())[:9]   # the preseason's label if any
                 return self.send(200, own_matches.site_board(mode, season), cache=60)
             if u.path == '/ladder/api/own/season':                # 17.11.2026: preseason or not (own_season.json) - the tab's texts
-                return self.send(200, own_matches.site_season(), cache=60)
+                # 18.11.2026 (SirItos): + "maps" {mode: [{key, name, minimap}]} - the season's automatch pool, the site's "Season maps"
+                return self.send(200, dict(own_matches.site_season(), maps=_season_maps_view()), cache=60)
             if u.path == '/ladder/api/own/all':                   # 17.11.2026, launcher 1.6.20: every player's Elite rating, all modes
                 cfg = own_matches.season_cfg() or {}; season = cfg.get('label') or current_season()
                 return self.send(200, dict(own_matches.site_all(season), preseason=bool(cfg), info=cfg.get('info')), cache=60)

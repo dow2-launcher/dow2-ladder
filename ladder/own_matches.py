@@ -312,7 +312,7 @@ def migrate(c):
 
 
 def season_cfg(data_dir=None, log=print):
-    """<data>/own_season.json -> {'label', 'start'} or None (no file = no preseason: every match, the quarter season as before).
+    """<data>/own_season.json -> {'label', 'start'[, 'info', 'maps']} or None (no file = no preseason: every match, the quarter season as before).
     A broken file is logged and treated as no file."""
     fn = os.path.join(data_dir or DATA_DIR, SEASON_FILE)
     try:
@@ -326,6 +326,15 @@ def season_cfg(data_dir=None, log=print):
     info = d.get('info')                         # 17.11.2026, launcher 1.6.20: the page about the (pre)season, its (i) in the profile
     if isinstance(info, str) and re.fullmatch(r'https://[^\s"<>]{1,300}', info): out['info'] = info
     elif info is not None: log('own_matches: %s: "info" must be an https:// address, got %r' % (fn, info))
+    # 18.11.2026 (SirItos): the season's map pool of the Elite automatch, "maps": {"1v1": [keys], "2v2": [...], "3v3": [...]} - while
+    # a mode has one, the server picks one of exactly these at random (no player bans); the site's "Season maps" shows them. The keys
+    # are checked against the map catalog by ladder.py (_season_pool); a missing "maps" or mode = the old rules
+    maps = d.get('maps')
+    if isinstance(maps, dict):
+        pool = {m: list(dict.fromkeys(k for k in v if isinstance(k, str) and re.fullmatch(r'[\w.-]{1,64}', k)))[:20]
+                for m, v in maps.items() if m in MODES_ALL and isinstance(v, list)}
+        if any(pool.values()): out['maps'] = {m: v for m, v in pool.items() if v}
+    elif maps is not None: log('own_matches: %s: "maps" must be {"1v1": [map keys], ...}, got %r' % (fn, maps))
     return out
 
 
