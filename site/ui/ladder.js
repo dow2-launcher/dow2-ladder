@@ -41,6 +41,7 @@ function applyLang() {
   $('#howText').innerHTML = T('how')(PRE);
   setTitle(); render(); renderPlayer();
   if (histInit) { hFillSelects(hMaps); if (hItems.length) hPaint(); }
+  if (!$('#smaps').hidden) renderMaps();
   if (liveInit) { loadLive(); loadRooms(); }
 }
 function setTitle() {
@@ -117,7 +118,8 @@ function initTable() {
 }
 function syncModes() { document.querySelectorAll('#modes button').forEach(b => b.classList.toggle('on', b.dataset.m === MODE)); }
 $('#modes').addEventListener('click', e => { const b = e.target.closest('button'); if (!b || b.dataset.m === MODE) return; MODE = b.dataset.m;
-  history.replaceState(null, '', tableUrl(MODE) + (location.hash === '#how' ? '#how' : '')); syncModes(); DATA = null; loadTable();
+  history.replaceState(null, '', tableUrl(MODE) + (/^#(how|maps)$/.test(location.hash) ? location.hash : '')); syncModes(); DATA = null; loadTable();
+  if (!$('#smaps').hidden) renderMaps();                 // 18.11.2026: the season's maps light the mode picked
   document.querySelectorAll('#tabs .tab').forEach(a => { a.href = viewUrl(a.dataset.v); }); });
 
 // ---------- the player page ----------

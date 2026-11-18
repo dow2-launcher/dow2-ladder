@@ -129,10 +129,14 @@ const UI = {
     calHead: 'Калибровка', seasonL: s => `сезон ${s}`, foot: 'Dawn of War II: Retribution · рейтинг Elite по матчам нашего автоматча',
     tableNote: 'Нажмите на игрока — его страница: рейтинг в каждом режиме и матчи с изменением за каждый.',
     hTitle: 'История матчей — Elite Ladder', lTitle: 'Сейчас — Elite Ladder',
-    prevSeason: s => `Предыдущий сезон (тест ${s})`, prevNote: 'до предсезона, по правилам теста; в рейтинг предсезона не идёт' },
+    prevSeason: s => `Предыдущий сезон (тест ${s})`, prevNote: 'до предсезона, по правилам теста; в рейтинг предсезона не идёт',
+    menuT: 'Меню', smapsLink: 'Карты сезона',
+    smapsNote: 'Автоматч Elite в этом сезоне идёт только на этих картах: сервер выбирает одну из них случайно, баны карт в игре пока не действуют.' },
   en: { tabTable: 'Rating', tabHistory: 'Matches', tabLive: 'Live', chatLink: 'Chat', dlLauncher: 'Download launcher', back: '← Back to the table',
     gamesCol: 'Games', wlCol: 'W–L', wlHint2: 'Wins – losses (leaving before the end is a loss too)', calT: (k, n) => `calibration: ${k} of ${n} played`, leavesT: n => `leaves among them: ${n}`, hoursHint: 'Hours in Retribution (Steam); shown when the Steam profile is public', hoursLine: h => `${fmtN(h)} h in Retribution`,
     calHead: 'Calibration', seasonL: s => `season ${s}`, foot: 'Dawn of War II: Retribution · the Elite rating of our automatch',
     tableNote: 'Click a player for his page: his rating in every mode and his matches with the change of each.',
     hTitle: 'Match history — Elite Ladder', lTitle: 'Live — Elite Ladder',
-    prevSeason: s => `Previous season (test ${s})`, prevNote: 'before the preseason, by the test\'s rules; not in the preseason rating' } };
+    prevSeason: s => `Previous season (test ${s})`, prevNote: 'before the preseason, by the test\'s rules; not in the preseason rating',
+    menuT: 'Menu', smapsLink: 'Season maps',
+    smapsNote: 'This season the Elite automatch is played on these maps only: the server picks one of them at random; map bans in the game do not apply for now.' } };

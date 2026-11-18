@@ -168,6 +168,41 @@ function initLive() {
   setInterval(() => { if (VIEW === 'live' && !document.hidden) loadRooms(); }, 15000);
 }
 
+// ---------- 18.11.2026 (SirItos): "Season maps" (#maps) - the Elite automatch's pool per mode, /ladder/api/own/season "maps" (the same
+// own_season.json the matcher reads, so the page always shows what the automatch plays); the button only while there is a pool ----------
+let SMAPS = null;
+function renderMaps() {
+  if (!SMAPS) return;
+  const tile = x => { const src = /^maps\/[\w.-]+\.png$/.test(x.minimap || '') ? A + thumb(x.minimap) : '';
+    return `<figure class="smt card">${src ? `<img src="${esc(src)}" alt="" loading="lazy" width="168" height="168">` : '<i></i>'}<figcaption>${esc(String(x.name || x.key).replace(/^\(\d+p\)\s*/, ''))}</figcaption></figure>`; };
+  $('#smaps').innerHTML = `<p class="smn">${esc(T('smapsNote'))}</p><div class="smg">` + MODES.filter(m => SMAPS[m]).map(m =>
+    `<div class="smm${m === MODE ? ' on' : ''}"><div class="smh">${m.replace('v', ' vs ')}</div><div class="smr">${SMAPS[m].map(tile).join('')}</div></div>`).join('') + '</div>';
+}
+function showMaps(on) {
+  const l = $('#smapsL'); $('#smaps').hidden = !on; l.classList.toggle('on', on); l.setAttribute('aria-expanded', on); if (on) renderMaps();
+  const want = on ? '#maps' : '';
+  if (location.hash !== want && (want || location.hash === '#maps')) history.replaceState(null, '', location.pathname + location.search + want);
+}
+function openMaps() { if (location.hash === '#maps' && SMAPS && VIEW === 'table') { showMaps(true); setTimeout(() => $('#smaps').scrollIntoView({ block: 'nearest' }), 0); } }
+$('#smapsL').addEventListener('click', e => { e.preventDefault(); showMaps($('#smaps').hidden); });
+window.addEventListener('hashchange', openMaps);
+fetch('/ladder/api/own/season').then(r => r.json()).then(d => {
+  SMAPS = d && d.maps && MODES.some(m => (d.maps[m] || []).length) ? d.maps : null; $('#smapsL').hidden = !SMAPS;
+  if (!SMAPS) $('#smaps').hidden = true; openMaps(); }).catch(() => {});
+
+// ---------- 18.11.2026 (SirItos): the phone's menu - a drawer from the left behind ☰ (CSS: ladder.css, <= 860 px); closes on a tap
+// outside (the scrim), on an item, on Esc, and when the window grows to a desktop's ----------
+const HDR = $('.hdr'), BURGER = $('#burger');
+function menu(open) {
+  HDR.classList.toggle('open', open); BURGER.setAttribute('aria-expanded', open); document.body.classList.toggle('menu-open', open);
+  if (open) { const a = $('#menu .tab.on') || $('#menu a'); if (a) a.focus({ preventScroll: true }); }
+}
+BURGER.addEventListener('click', () => menu(!HDR.classList.contains('open')));
+$('#scrim').addEventListener('click', () => menu(false));
+$('#menu').addEventListener('click', e => { if (e.target.closest('a')) menu(false); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && HDR.classList.contains('open')) { menu(false); BURGER.focus(); } });
+matchMedia('(min-width: 861px)').addEventListener('change', e => { if (e.matches) menu(false); });
+
 // ---------- the language, the start ----------
 $('#lang').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; LANG = b.dataset.l;
   if (QS.get('lang')) { QS.set('lang', LANG); history.replaceState(null, '', location.pathname + '?' + QS + location.hash); }
