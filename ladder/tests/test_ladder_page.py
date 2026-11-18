@@ -71,7 +71,7 @@ miss = [m['minimap'] for m in idx['maps'].values() if _re.fullmatch(r'maps/[\w.-
         and not os.path.exists(REPO + '/site/assets/maps_s/' + m['minimap'][5:-4] + '.webp')]
 check('every minimap has its webp thumb (assets/maps_s/, <= 12 KB)', (miss, max(os.path.getsize(REPO + '/site/assets/maps_s/' + f)
       for f in os.listdir(REPO + '/site/assets/maps_s')) <= 12000), ([], True))
-# 18.11.2026 (SirItos): the season maps' cards fill the section - a 256 px webp per minimap (assets/maps_m/), each answer under 30 KB
+# 18.11.2026 (SirItos): the season maps' cards fill the section - a 232 px webp per minimap (assets/maps_m/, q70), each answer under 30 KB
 miss = [m['minimap'] for m in idx['maps'].values() if _re.fullmatch(r'maps/[\w.-]+\.png', m.get('minimap') or '')
         and not os.path.exists(REPO + '/site/assets/maps_m/' + m['minimap'][5:-4] + '.webp')]
 check('every minimap has its 256 px webp (assets/maps_m/, < 30 KB)', (miss, max(os.path.getsize(REPO + '/site/assets/maps_m/' + f)

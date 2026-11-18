@@ -171,11 +171,14 @@ function initLive() {
 // ---------- 18.11.2026 (SirItos): "Season maps" (#maps) - the Elite automatch's pool per mode, /ladder/api/own/season "maps" (the same
 // own_season.json the matcher reads, so the page always shows what the automatch plays); the block only while there is a pool ----------
 let SMAPS = null;
+// 18.11.2026: the cards fill the section - a 232 px webp (maps_m/, <= 18 KB; ?v= - nginx caches maps_m a day); the 168 px thumb if one is missing
+const SM_V = '20261118m', smSrc = x => /^maps\/[\w.-]+\.png$/.test(x.minimap || '') ? A + x.minimap.replace(/^maps\/(.+)\.png$/, 'maps_m/$1.webp') + '?v=' + SM_V : '';
 function renderMaps() {
   if (!SMAPS) return;
-  // 18.11.2026: the cards fill the section - the 256 px webp (maps_m/, <= 25 KB); the 168 px thumb if one is missing
-  const tile = x => { const ok = /^maps\/[\w.-]+\.png$/.test(x.minimap || ''), src = ok ? A + x.minimap.replace(/^maps\/(.+)\.png$/, 'maps_m/$1.webp') : '';
-    return `<figure class="smt card">${src ? `<img src="${esc(src)}" alt="" loading="lazy" width="256" height="256" onerror="this.onerror=null;this.src='${esc(A + thumb(x.minimap))}'">` : '<i></i>'}<figcaption>${esc(String(x.name || x.key).replace(/^\(\d+p\)\s*/, ''))}</figcaption></figure>`; };
+  // 18.11.2026 (SirItos: "the maps load slowly"): the card keeps its square from the start - a shimmer (.smi, CSS) until the picture is
+  // in, then it fades in; on an error the old thumb
+  const tile = x => { const src = smSrc(x);
+    return `<figure class="smt card"><span class="smi">${src ? `<img src="${esc(src)}" alt="" decoding="async" width="232" height="232" onload="this.parentNode.classList.add('ok')" onerror="this.onerror=null;this.src='${esc(A + thumb(x.minimap))}'">` : ''}</span><figcaption>${esc(String(x.name || x.key).replace(/^\(\d+p\)\s*/, ''))}</figcaption></figure>`; };
   // 18.11.2026 (SirItos): only the mode picked in the 1 vs 1 / 2 vs 2 / 3 vs 3 switch (its click re-renders), no headings
   const ms = SMAPS[MODE] || [];
   $('#smapsMode').textContent = '· ' + MODE.replace('v', ' vs ');
@@ -190,7 +193,11 @@ fetch('/ladder/api/own/season').then(r => r.json()).then(d => {
   SMAPS = d && d.maps && MODES.some(m => (d.maps[m] || []).length) ? d.maps : null;
   if (!SMAPS) { $('#smaps').hidden = true; return; }
   let open = false; try { open = localStorage.getItem('ladderSmapsOpen') === '1'; } catch (e) {}
-  $('#smaps').open = open; renderMaps(); $('#smaps').hidden = false; openMaps(); }).catch(() => {});
+  $('#smaps').open = open; renderMaps(); $('#smaps').hidden = false; openMaps();
+  // 18.11.2026 (SirItos): every mode's pictures quietly into the cache once the page is up - opening the section or switching the
+  // mode is then instant (the same URLs as the cards)
+  setTimeout(() => { window.SM_PRE = MODES.flatMap(m => SMAPS[m] || []).map(smSrc).filter(Boolean).map(u => { const im = new Image(); im.decoding = 'async'; im.src = u; return im; }); }, 300);
+}).catch(() => {});
 
 // ---------- the language, the start ----------
 $('#lang').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; LANG = b.dataset.l;
