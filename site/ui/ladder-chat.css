@@ -136,3 +136,8 @@ h1 { margin: 0; font: 700 26px/1.2 var(--fh); color: #d8f6ea; text-shadow: 0 2px
   .m .t { font-size: 15px; }
   .send button { padding: 0 14px; }
 }
+
+/* 18.11.2026 (SirItos): the page scrolls as before (the inner-scroll box, PR #46, was too small on a phone), only the site's top bar
+   stays in view - sticky, opaque enough to read over the messages; jumps to a quote stop below it */
+html { scroll-padding-top: 72px; }
+body > header.hdr { position: sticky; top: 0; z-index: 50; background: linear-gradient(rgba(4, 9, 10, .97), rgba(4, 9, 10, .93)); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
