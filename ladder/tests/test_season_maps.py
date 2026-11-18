@@ -36,6 +36,16 @@ def match_map(hints, mode='1v1', game='elite'):
     m = next(iter(L.MM_MATCHES.values()), None)
     return m and m['map']
 
+def nn_map(wishes, mode='1v1', game='elite'):
+    """a non-native match (the launcher's search, mm_join) of these players (steam -> his map wishes), the map it gets"""
+    L.MM.clear(); L.MM_MATCHES.clear(); L.NM_HINTS.clear()
+    for s, w in wishes.items(): L.mm_join(s, mode, {'game': game, 'maps': w, 'name': 'P' + s[-1]})
+    m = next(iter(L.MM_MATCHES.values()), None)
+    return m and m['map']
+def nn_seen(wishes, n, **k): return {nn_map(wishes, **k) for i in range(n)}
+def grp(game, mode, *wishes): return [{'rating': 1500, 'game': game, 'mode': mode, 'maps': w} for w in wishes]
+X, Y, Z = '2p_bay_of_grots', '2p_vulcan_pits', '2p_fen_dunloch'
+
 print('== the keys agreed with SirItos are in the catalog, of the mode\'s size')
 for mode, keys in SEASON.items():
     check('%s: %s' % (mode, ', '.join(keys)), [CAT.get(k, {}).get('maxplayers') for k in keys], [2 * L.TEAM_N[mode]] * 4)
@@ -55,6 +65,8 @@ check('season_cfg has no maps', 'maps' in L.own_matches.season_cfg(), False)
 check('elite 1v1 = nm_maps.json', L._nm_maps('elite', '1v1'), OLD1)
 check('elite 3v3 = the catalog\'s 6p maps', L._nm_maps('elite', '3v3'), OLD3)
 check('bans narrow the wishes', L._nm_wishes('elite', '1v1', {'bans': [NAME('2p_vulcan_pits')]}), [k for k in OLD1 if k != '2p_vulcan_pits'])
+check('non-native Elite: the common wish', nn_seen({A: [X, Y], B: [Y, Z]}, 30), {Y})
+check('_group_ok: Elite wishes that do not meet -> no', L._group_ok(grp('elite', '1v1', [X], [Y])), False)
 
 print('== the season pool (Elite)')
 season(dict(BASE, maps=SEASON))
@@ -79,6 +91,19 @@ check('3v3: only the season pool', sorted(seen), sorted(SEASON['3v3']))
 seen = set()
 for i in range(60): seen.add(match_map({A: {}, B: {}}, game='vanilla'))
 check('vanilla 1v1 match: not the season pool', seen <= set(L._nm_maps('vanilla', '1v1')) and not seen <= set(SEASON['1v1']), True)
+
+print('== the season pool: the non-native path (mm_join / _try_match / _group_ok)')
+seen = nn_seen({A: [X], B: [Y]}, 120)
+check('1v1 Elite, wishes that do not meet: matched, every season map, nothing else', sorted(seen), sorted(SEASON['1v1']))
+seen = nn_seen({A: [X, Y], B: [Y, Z]}, 60, game='elite-3.2.1')
+check('1v1 "elite-3.2.1", a common wish: still the season pool only', sorted(seen), sorted(SEASON['1v1']))
+seen = nn_seen({A: ['4p_settlement'], B: [], C: ['4p_ancestors_rest'], D: ['4p_vulcan_x']}, 80, mode='2v2')
+check('2v2 Elite: the season pool only', sorted(seen), sorted(SEASON['2v2']))
+check('_group_ok: Elite wishes that do not meet -> yes (wishes do not count)', L._group_ok(grp('elite', '1v1', [X], [Y])), True)
+check('_group_ok: max_diff still counts', L._group_ok([dict(grp('elite', '1v1', [X])[0], rating=1000, max_diff=100), grp('elite', '1v1', [Y])[0]]), False)
+check('_group_ok: vanilla wishes that do not meet -> no (unchanged)', L._group_ok(grp('vanilla', '1v1', [X], [Y])), False)
+check('vanilla non-native: the common wish (unchanged)', nn_seen({A: [X, Y], B: [Y, Z]}, 30, game='vanilla'), {Y})
+check('vanilla non-native, no common wish: the anchor\'s (unchanged)', nn_seen({A: [X], B: [Y]}, 30, game='vanilla'), {X})
 
 print('== the API (/ladder/api/own/season)')
 v = L._season_maps_view()

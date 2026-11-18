@@ -526,6 +526,7 @@ def _common_maps(grp):  # пересечение желаемых карт гр�
 def _group_ok(grp):  # ограничения: карты пересекаются, разброс рейтинга в пределах max_diff каждого
     spread = grp[-1]['rating'] - grp[0]['rating']
     if any(p.get('max_diff') and spread > p['max_diff'] for p in grp): return False
+    if _season_pool(grp[0].get('game'), grp[0].get('mode')): return True   # 18.11.2026 (SirItos): a season pool (Elite) - map wishes do not count
     c = _common_maps(grp)
     return c is None or bool(c)
 
@@ -558,10 +559,13 @@ def _try_match(mode):  # под MM_LOCK: нестрогий подбор с пр
         win = _own_window(waiting)                              # 17.11.2026 preseason: a rating window widening with the wait
         if win: fits = (lambda f0: lambda g: f0(g) and win(g))(fits)
         grp = None
+        # 18.11.2026 (SirItos): Elite with a season pool (own_season.json "maps", _season_pool) - the players' map wishes neither
+        # steer the grouping nor the pick: the map is one of the pool at random (a native match: _nm_pick_map, the same pool)
+        spool = _season_pool(waiting[0].get('game'), mode)
         for anchor in waiting:
-            amaps = set(anchor.get('maps') or [])
+            amaps = set() if spool else set(anchor.get('maps') or [])
             def score(q):
-                qm = set(q.get('maps') or [])
+                qm = set() if spool else set(q.get('maps') or [])
                 no_common = 1 if (amaps and qm and not (amaps & qm)) else 0
                 diff = abs(q['rating'] - anchor['rating'])
                 over = 1 if any(x.get('max_diff') and diff > x['max_diff'] for x in (anchor, q)) else 0
@@ -579,8 +583,9 @@ def _try_match(mode):  # под MM_LOCK: нестрогий подбор с пр
             if len(g) == need: grp = g; break
         if not grp: break
         grp.sort(key=lambda p: p['rating'])
-        cm = _common_maps(grp)
-        if cm: pool = sorted(cm)
+        cm = None if spool else _common_maps(grp)
+        if spool: pool = list(spool)
+        elif cm: pool = sorted(cm)
         elif amaps: pool = sorted(amaps)
         else: pool = sorted(set().union(*[set(p.get('maps') or []) for p in grp]))
         mmap = random.choice(pool) if pool else None
