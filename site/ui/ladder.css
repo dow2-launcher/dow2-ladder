@@ -1,12 +1,5 @@
 /* /ladder/ (ladder/ladder.html): pure CSS frames, no picture needed (17.11.2026, SirItos; why: the comment in ladder.html) */
-@font-face { font-family: 'Roboto Condensed'; font-weight: 400 500; font-display: swap; size-adjust: 107%;
-  src: local('Roboto Condensed'), local('RobotoCondensed-Regular'), url(/elite/fonts/rc400.woff2) format('woff2'); }
-@font-face { font-family: 'Roboto Condensed'; font-weight: 600 700; font-display: swap; size-adjust: 107%;
-  src: local('Roboto Condensed Bold'), local('RobotoCondensed-Bold'), url(/elite/fonts/rc700.woff2) format('woff2'); }
-@font-face { font-family: 'D Head'; font-weight: 600 700; font-display: swap; size-adjust: 93%;
-  src: local('Spectral SemiBold'), local('Spectral-SemiBold'), url(/elite/fonts/sp600.woff2) format('woff2'); }
-@font-face { font-family: Cinzel; font-weight: 700; font-display: swap; unicode-range: U+0020-007A;
-  src: local('Cinzel Bold'), local('Cinzel-Bold'), url(/elite/fonts/cinzel-logo.woff2) format('woff2'); }
+/* the fonts, the header and the plain buttons: ladder-hdr.css (18.11.2026, shared with the chat page; loaded before this file) */
 :root {
   --tex-bg: url(/elite/ui/bg.webp); --tex-panel: url(/elite/ui/panel-fill.jpg); --tex-card: url(/elite/ui/card-fill.jpg);
   /* the steel of the frames, the teal-steel plate, a rivet, the band under a heading */
@@ -36,48 +29,10 @@ button, select, input { font: inherit; color: inherit; }
 [hidden] { display: none !important; }
 :focus-visible { outline: 1px solid var(--gd); outline-offset: 2px; }
 
-/* ---------- header: the game's logo arrangement, the tabs with a glow from below (the launcher's header) ---------- */
-.hdr { display: flex; align-items: center; gap: 16px; min-height: 58px; padding: 0 20px; border-bottom: 2px solid var(--ln);
-  background: linear-gradient(rgba(4, 9, 10, .9), rgba(4, 9, 10, .65)); box-shadow: 0 1px 0 #000, 0 0 14px rgba(69, 224, 192, .18); }
-.brand { display: flex; align-items: center; flex: none; text-shadow: none; }
-.brand:hover { text-shadow: none; }
-.dd-logo { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 46px; margin-top: 5px; padding: 0 4px; }
-.dd-ii { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font: 700 58px/.78 Cinzel, serif; letter-spacing: -6px; padding-right: 6px;
-  background: linear-gradient(#ea5a47 0%, #c22d22 30%, #8e1610 66%, #560906 100%); -webkit-background-clip: text; background-clip: text; color: transparent;
-  -webkit-text-stroke: 1px rgba(38, 3, 2, .95); filter: drop-shadow(0 0 5px rgba(196, 40, 28, .45)) drop-shadow(0 1px 0 #000); pointer-events: none; }
-.dd-w { position: relative; display: flex; align-items: center; gap: 6px; font: 700 18px/1 Cinzel, serif; letter-spacing: 1.6px; text-transform: uppercase; white-space: nowrap;
-  background: linear-gradient(#fff 0%, #e3f1ed 38%, #98b1aa 54%, #eef8f5 100%); -webkit-background-clip: text; background-clip: text; color: transparent;
-  filter: drop-shadow(0 1px 0 #000) drop-shadow(0 0 2px rgba(0, 0, 0, .95)); }
-.dd-w em { font-style: normal; font-size: 10px; letter-spacing: 1px; vertical-align: 3px; margin: 0 1px; }
-.dd-w::before, .dd-w::after { content: ""; width: 12px; height: 1px; background: linear-gradient(90deg, transparent, #cfdbd7); }
-.dd-w::after { transform: scaleX(-1); }
-.dd-sub { position: relative; margin-top: 5px; font: 700 10px/1 Cinzel, serif; letter-spacing: 4.6px; padding-left: 4.6px; text-transform: uppercase; color: #ddd5c4;
-  text-shadow: 0 1px 1px #000, 0 0 2px #000; }
-.tabs { display: flex; align-self: stretch; gap: 2px; }
-.tab { display: flex; align-items: center; padding: 0 14px; font: 700 19px var(--fh); color: #8fb0a8; text-shadow: 0 1px 2px #000; white-space: nowrap; }
-.tab:hover, .tab:focus-visible { color: #d6eee7; text-shadow: 0 1px 2px #000; }
-.tab.on { color: #eafff8; background: linear-gradient(transparent 35%, rgba(69, 224, 192, .2)); text-shadow: 0 0 12px rgba(69, 224, 192, .8), 0 1px 2px #000; }
-.hdr-r { margin-left: auto; display: flex; align-items: center; gap: 14px; }
-.hl { font: 600 14px var(--fb); white-space: nowrap; }
-.lang { display: inline-flex; border: 1px solid #2b6f64; background: #061011; }
-.lang button { border: 0; background: none; padding: 4px 9px; font: 600 12.5px var(--fb); color: var(--mu); cursor: pointer; }
-.lang button.on { color: #eafff8; background: #0f3d36; box-shadow: inset 0 0 6px rgba(69, 224, 192, .35); }
-/* 18.11.2026 (SirItos): the menu as a drawer on a phone (the media rules below); on a desktop #menu is no box - the header as before */
-.menu { display: contents; }
-.hdr > .lang { margin-left: -2px; }
-.burger, .scrim { display: none; }
 
-/* ---------- buttons: the game's plate for the main one, a metal frame for the ordinary (the launcher's .btn / .btn.gold) ---------- */
-.btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 32px; padding: 0 13px; border: 2px solid transparent; border-radius: 0;
-  background: linear-gradient(#1b2c2e, #0c1516) padding-box, linear-gradient(#5f7c78, #24393a 45%, #121c1d) border-box;
-  box-shadow: 0 0 0 1px #000, inset 0 1px 0 rgba(255, 255, 255, .07), inset 0 0 0 1px rgba(69, 224, 192, .12);
-  font: 700 15px/1 var(--fh); color: #dcefe9; text-shadow: 0 1px 2px #000; white-space: nowrap; cursor: pointer; transition: box-shadow .12s, color .12s, filter .12s; }
-.btn:hover, .btn:focus-visible { color: #fff; text-shadow: 0 1px 2px #000;
-  box-shadow: 0 0 0 1px #000, inset 0 0 0 1px rgba(69, 224, 192, .75), inset 0 0 10px rgba(69, 224, 192, .22), 0 0 7px rgba(69, 224, 192, .28); }
-.btn.gold, .seg button.on { border: 2px solid transparent; background: var(--plate); color: #fff; text-shadow: 0 1px 2px #000, 0 0 8px rgba(0, 0, 0, .6);
+/* ---------- the mode switch: the game's plate for the one on (the buttons .btn: ladder-hdr.css) ---------- */
+.seg button.on { border: 2px solid transparent; background: var(--plate); color: #fff; text-shadow: 0 1px 2px #000, 0 0 8px rgba(0, 0, 0, .6);
   box-shadow: var(--plate-sh); }
-.btn.gold:hover, .btn.gold:focus-visible { box-shadow: var(--plate-sh), 0 0 14px rgba(69, 224, 192, .45); filter: brightness(1.15); }
-.btn.small { height: 28px; padding: 0 10px; font-size: 14px; }
 .seg { display: inline-flex; gap: 6px; flex-wrap: wrap; }
 .seg button { height: 34px; padding: 0 16px; border: 2px solid transparent; border-radius: 0; cursor: pointer;
   background: linear-gradient(#1b2c2e, #0c1516) padding-box, linear-gradient(#5f7c78, #24393a 45%, #121c1d) border-box;
@@ -180,7 +135,14 @@ input::placeholder { color: var(--dim); }
 input[type=checkbox] { accent-color: var(--gd); }
 
 /* ---------- a player's page ---------- */
-.back { display: inline-block; margin: 0 0 10px; font: 600 15px var(--fh); }
+/* 18.11.2026 (SirItos: "the whole button clickable, not the text on hover"): "Назад к таблице" - a quiet outlined button, the whole box is
+   the link; neither the mode switch's plates nor the launcher's gold */
+.back { display: inline-flex; align-items: center; gap: 9px; height: 36px; padding: 0 16px 0 13px; margin: 0 0 12px; border: 1px solid rgba(69, 224, 192, .34);
+  background: rgba(6, 16, 17, .6); color: var(--sf); font: 600 15px/1 var(--fb); letter-spacing: .02em; white-space: nowrap; cursor: pointer;
+  transition: border-color .15s, color .15s, background .15s, box-shadow .15s; }
+.back::before { content: ""; flex: none; width: 7px; height: 7px; margin-top: 1px; border: solid currentColor; border-width: 0 0 2px 2px; transform: rotate(45deg); }
+.back:hover, .back:focus-visible { color: #fff; text-shadow: none; border-color: var(--gd); background: rgba(69, 224, 192, .1); box-shadow: 0 0 8px rgba(69, 224, 192, .22); }
+.back:active { background: rgba(69, 224, 192, .16); }
 .pp-h { display: flex; align-items: center; gap: 16px; min-width: 0; margin-bottom: 14px; }
 .av { width: 72px; height: 72px; flex: none; object-fit: cover; border: 2px solid var(--ln2); background: #061011; box-shadow: 0 0 0 1px #000, 0 0 12px rgba(69, 224, 192, .35);
   display: flex; align-items: center; justify-content: center; font: 700 30px var(--fh); color: var(--gd2); }
@@ -225,34 +187,8 @@ input[type=checkbox] { accent-color: var(--gd); }
 
 .foot { max-width: 1040px; margin: 0 auto; padding: 0 16px 28px; color: var(--dim); font-size: 13px; text-align: center; }
 
-@media (max-width: 860px) {
-  /* 18.11.2026 (SirItos): ☰ + the logo + RU/EN in the bar; the tabs, the links and the mirrors slide in from the left (transform only) */
-  .hdr { gap: 10px; min-height: 54px; padding: 0 12px 0 6px; }
-  .hdr > .lang { margin-left: auto; }
-  .burger { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 42px; height: 42px; padding: 0; border: 0; background: none; cursor: pointer; }
-  .burger i, .burger i::before, .burger i::after { display: block; width: 22px; height: 2px; background: var(--gd); box-shadow: 0 0 6px rgba(69, 224, 192, .55); transition: transform .2s, background .2s; }
-  .burger i { position: relative; }
-  .burger i::before, .burger i::after { content: ""; position: absolute; left: 0; }
-  .burger i::before { top: -7px; } .burger i::after { top: 7px; }
-  .burger:hover i, .burger:hover i::before, .burger:hover i::after { background: var(--gd2); }
-  .menu { position: fixed; z-index: 60; top: 0; bottom: 0; left: 0; width: min(300px, 84vw); display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain;
-    padding: 10px 0 18px; border-right: 2px solid var(--ln); background: linear-gradient(rgba(9, 19, 20, .97), rgba(5, 11, 12, .98)), var(--tex-panel) center / cover, #0b1516;
-    box-shadow: 0 0 0 1px #000, 0 0 18px rgba(69, 224, 192, .18), 12px 0 28px rgba(0, 0, 0, .6);
-    transform: translateX(-104%); visibility: hidden; transition: transform .22s ease, visibility 0s .22s; }
-  .hdr.open .menu { transform: none; visibility: visible; transition: transform .22s ease; }
-  .tabs { flex-direction: column; align-self: auto; gap: 0; padding-bottom: 10px; margin-bottom: 14px; background: var(--band); }
-  .tab { padding: 13px 22px; font-size: 21px; border-left: 3px solid transparent; }
-  .tab.on { border-left-color: var(--gd); background: linear-gradient(90deg, rgba(69, 224, 192, .2), transparent 80%); }
-  .hdr-r { margin: 0; flex-direction: column; align-items: flex-start; gap: 14px; padding: 0 22px; }
-  .hdr-r .hl { font-size: 17px; }
-  .scrim { display: block; position: fixed; z-index: 55; inset: 0; background: rgba(0, 0, 0, .6); opacity: 0; pointer-events: none; transition: opacity .22s; }
-  .hdr.open .scrim { opacity: 1; pointer-events: auto; }
-  body.menu-open { overflow: hidden; }
-}
-@media (max-width: 860px) and (prefers-reduced-motion: reduce) { .menu, .hdr.open .menu, .scrim { transition: none; } }
 @media (max-width: 620px) {
   .wrap { padding: 12px 8px 30px; }
-  .dd-w { font-size: 15px; } .dd-w::before, .dd-w::after { width: 7px; } .dd-ii { font-size: 50px; }
   .panel { padding: 6px 8px 10px; }
   .h { font-size: 20px; }
   .ph .seg { flex-basis: 100%; } .ph .seg button { flex: 1; }

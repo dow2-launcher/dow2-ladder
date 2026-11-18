@@ -24,25 +24,28 @@
      ladder-x.js history + live + the start; deferred, in this order, one global scope), four woff2 font subsets (< 20 KB each).
      The frames, plates, bands and rivets are pure CSS - the page looks right with no picture loaded; three small textures (< 12 KB)
      are only an extra. The minimaps are 168 px webp thumbs (/elite/assets/maps_s/). After changing a file bump ?v= below.
-     18.11.2026 (SirItos): "Season maps" (#maps) by the preseason's label - the Elite automatch's pool per mode (/ladder/api/own/season). -->
+     18.11.2026 (SirItos): "Season maps" (#maps, a block above the table) - the Elite automatch's pool per mode (/ladder/api/own/season). -->
 <link rel="stylesheet" href="/elite/ui/badges.css">
-<link rel="stylesheet" href="/elite/ui/ladder.css?v=20261118a">
-<link rel="stylesheet" href="/elite/ui/ladder-x.css?v=20261118a">
-<script defer src="/elite/ui/ladder-t.js?v=20261118a"></script>
-<script defer src="/elite/ui/ladder.js?v=20261118a"></script>
-<script defer src="/elite/ui/ladder-x.js?v=20261118a"></script>
-<script defer src="/elite/ui/mirrors.js"></script>
+<link rel="stylesheet" href="/elite/ui/ladder-hdr.css?v=20261118c">
+<link rel="stylesheet" href="/elite/ui/ladder.css?v=20261118c">
+<link rel="stylesheet" href="/elite/ui/ladder-x.css?v=20261118c">
+<script defer src="/elite/ui/ladder-t.js?v=20261118c"></script>
+<script defer src="/elite/ui/ladder.js?v=20261118c"></script>
+<script defer src="/elite/ui/ladder-x.js?v=20261118c"></script>
+<script defer src="/elite/ui/ladder-hdr.js?v=20261118c"></script>
+<script defer src="/elite/ui/mirrors.js?v=20261118c"></script>
 </head>
 <body>
-<!-- 18.11.2026 (SirItos): on a phone (<= 860 px) the menu (#menu: the tabs, the links, the mirrors) is a drawer from the left behind
-     the ☰ button; a tap outside (#scrim), on an item or Esc closes it. On a desktop #menu is display: contents - the header as before -->
+<!-- 18.11.2026 (SirItos): on a phone / narrow window (<= 980 px) the menu (#menu: the tabs, the links, the mirrors) is a drawer from the left behind
+     the ☰ button; a tap outside (#scrim), on an item or Esc closes it (ladder-hdr.js). On a desktop #menu is display: contents.
+     The same header is on /ladder/chat (chat.html, ladder-hdr.css + ladder-hdr.js): "Чат" is a menu item like the views (no data-v:
+     a real link), the mirrors are buttons. Keep the two copies alike. -->
 <header class="hdr">
   <button class="burger" id="burger" type="button" aria-controls="menu" aria-expanded="false" data-h="menuT"><i></i></button>
   <a class="brand" href="/ladder/" aria-label="Elite Ladder — Dawn of War II"><span class="dd-logo" aria-hidden="true"><b class="dd-ii">II</b><span class="dd-w">Dawn <em>of</em> War</span><span class="dd-sub">Elite Ladder</span></span></a>
   <div class="menu" id="menu">
-    <nav class="tabs" id="tabs"><a class="tab" data-v="table" href="/ladder/" data-t="tabTable"></a><a class="tab" data-v="history" href="/ladder/?view=history" data-t="tabHistory"></a><a class="tab" data-v="live" href="/ladder/?view=live" data-t="tabLive"></a></nav>
+    <nav class="tabs" id="tabs"><a class="tab" data-v="table" href="/ladder/" data-t="tabTable"></a><a class="tab" data-v="history" href="/ladder/?view=history" data-t="tabHistory"></a><a class="tab" data-v="live" href="/ladder/?view=live" data-t="tabLive"></a><a class="tab" href="/ladder/chat" data-t="chatLink"></a></nav>
     <div class="hdr-r">
-      <a class="hl" href="/ladder/chat" data-t="chatLink"></a>
       <a class="hl" href="/ladder/inbox" id="inboxLink" hidden>Inbox</a>
       <a class="btn gold small" href="/elite/" data-t="dlLauncher"></a>
       <span data-mirrors></span>
@@ -54,10 +57,12 @@
 
 <div class="wrap">
   <main id="vTable" hidden>
+    <!-- 18.11.2026 (SirItos): the season's maps above the table, like "Как работает рейтинг" but open by default (a visitor's close is
+         remembered); only the mode picked in the table's switch; shown while /ladder/api/own/season has a pool -->
+    <details class="panel smaps" id="smaps" hidden open><summary><span data-t="smapsLink"></span><span class="smm" id="smapsMode"></span></summary><div class="smb" id="smapsBody"></div></details>
     <section class="panel">
-      <div class="ph"><h1 class="h" data-t="title"></h1><span class="tag pre" id="tag" hidden></span><span class="muted" id="seasonL"></span><a class="btn small smaps-l" id="smapsL" href="#maps" hidden aria-controls="smaps" aria-expanded="false" data-t="smapsLink"></a><span class="sp"></span>
+      <div class="ph"><h1 class="h" data-t="title"></h1><span class="tag pre" id="tag" hidden></span><span class="muted" id="seasonL"></span><span class="sp"></span>
         <div class="seg" id="modes"><button data-m="1v1" class="on">1 vs 1</button><button data-m="2v2">2 vs 2</button><button data-m="3v3">3 vs 3</button></div></div>
-      <div class="smaps" id="smaps" hidden></div>
       <div class="tb" id="tb">
         <div class="tr th"><span class="l">#</span><span class="l" data-t="player"></span><span data-t="rating" data-h="ratingHint"></span><span data-t="gamesCol"></span><span data-t="wlCol" data-h="wlHint2"></span></div>
         <div id="rows"><div class="empty" data-t="loading"></div></div>

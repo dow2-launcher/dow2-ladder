@@ -1,0 +1,116 @@
+/* The header of the ladder pages (/ladder/ and /ladder/chat), 18.11.2026 (SirItos: "Чат" a menu item like the others, the mirrors as
+   real buttons, one header on every ladder page). Moved out of ladder.css so that the chat page (its own gold look) loads only this:
+   every rule is under .hdr (no clash with the page's own classes), the colors and the fonts are set on .hdr itself (the same values as
+   ladder.css :root). The plain buttons (.btn) live here too - the page's panels use them. Under 30 KB like every file of the page. */
+@font-face { font-family: 'Roboto Condensed'; font-weight: 400 500; font-display: swap; size-adjust: 107%;
+  src: local('Roboto Condensed'), local('RobotoCondensed-Regular'), url(/elite/fonts/rc400.woff2) format('woff2'); }
+@font-face { font-family: 'Roboto Condensed'; font-weight: 600 700; font-display: swap; size-adjust: 107%;
+  src: local('Roboto Condensed Bold'), local('RobotoCondensed-Bold'), url(/elite/fonts/rc700.woff2) format('woff2'); }
+@font-face { font-family: 'D Head'; font-weight: 600 700; font-display: swap; size-adjust: 93%;
+  src: local('Spectral SemiBold'), local('Spectral-SemiBold'), url(/elite/fonts/sp600.woff2) format('woff2'); }
+@font-face { font-family: Cinzel; font-weight: 700; font-display: swap; unicode-range: U+0020-007A;
+  src: local('Cinzel Bold'), local('Cinzel-Bold'), url(/elite/fonts/cinzel-logo.woff2) format('woff2'); }
+
+/* ---------- header: the game's logo arrangement, the tabs with a glow from below (the launcher's header) ---------- */
+.hdr { --ln: #1e5a52; --tx: #e4f3ed; --sf: #bdd1cb; --mu: #86a19b; --gd: #45e0c0; --gd2: #c8fff0; --tex-panel: url(/elite/ui/panel-fill.jpg);
+  --fb: "Roboto Condensed", "Arial Narrow", "Liberation Sans Narrow", "Helvetica Neue", Arial, sans-serif; --fh: "D Head", Spectral, Georgia, "Times New Roman", serif;
+  --plate: linear-gradient(#2f5d56, #183c37 45%, #0d2522 56%, #13332f) padding-box, linear-gradient(#d2e9e3, #5f8a83 30%, #1f3b38 62%, #8fb5ad) border-box;
+  --plate-sh: 0 0 0 1px #000, inset 0 1px 0 rgba(255, 255, 255, .28), inset 0 0 0 1px rgba(0, 0, 0, .45), inset 0 0 10px rgba(69, 224, 192, .28), 0 0 8px rgba(69, 224, 192, .32);
+  --band: linear-gradient(90deg, transparent, rgba(69, 224, 192, .6) 16%, rgba(69, 224, 192, .6) 84%, transparent) center bottom / 100% 1px no-repeat,
+    linear-gradient(90deg, transparent, rgba(0, 0, 0, .9) 8%, rgba(0, 0, 0, .9) 92%, transparent) center calc(100% - 1px) / 100% 2px no-repeat;
+  --tabx: 14px;
+  position: relative; display: flex; align-items: center; gap: 16px; min-height: 58px; padding: 0 20px; border-bottom: 2px solid var(--ln);
+  font: 15px/1.45 var(--fb); color: var(--tx); color-scheme: dark;
+  background: linear-gradient(rgba(4, 9, 10, .9), rgba(4, 9, 10, .65)); box-shadow: 0 1px 0 #000, 0 0 14px rgba(69, 224, 192, .18); }
+.hdr *, .hdr *::before, .hdr *::after { box-sizing: border-box; }
+.hdr a { text-decoration: none; transition: color .15s, text-shadow .15s; }
+.hdr button { font: inherit; color: inherit; }
+.hdr [hidden] { display: none !important; }
+.hdr :focus-visible { outline: 1px solid var(--gd); outline-offset: 2px; }
+.hdr .brand { display: flex; align-items: center; flex: none; text-shadow: none; }
+.dd-logo { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 46px; margin-top: 5px; padding: 0 4px; }
+.dd-ii { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font: 700 58px/.78 Cinzel, serif; letter-spacing: -6px; padding-right: 6px;
+  background: linear-gradient(#ea5a47 0%, #c22d22 30%, #8e1610 66%, #560906 100%); -webkit-background-clip: text; background-clip: text; color: transparent;
+  -webkit-text-stroke: 1px rgba(38, 3, 2, .95); filter: drop-shadow(0 0 5px rgba(196, 40, 28, .45)) drop-shadow(0 1px 0 #000); pointer-events: none; }
+.dd-w { position: relative; display: flex; align-items: center; gap: 6px; font: 700 18px/1 Cinzel, serif; letter-spacing: 1.6px; text-transform: uppercase; white-space: nowrap;
+  background: linear-gradient(#fff 0%, #e3f1ed 38%, #98b1aa 54%, #eef8f5 100%); -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 1px 0 #000) drop-shadow(0 0 2px rgba(0, 0, 0, .95)); }
+.dd-w em { font-style: normal; font-size: 10px; letter-spacing: 1px; vertical-align: 3px; margin: 0 1px; }
+.dd-w::before, .dd-w::after { content: ""; width: 12px; height: 1px; background: linear-gradient(90deg, transparent, #cfdbd7); }
+.dd-w::after { transform: scaleX(-1); }
+.dd-sub { position: relative; margin-top: 5px; font: 700 10px/1 Cinzel, serif; letter-spacing: 4.6px; padding-left: 4.6px; text-transform: uppercase; color: #ddd5c4;
+  text-shadow: 0 1px 1px #000, 0 0 2px #000; }
+/* the menu items: Рейтинг / Матчи / Сейчас (views of /ladder/) and Чат (/ladder/chat) - one look, .on = the page you are on */
+.hdr .tabs { display: flex; align-self: stretch; gap: 2px; margin: 0; padding: 0; border: 0; }
+.hdr .tab { display: flex; align-items: center; padding: 0 var(--tabx); font: 700 19px var(--fh); color: #8fb0a8; text-shadow: 0 1px 2px #000; white-space: nowrap; }
+.hdr .tab:hover, .hdr .tab:focus-visible { color: #d6eee7; text-shadow: 0 1px 2px #000; }
+.hdr .tab.on { color: #eafff8; background: linear-gradient(transparent 35%, rgba(69, 224, 192, .2)); text-shadow: 0 0 12px rgba(69, 224, 192, .8), 0 1px 2px #000; }
+.hdr-r { margin-left: auto; display: flex; align-items: center; gap: 14px; }
+.hdr .hl { font: 600 14px var(--fb); white-space: nowrap; color: var(--gd); }
+.hdr .hl:hover { color: #c9f7ea; }
+.lang { display: inline-flex; border: 1px solid #2b6f64; background: #061011; }
+.lang button { border: 0; background: none; padding: 4px 9px; font: 600 12.5px var(--fb); color: var(--mu); cursor: pointer; }
+.lang button.on { color: #eafff8; background: #0f3d36; box-shadow: inset 0 0 6px rgba(69, 224, 192, .35); }
+/* the mirrors (mirrors.js draws them; its own style is tiny for the other pages) - here real buttons: a flag and the number, the one in
+   use lit like the language's button, the place in the tooltip; in the drawer the country's name too */
+.hdr .mirrors { display: inline-flex; align-items: center; gap: 6px; font: 700 14px/1 var(--fb); opacity: 1; }
+.hdr .mirrors > span { display: inline-flex; color: var(--mu); }
+.hdr .mirrors > span svg { width: 14px; height: 14px; }
+.hdr .mirrors a { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; min-width: 46px; padding: 0 9px; border: 1px solid #2b6f64;
+  border-radius: 0; background: #061011; color: var(--sf); opacity: 1; box-shadow: none; transition: border-color .15s, color .15s, box-shadow .15s; }
+.hdr .mirrors a:hover, .hdr .mirrors a:focus-visible { color: #fff; border-color: var(--gd); box-shadow: 0 0 7px rgba(69, 224, 192, .3); }
+.hdr .mirrors a.on { color: #eafff8; background: #0f3d36; border-color: var(--gd); box-shadow: inset 0 0 8px rgba(69, 224, 192, .4), 0 0 6px rgba(69, 224, 192, .25); }
+.hdr .mirrors svg[viewBox="0 0 9 6"] { width: 18px; height: 12px; box-shadow: 0 0 0 1px rgba(0, 0, 0, .7); }
+.hdr .mirrors .mt { display: none; font-weight: 600; }
+/* 18.11.2026 (SirItos): the menu as a drawer on a phone (the media rules below); on a desktop #menu is no box */
+.hdr .menu { display: contents; }
+.hdr > .lang { margin-left: -2px; }
+.hdr .burger, .hdr .scrim { display: none; }
+
+/* ---------- buttons: the game's plate for the main one, a metal frame for the ordinary (the launcher's .btn / .btn.gold) ---------- */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 32px; padding: 0 13px; border: 2px solid transparent; border-radius: 0;
+  background: linear-gradient(#1b2c2e, #0c1516) padding-box, linear-gradient(#5f7c78, #24393a 45%, #121c1d) border-box;
+  box-shadow: 0 0 0 1px #000, inset 0 1px 0 rgba(255, 255, 255, .07), inset 0 0 0 1px rgba(69, 224, 192, .12);
+  font: 700 15px/1 var(--fh); color: #dcefe9; text-shadow: 0 1px 2px #000; white-space: nowrap; cursor: pointer; transition: box-shadow .12s, color .12s, filter .12s; }
+.btn:hover, .btn:focus-visible { color: #fff; text-shadow: 0 1px 2px #000;
+  box-shadow: 0 0 0 1px #000, inset 0 0 0 1px rgba(69, 224, 192, .75), inset 0 0 10px rgba(69, 224, 192, .22), 0 0 7px rgba(69, 224, 192, .28); }
+.btn.gold { border: 2px solid transparent; background: var(--plate); color: #fff; text-shadow: 0 1px 2px #000, 0 0 8px rgba(0, 0, 0, .6); box-shadow: var(--plate-sh); }
+.btn.gold:hover, .btn.gold:focus-visible { box-shadow: var(--plate-sh), 0 0 14px rgba(69, 224, 192, .45); filter: brightness(1.15); }
+.btn.small { height: 28px; padding: 0 10px; font-size: 14px; }
+
+/* four items + the mirror buttons: a narrow desktop (981-1180 px) packs them tighter; below - the drawer (980: room for wider fallback fonts) */
+@media (max-width: 1180px) { .hdr { gap: 12px; padding: 0 14px; } .hdr { --tabx: 9px; } .hdr .tab { font-size: 18px; } .hdr-r { gap: 10px; }
+  .hdr .mirrors > span { display: none; } .hdr .mirrors a { min-width: 40px; padding: 0 7px; } }
+@media (max-width: 980px) {
+  /* 18.11.2026 (SirItos): ☰ + the logo + RU/EN in the bar; the items, the launcher and the mirrors slide in from the left (transform only) */
+  .hdr { gap: 10px; min-height: 54px; padding: 0 12px 0 6px; }
+  .hdr > .lang { margin-left: auto; }
+  .hdr .burger { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 42px; height: 42px; padding: 0; border: 0; background: none; cursor: pointer; }
+  .burger i, .burger i::before, .burger i::after { display: block; width: 22px; height: 2px; background: var(--gd); box-shadow: 0 0 6px rgba(69, 224, 192, .55); transition: transform .2s, background .2s; }
+  .burger i { position: relative; }
+  .burger i::before, .burger i::after { content: ""; position: absolute; left: 0; }
+  .burger i::before { top: -7px; } .burger i::after { top: 7px; }
+  .burger:hover i, .burger:hover i::before, .burger:hover i::after { background: var(--gd2); }
+  .hdr .menu { position: fixed; z-index: 60; top: 0; bottom: 0; left: 0; width: min(300px, 84vw); display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain;
+    padding: 10px 0 18px; border-right: 2px solid var(--ln); background: linear-gradient(rgba(9, 19, 20, .97), rgba(5, 11, 12, .98)), var(--tex-panel) center / cover, #0b1516;
+    box-shadow: 0 0 0 1px #000, 0 0 18px rgba(69, 224, 192, .18), 12px 0 28px rgba(0, 0, 0, .6);
+    transform: translateX(-104%); visibility: hidden; transition: transform .22s ease, visibility 0s .22s; }
+  .hdr.open .menu { transform: none; visibility: visible; transition: transform .22s ease; }
+  .hdr .tabs { flex-direction: column; align-self: auto; gap: 0; padding-bottom: 10px; margin-bottom: 16px; background: var(--band); }
+  .hdr .tab { padding: 13px 22px; font-size: 21px; border-left: 3px solid transparent; }
+  .hdr .tab.on { border-left-color: var(--gd); background: linear-gradient(90deg, rgba(69, 224, 192, .2), transparent 80%); }
+  .hdr-r { margin: 0; flex-direction: column; align-items: flex-start; gap: 16px; padding: 0 22px; }
+  .hdr .hl { font-size: 17px; }
+  .hdr .btn.gold { height: 38px; padding: 0 16px; font-size: 16px; }
+  .hdr .mirrors { flex-wrap: wrap; gap: 8px; }
+  .hdr .mirrors { width: 100%; }
+  .hdr .mirrors > span { display: inline-flex; align-items: center; gap: 8px; flex-basis: 100%; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; }
+  .hdr .mirrors > span::after { content: attr(title); }
+  .hdr .mirrors a { flex: 1 1 100%; justify-content: flex-start; height: 40px; padding: 0 12px; gap: 10px; }
+  .hdr .mirrors .mt { display: inline; }
+  .hdr .scrim { display: block; position: fixed; z-index: 55; inset: 0; background: rgba(0, 0, 0, .6); opacity: 0; pointer-events: none; transition: opacity .22s; }
+  .hdr.open .scrim { opacity: 1; pointer-events: auto; }
+  body.menu-open { overflow: hidden; }
+}
+@media (max-width: 980px) and (prefers-reduced-motion: reduce) { .hdr .menu, .hdr.open .menu, .hdr .scrim { transition: none; } }
+@media (max-width: 620px) { .dd-w { font-size: 15px; } .dd-w::before, .dd-w::after { width: 7px; } .dd-ii { font-size: 50px; } }
