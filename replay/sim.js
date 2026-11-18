@@ -17,7 +17,11 @@
       resTitle: 'Match result', resWin: 'Winner', resLikely: 'Probable winner', resUnknown: 'Result unknown', at: 'At', resPts: 'points held', resVp: 'victory points held', resSq: 'squads on the field',
       resWipe: 'all squads of the other side were destroyed', resRead: 'read from the state of the match at its end: victory points and points held, army strength', resGuess: 'estimated from retreats and squad losses in the last quarter of the match',
       resNone: 'the replay does not say clearly enough who won',
-      resNote: 'The replay does not record how the match ended (victory points, HQ, surrender), so the verdict comes from the last seconds.' },
+      resNote: 'The replay does not record how the match ended (victory points, HQ, surrender), so the verdict comes from the last seconds.',
+      tk: 'Victory point score', tkHint: n => `each side starts with ${n}; the side holding fewer victory points loses score, 0 = defeat. Marks: a victory point changes hands`,
+      tkS: 'VP score', tkPts: 'strategic points held', tkVp: 'victory points held', resScore: 'victory point score',
+      resVpWin: 'the victory point score of the other side ran out (the game\'s own win condition)', resConcede: 'the other side conceded (the game\'s own win condition)',
+      resHq: 'the HQ of the other side was destroyed (the game\'s own win condition)', resGame: 'the game\'s own win condition' },
     ru: { title: 'Матч посекундно', badge: 'движок игры', sub: 'Все отряды матча так, как их просчитала сама игра: где стоят, сколько здоровья и что делают — каждую секунду. Жмите «Смотреть» или кликайте в любой момент.',
       play: 'Смотреть', pause: 'Пауза', trails: 'Следы', heat: 'Тепловая карта', heatNone: 'выкл', army: 'Сила армий (сумма HP отрядов на поле)',
       pts: 'Стратегические точки под контролем', req: 'Отрядов на поле', moments: 'Ключевые моменты', all: 'Все', fights: 'Бои', heroes: 'Герои', deaths: 'Потери', chat: 'Чат',
@@ -32,7 +36,11 @@
       resTitle: 'Итог матча', resWin: 'Победа', resLikely: 'Вероятная победа', resUnknown: 'Результат неизвестен', at: 'На', resPts: 'точек под контролем', resVp: 'VP-точек под контролем', resSq: 'отрядов на поле',
       resWipe: 'все отряды другой стороны уничтожены', resRead: 'по состоянию матча в конце: очки и точки под контролем, сила армий', resGuess: 'оценка по ретритам и потерям отрядов в последней четверти матча',
       resNone: 'по реплею не удаётся уверенно сказать, кто победил',
-      resNote: 'Реплей не хранит, чем закончился матч (очки, штаб, сдача), поэтому вывод сделан по последним секундам.' } };
+      resNote: 'Реплей не хранит, чем закончился матч (очки, штаб, сдача), поэтому вывод сделан по последним секундам.',
+      tk: 'Счёт победных очков', tkHint: n => `у каждой стороны ${n}; у той, что держит меньше победных точек, счёт тает, 0 — поражение. Отметки — победная точка сменила хозяина`,
+      tkS: 'счёт', tkPts: 'стратегических точек под контролем', tkVp: 'победных точек под контролем', resScore: 'счёт победных очков',
+      resVpWin: 'у другой стороны кончились победные очки (по условию победы самой игры)', resConcede: 'другая сторона сдалась (по условию победы самой игры)',
+      resHq: 'штаб другой стороны уничтожен (по условию победы самой игры)', resGame: 'по условию победы самой игры' } };
   const tx = k => (TX[L] || TX.en)[k];
   const tnm = (teams, tm) => { const i = teams.indexOf(tm); return i >= 0 && i < 2 ? tx('sides')[i] : tx('team')(tm + 1); };
   const tname = tm => tnm(S.teams, tm);
@@ -113,6 +121,13 @@
 .sim-opt { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
 .sim-opt select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 4px 6px; }
 .sim-tl canvas { width: 100%; height: 54px; display: block; cursor: pointer; border-radius: 8px; }
+.sim-tk { margin-top: 6px; }
+.sim-tk[hidden] { display: none; }
+.sim-tkh { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); margin: 0 0 3px; }
+.sim-tkh b { font: 700 13px ui-monospace, Menlo, Consolas, monospace; }
+.sim-tk canvas { width: 100%; height: 40px; display: block; cursor: pointer; border-radius: 8px; }
+.sim-tkp { display: inline-block; min-width: 2.2em; padding: 0 5px; margin-left: 4px; border-radius: 6px; color: #fff; text-align: center; font-variant-numeric: tabular-nums; text-shadow: none; }
+.sim-team h4 .sim-tkp { font-size: 12px; line-height: 17px; }
 .sim-charts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
 .sim-ch { font-size: 12.5px; color: var(--muted); margin: 0 0 4px; }
 .sim-charts canvas { width: 100%; height: 120px; display: block; cursor: pointer; border: 1px solid var(--line); border-radius: 8px; }
@@ -134,7 +149,7 @@
 .sim-e .d { color: var(--muted); font-size: 12.5px; }
 .sim-e .x { overflow-wrap: anywhere; }
 @media (max-width: 760px) { .sim-main { grid-template-columns: 1fr; } .sim-side { display: grid; grid-template-columns: 1fr 1fr; } .sim-charts { grid-template-columns: 1fr; } }
-@media (max-width: 460px) { .sim-side { grid-template-columns: 1fr; } }
+@media (max-width: 460px) { .sim-side { grid-template-columns: 1fr; } .sim-score { font-size: 13.5px; right: 6px; } }
 `;
 
   function el(h) { const d = document.createElement('div'); d.innerHTML = h.trim(); return d.firstChild; }
@@ -163,9 +178,14 @@
         const vps = D.pown.pts.map((p, i) => p[0] === 'vp' ? own[i] : null).filter(o => o !== null);
         if (vps.length) { f.vp = { n: vps.length }; teams.forEach(tm => { f.vp[tm] = vps.filter(o => o === tm).length; }); }
       }
+      // 18.11: the victory-point score (tickets) and the end as the game's own win condition saw it (sim_view.py tickets_block) - exact
+      if (D.tk && D.tk.vp && D.tk.end && teams.every(tm => D.tk.end[tm] != null)) { f.tk = {}; teams.forEach(tm => { f.tk[tm] = D.tk.end[tm]; }); }
       r.facts = f;
+      const gwin = D.tk && D.tk.win;
+      if (gwin && teams.includes(gwin.team)) { r.team = gwin.team; r.level = 'sure'; r.game = true; r.how = { vp: 'resVpWin', concede: 'resConcede', annihilate: 'resHq' }[gwin.how] || 'resGame'; return r; }
       if (f.sq[a] === 0 && f.sq[b] > 0) { r.team = b; r.level = 'sure'; r.how = 'resWipe'; return r; }
       if (f.sq[b] === 0 && f.sq[a] > 0) { r.team = a; r.level = 'sure'; r.how = 'resWipe'; return r; }
+      if (f.tk && Math.abs(f.tk[a] - f.tk[b]) >= 50) vote[f.tk[a] > f.tk[b] ? a : b] += 2;
       if (f.vp && f.vp[a] !== f.vp[b]) vote[f.vp[a] > f.vp[b] ? a : b] += 2;
       if (f.pts[a] != null && f.pts[b] != null && f.pts[a] !== f.pts[b]) vote[f.pts[a] > f.pts[b] ? a : b] += 1;
       const ra = f.army[a], rb = f.army[b];
@@ -181,14 +201,15 @@
     const names = tm => r.players.filter(p => p.team === tm).map(p => esc(p.name)).join(', ');
     const head = r.team != null ? `<b>${tx(r.level === 'sure' ? 'resWin' : 'resLikely')}: ${nm(r.team)}</b> (${names(r.team)})` : `<b>${tx('resUnknown')}</b>`;
     const f = r.facts;
-    const facts = f ? tx('at') + ' ' + fmt(r.dur) + ': ' + r.teams.map(tm => `${nm(tm)} - ` + [f.pts[tm] != null ? `${f.pts[tm]} ${tx('resPts')}` : '', f.vp ? `${f.vp[tm]}/${f.vp.n} ${tx('resVp')}` : '', `${f.sq[tm]} ${tx('resSq')}`].filter(Boolean).join(', ')).join(' · ') : '';
-    return { head, why: r.team != null ? tx(r.how) : tx('resNone'), facts, note: r.how === 'resWipe' ? '' : tx('resNote') };
+    const facts = f ? tx('at') + ' ' + fmt(r.dur) + ': ' + r.teams.map(tm => `${nm(tm)} - ` + [f.tk ? `${tx('resScore')} <b>${f.tk[tm]}</b>` : '', f.pts[tm] != null ? `${f.pts[tm]} ${tx('resPts')}` : '', f.vp ? `${f.vp[tm]}/${f.vp.n} ${tx('resVp')}` : '', `${f.sq[tm]} ${tx('resSq')}`].filter(Boolean).join(', ')).join(' · ') : '';
+    return { head, why: r.team != null ? tx(r.how) : tx('resNone'), facts, note: r.how === 'resWipe' || r.game ? '' : tx('resNote') };
   }
   const resHTML = r => { const p = resParts(r); return `<div class="res-h">${tx('resTitle')}: ${p.head}</div><div class="res-d">${p.why}${p.facts ? '<br>' + p.facts : ''}${p.note ? '<br><i>' + p.note + '</i>' : ''}</div>`; };
   function resbox() {
     if (!S || !S.res || !S.el.res) return;
     S.el.res.innerHTML = resHTML(S.res);
-    S.el.final.innerHTML = `${tx('resTitle')}<br>${resParts(S.res).head}`;
+    const f = S.res.facts, sc = f && f.tk ? `<br><small>${tx('tk')}: ${S.res.teams.map(tm => `<b style="color:${TEAMC[S.res.teams.indexOf(tm) % 2]}">${f.tk[tm]}</b>`).join(' : ')}</small>` : '';
+    S.el.final.innerHTML = `${tx('resTitle')}<br>${resParts(S.res).head}${sc}`;
   }
 
   async function show(rid, mapKey, views) {
@@ -290,6 +311,29 @@
       }
       D.points = ser;
     }
+    // 18.11 (owner): the victory-point score per team per second (VP mode only), gaps carried forward, the last second = the final score;
+    // the VP marks: a victory point changes hands (a new owner or back to neutral)
+    S.tk = null;
+    const TK = D.tk;
+    if (TK && TK.vp && TK.by && S.teams.length === 2 && S.teams.every(tm => TK.by[tm])) {
+      S.tk = { by: {}, max: 1, vpEv: [], vpN: {} };
+      S.teams.forEach(tm => {
+        const src = TK.by[tm], out = new Array(D.dur); let v = (TK.start || {})[tm] != null ? TK.start[tm] : 500;
+        for (let i = 0; i < D.dur; i++) { if (src[i] != null) v = src[i]; out[i] = v; }
+        if (TK.end && TK.end[tm] != null && TK.win) out[D.dur - 1] = TK.end[tm];
+        S.tk.by[tm] = out; S.tk.max = Math.max(S.tk.max, ...out.slice(0, 5), (TK.start || {})[tm] || 0);
+      });
+      if (D.pown) {
+        const own = D.pown.pts.map(() => -1), vpi = D.pown.pts.map(p => p[0] === 'vp');
+        const ser = {}; S.teams.forEach(tm => { ser[tm] = new Array(D.dur).fill(0); });
+        let j = 0; const ev = D.pown.ev;
+        for (let s = 0; s < D.dur; s++) {
+          while (j < ev.length && ev[j][0] <= s) { const [es, i, o] = ev[j]; if (vpi[i] && o !== own[i]) { if (es > 0) S.tk.vpEv.push([es, o]); own[i] = o; } else own[i] = o; j++; }
+          own.forEach((o, i) => { if (vpi[i] && ser[o]) ser[o][s]++; });
+        }
+        if (vpi.some(Boolean)) S.tk.vpN = ser;
+      }
+    }
     S.alive = {};   // squads on the field per team per second
     D.frames.forEach((fr, s) => { for (let i = 0; i < fr.length; i += 6) { const sq = D.squads[fr[i]], p = sq && S.P[sq[0]]; if (!p || fr[i + 4] <= 0 || fr[i + 3] <= 0) continue; (S.alive[p.team] || (S.alive[p.team] = new Array(D.dur).fill(0)))[s]++; } });
   }
@@ -330,6 +374,7 @@
         <label class="sim-opt"><span id="simHL"></span> <select id="simHeat"></select></label>
       </div>
       <div class="sim-tl"><canvas id="simTl"></canvas></div>
+      <div class="sim-tk" id="simTkW" ${S.tk ? '' : 'hidden'}><div class="sim-tkh"><span id="simTkL"></span><span id="simTkV"></span></div><canvas id="simTk"></canvas></div>
       <div class="sim-res" id="simRes"></div>
       <div class="sim-charts">
         <div><div class="sim-ch" id="simC1"></div><canvas id="simArmy"></canvas></div>
@@ -339,7 +384,7 @@
       <div class="sim-ev"><div class="cap" id="simMo"></div><div class="sim-evf" id="simEvf"></div><div class="sim-evl" id="simEvl"></div></div>
       <div class="sim-cb" id="simCb" hidden></div>`;
     const $ = id => document.getElementById(id);
-    S.el = { map: $('simMap'), tl: $('simTl'), army: $('simArmy'), pts: $('simPts'), req: $('simReq'), clock: $('simClock'), score: $('simScore'),
+    S.el = { map: $('simMap'), tl: $('simTl'), tk: $('simTk'), army: $('simArmy'), pts: $('simPts'), req: $('simReq'), clock: $('simClock'), score: $('simScore'),
       chat: $('simChat'), tip: $('simTip'), side: $('simSide'), time: $('simTime'), play: $('simPlay'), evl: $('simEvl'), big: $('simBig'), res: $('simRes'), final: $('simFinal') };
     // background minimap
     const m = AS.maps && AS.maps[S.mapKey];
@@ -351,7 +396,7 @@
     $('simTr').onchange = e => { S.trails = e.target.checked; draw(); };
     $('simHeat').onchange = e => { S.heat = e.target.value; draw(); };
     const seekCanvas = (cv, e) => { const r = cv.getBoundingClientRect(); seek(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * (D.dur - 1)); };
-    for (const cv of [S.el.tl, S.el.army, S.el.pts, S.el.req]) {
+    for (const cv of [S.el.tl, S.el.tk, S.el.army, S.el.pts, S.el.req]) {
       cv.addEventListener('pointerdown', e => { cv.setPointerCapture(e.pointerId); S.drag = cv; seekCanvas(cv, e); });
       cv.addEventListener('pointermove', e => { if (S.drag === cv) seekCanvas(cv, e); });
       cv.addEventListener('pointerup', () => { S.drag = null; });
@@ -373,6 +418,7 @@
     $('simT').textContent = tx('title'); $('simB').textContent = tx('badge'); $('simSub').textContent = tx('sub');
     $('simTrL').textContent = tx('trails'); $('simHL').textContent = tx('heat');
     $('simC1').textContent = tx('army'); $('simC2').textContent = tx('pts'); $('simC3').textContent = tx('req'); $('simMo').textContent = tx('moments');
+    if (S.tk) { $('simTkL').innerHTML = `${tx('tk')} <small>(${S.tk.max} → 0)</small>`; $('simTkL').title = tx('tkHint')(S.tk.max); }
     if (S.el.big) $('simStart').textContent = tx('start');
     const hs = $('simHeat'); hs.innerHTML = `<option value="">${tx('heatNone')}</option>` + S.D.players.map(p => `<option value="${p.pid}">${esc(p.name)}</option>`).join(''); hs.value = S.heat;
     $('simEvf').innerHTML = ['all', 'fights', 'heroes', 'deaths', 'chat'].map(k => `<button data-k="${k}" class="${S.evf === k ? 'on' : ''}">${tx(k)}</button>`).join('');
@@ -411,9 +457,16 @@
       document.getElementById('simPB' + p.pid).style.width = Math.min(100, 100 * a / S.armyMax) + '%';
     });
     if (S.qtip != null) { const tip = document.getElementById('simQT'); if (tip && S.el.side.querySelector(`.sim-q[data-q="${S.qtip}"]`)) tip.innerHTML = qtext(S.qtip); else qhide(); }
-    S.teams.forEach(tm => { const pt = (D.points || {})[tm] || [], x = document.getElementById('simTP' + tm); if (x) x.textContent = pt[s] != null ? '⚑ ' + pt[s] : ''; });
+    S.teams.forEach(tm => { const x = document.getElementById('simTP' + tm); if (x) x.innerHTML = scoreHTML(tm, s); });
+    if (S.tk) { const v = document.getElementById('simTkV'); if (v) v.innerHTML = S.teams.map(tm => `<b style="color:${TEAMC[S.teams.indexOf(tm) % 2]}">${S.tk.by[tm][s]}</b>`).join(' : '); }
   }
 
+  // ⚑ strategic points held, ◆ victory points held, then the victory-point score (VP mode only)
+  function scoreHTML(tm, s) {
+    const D = S.D, pt = ((D.points || {})[tm] || [])[s], k = S.tk, col = TEAMC[S.teams.indexOf(tm) % 2];
+    const vp = k && k.vpN[tm] ? `<span title="${tx('tkVp')}"> · ◆ ${k.vpN[tm][s]}</span>` : '';
+    return (pt != null ? `<span title="${tx('tkPts')}">⚑ ${pt}</span>` : '') + vp + (k ? `<span class="sim-tkp" style="background:${col}" title="${tx('tk')}">${k.by[tm][s]}</span>` : '');
+  }
   // squad state at second s: a alive, d down (a hero at 0 HP, can be revived), g not on the map (garrison, transport), x wiped out
   function qstate(id, s) {
     if (s > S.life.last[id]) return 'x';
@@ -721,7 +774,7 @@
     // clock + score + chat
     S.el.clock.textContent = fmt(t);
     const s = Math.min(D.dur - 1, Math.floor(t));
-    S.el.score.innerHTML = S.teams.map(tm => { const v = ((D.points || {})[tm] || [])[s]; return v != null ? `<span style="color:${TEAMC[S.teams.indexOf(tm) % 2]}">⚑ ${v}</span>` : ''; }).join(' &nbsp;');
+    const sk = s + '|' + L; if (sk !== S.scoreKey) { S.scoreKey = sk; S.el.score.innerHTML = S.teams.map(tm => `<span style="color:${TEAMC[S.teams.indexOf(tm) % 2]}">${scoreHTML(tm, s)}</span>`).join(' &nbsp;'); }
     const cl = (D.chat || []).filter(x => x[0] <= t && t - x[0] < 9).slice(-3);
     const ck = cl.map(x => x[0] + x[1] + x[3]).join('|');
     if (ck !== S.chatKey) {
@@ -753,7 +806,25 @@
     chart(S.el.army, S.teams.map(tm => ({ c: TEAMC[S.teams.indexOf(tm) % 2], v: (D.army_team || {})[tm] || [], w: 2.2 })), { fights: true });
     chart(S.el.pts, S.teams.map(tm => ({ c: TEAMC[S.teams.indexOf(tm) % 2], v: (D.points || {})[tm] || [], w: 2.2 })), {});
     chart(S.el.req, S.teams.map(tm => ({ c: TEAMC[S.teams.indexOf(tm) % 2], v: S.alive[tm] || [], w: 2.2 })), {});
-    timeline();
+    timeline(); tkline();
+  }
+  // the victory-point score of both sides over the match (0 at the bottom), marks where a victory point changes hands
+  function tkline() {
+    const cv = S.el.tk; if (!S.tk || !cv) return;
+    const [w, h] = sizeCanvas(cv, 40), c = cv.getContext('2d'), D = S.D, n = D.dur, K = S.tk;
+    const X = s => 8 + (w - 16) * s / Math.max(1, n - 1), Y = v => 5 + (h - 10) * (1 - Math.max(0, v) / K.max);
+    c.clearRect(0, 0, w, h);
+    c.fillStyle = 'rgba(127,127,127,.12)'; c.fillRect(0, 0, w, h);
+    c.strokeStyle = 'rgba(127,127,127,.35)'; c.lineWidth = 1; c.beginPath(); c.moveTo(8, Y(0) + .5); c.lineTo(w - 8, Y(0) + .5); c.stroke();
+    for (const [es, o] of K.vpEv) { const x = Math.round(X(es)) + .5, i = S.teams.indexOf(o); c.strokeStyle = i >= 0 ? TEAMC[i % 2] : 'rgba(150,150,150,.9)'; c.globalAlpha = .45; c.beginPath(); c.moveTo(x, 0); c.lineTo(x, h); c.stroke(); c.globalAlpha = 1;
+      c.fillStyle = c.strokeStyle; c.beginPath(); c.moveTo(x, 0); c.lineTo(x + 3, 3); c.lineTo(x, 6); c.lineTo(x - 3, 3); c.fill(); }
+    const step = Math.max(1, Math.floor(n / (w * 1.5)));
+    S.teams.forEach((tm, ti) => {
+      const v = K.by[tm]; c.strokeStyle = TEAMC[ti % 2]; c.lineWidth = 2; c.beginPath();
+      for (let i = 0; i < n; i += step) { const x = X(i), y = Y(v[i]); if (i) c.lineTo(x, y); else c.moveTo(x, y); }
+      c.lineTo(X(n - 1), Y(v[n - 1])); c.stroke();
+    });
+    const x = X(Math.min(n - 1, S.t)); c.fillStyle = 'rgba(230,195,92,.18)'; c.fillRect(8, 0, x - 8, h); c.strokeStyle = '#e6c35c'; c.lineWidth = 2; c.beginPath(); c.moveTo(x, 0); c.lineTo(x, h); c.stroke();
   }
   function timeline() {
     const cv = S.el.tl, [w, h] = sizeCanvas(cv, 54), c = cv.getContext('2d'), D = S.D, n = D.dur;
