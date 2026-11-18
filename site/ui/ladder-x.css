@@ -77,17 +77,22 @@
   .rooms-grid { grid-template-columns: 1fr; } .room { grid-template-columns: 60px minmax(0, 1fr); } .room .mmap { width: 60px; height: 60px; }
 }
 
-/* ---------- 18.11.2026 (SirItos): "Season maps" (#maps), a block like "Как работает рейтинг" above the table, open by default - the
-   Elite automatch's pool of the mode picked, the minimaps as the history's cards (168 px webp thumbs, maps_s/) ---------- */
-details.smaps summary .smm { font: 600 15px var(--fb); color: var(--mu); text-shadow: none; }
-.smb { padding: 0 6px 6px; }
+/* ---------- 18.11.2026 (SirItos): "Season maps" (#maps), a collapsible section of the table's panel under its title row, open by
+   default - the Elite automatch's pool of the mode picked, the minimaps as the history's cards (168 px webp thumbs, maps_s/) ---------- */
+details.smaps { margin: -4px 0 12px; scroll-margin-top: 10px; }
+details.smaps[open] { padding-bottom: 14px; background: var(--band); }
+details.smaps summary { gap: 10px; padding: 4px 2px 8px; font-size: 18px; }
+details.smaps[open] summary { background: none; padding-bottom: 6px; margin-bottom: 2px; }
+details.smaps summary .smm { gap: 0; font: 600 15px var(--fb); color: var(--mu); text-shadow: none; }
+.smb { padding: 0 2px; }
 .smn { margin: 0 0 10px; color: var(--mu); font-size: 13.5px; }
-.smr { display: grid; grid-template-columns: repeat(4, minmax(0, 176px)); gap: 10px; }   /* 18.11.2026: the picked mode's maps only */
+/* 18.11.2026 (SirItos): the picked mode's 4 maps fill the width (256 px webp, maps_m/, <= 25 KB each); a phone 2 x 2 */
+.smr { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .smt { margin: 0; padding: 5px; min-width: 0; }
-.smt img, .smt i { display: block; width: 100%; height: auto; aspect-ratio: 1; background: #061011; border: 1px solid #2b6f64; box-shadow: 0 0 0 1px #000; }
+.smt img, .smt i { display: block; width: 100%; height: auto; aspect-ratio: 1; object-fit: contain; background: #061011; border: 1px solid #2b6f64; box-shadow: 0 0 0 1px #000; }
 .smt figcaption { margin-top: 5px; font: 600 13.5px/1.2 var(--fb); text-align: center; overflow-wrap: anywhere; }
 @media (max-width: 860px) {
-  .smr { grid-template-columns: repeat(4, minmax(0, 1fr)); max-width: 720px; gap: 6px; }
+  .smr { gap: 8px; }
   .smt { padding: 3px; } .smt figcaption { font-size: 12px; }
 }
-@media (max-width: 520px) { .smr { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; } .smt figcaption { font-size: 13px; } }
+@media (max-width: 620px) { .smr { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; } .smt figcaption { font-size: 13px; } }

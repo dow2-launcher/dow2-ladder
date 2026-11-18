@@ -173,11 +173,12 @@ function initLive() {
 let SMAPS = null;
 function renderMaps() {
   if (!SMAPS) return;
-  const tile = x => { const src = /^maps\/[\w.-]+\.png$/.test(x.minimap || '') ? A + thumb(x.minimap) : '';
-    return `<figure class="smt card">${src ? `<img src="${esc(src)}" alt="" loading="lazy" width="168" height="168">` : '<i></i>'}<figcaption>${esc(String(x.name || x.key).replace(/^\(\d+p\)\s*/, ''))}</figcaption></figure>`; };
+  // 18.11.2026: the cards fill the section - the 256 px webp (maps_m/, <= 25 KB); the 168 px thumb if one is missing
+  const tile = x => { const ok = /^maps\/[\w.-]+\.png$/.test(x.minimap || ''), src = ok ? A + x.minimap.replace(/^maps\/(.+)\.png$/, 'maps_m/$1.webp') : '';
+    return `<figure class="smt card">${src ? `<img src="${esc(src)}" alt="" loading="lazy" width="256" height="256" onerror="this.onerror=null;this.src='${esc(A + thumb(x.minimap))}'">` : '<i></i>'}<figcaption>${esc(String(x.name || x.key).replace(/^\(\d+p\)\s*/, ''))}</figcaption></figure>`; };
   // 18.11.2026 (SirItos): only the mode picked in the 1 vs 1 / 2 vs 2 / 3 vs 3 switch (its click re-renders), no headings
   const ms = SMAPS[MODE] || [];
-  $('#smapsMode').textContent = MODE.replace('v', ' vs ');
+  $('#smapsMode').textContent = '· ' + MODE.replace('v', ' vs ');
   $('#smapsBody').innerHTML = `<p class="smn">${esc(T('smapsNote'))}</p>` + (ms.length ? `<div class="smr">${ms.map(tile).join('')}</div>` : `<p class="smn">${esc(T('smapsNone'))}</p>`);
 }
 // 18.11.2026 (SirItos): a block above the table, open by default; a visitor's close is kept (localStorage, may be unavailable)

@@ -132,8 +132,9 @@ function card(m, prev) {
   const r = ((prev || PDATA).ratings || []).find(x => x.mode === m && (prev || x.season === PDATA.season));
   const cn = PDATA.cal_games || 5;
   let v, s1 = '', s2 = '';
-  // the test's players are in the preseason's calibration from 0/5 (the table is not wiped, SirItos 17.11)
-  if (!r && !prev && (PDATA.cal_modes || []).includes(m)) v = `<div class="cv cal" title="${esc(T('calT')(0, cn))}"><span class="cal">${calCell(0, cn)}</span></div>`, s1 = esc(T('noGames'));
+  // the test's players are in the preseason's calibration from 0/5 (the table is not wiped, SirItos 17.11); 18.11.2026 (SirItos: "0/5
+  // everywhere, the same"): in the preseason every mode with no entry yet shows the skulls 0/5, not only the modes of his roster (cal_modes)
+  if (!r && !prev && (PDATA.preseason || (PDATA.cal_modes || []).includes(m))) v = `<div class="cv cal" title="${esc(T('calT')(0, cn))}"><span class="cal">${calCell(0, cn)}</span></div>`, s1 = esc(T('noGames'));
   else if (!r) v = `<div class="cv none">—</div>`, s1 = esc(T('noGames'));
   else {
     if (r.cons != null) v = `<div class="cv" title="${esc(r.rating + ' ± ' + r.rd)}">${r.cons}</div>`, s1 = `${esc(r.rating)} ± ${esc(r.rd)}`;
