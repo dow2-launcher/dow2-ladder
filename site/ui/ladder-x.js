@@ -183,13 +183,14 @@ function renderMaps() {
 }
 // 18.11.2026 (SirItos): a block above the table, open by default; a visitor's close is kept (localStorage, may be unavailable)
 function openMaps() { if (location.hash === '#maps' && SMAPS && VIEW === 'table') { $('#smaps').open = true; setTimeout(() => $('#smaps').scrollIntoView({ block: 'start' }), 0); } }
-$('#smaps').addEventListener('toggle', () => { try { localStorage.setItem('ladderSmaps', $('#smaps').open ? '1' : '0'); } catch (e) {} });
+// 18.11.2026 (SirItos, later): closed by default after all; a visitor's open is kept (a new key: the old one recorded the open default)
+$('#smaps').addEventListener('toggle', () => { try { localStorage.setItem('ladderSmapsOpen', $('#smaps').open ? '1' : '0'); } catch (e) {} });
 window.addEventListener('hashchange', openMaps);
 fetch('/ladder/api/own/season').then(r => r.json()).then(d => {
   SMAPS = d && d.maps && MODES.some(m => (d.maps[m] || []).length) ? d.maps : null;
   if (!SMAPS) { $('#smaps').hidden = true; return; }
-  let closed = false; try { closed = localStorage.getItem('ladderSmaps') === '0'; } catch (e) {}
-  $('#smaps').open = !closed; renderMaps(); $('#smaps').hidden = false; openMaps(); }).catch(() => {});
+  let open = false; try { open = localStorage.getItem('ladderSmapsOpen') === '1'; } catch (e) {}
+  $('#smaps').open = open; renderMaps(); $('#smaps').hidden = false; openMaps(); }).catch(() => {});
 
 // ---------- the language, the start ----------
 $('#lang').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; LANG = b.dataset.l;
