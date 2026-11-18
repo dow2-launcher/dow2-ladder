@@ -5,7 +5,7 @@ const I18N = {
   ru: { title: 'Рейтинг Elite', home: 'На главную', pre: 'Предсезон', test: 'Тест', player: 'Игрок', rating: 'Рейтинг', games: 'Игр', wl: 'П – П – У',
     ratingHint: 'Осторожный рейтинг: Glicko-2 минус две неопределённости (RD)', wlHint: 'Победы – поражения – поражения за уход',
     cal: (k, n) => `калибровка ${k}/${n}`, loading: 'Загрузка…', empty: 'В этом режиме пока никто не играл.', err: 'Не удалось загрузить.',
-    stats: 'Страница игрока', back: '← К таблице', steam: 'Профиль Steam', recent: 'Последние матчи', all: 'Все', noGames: 'нет игр',
+    stats: 'Страница игрока', back: 'Назад к таблице', steam: 'Профиль Steam', recent: 'Последние матчи', all: 'Все', noGames: 'нет игр',
     noMatches: 'Матчей пока нет.', place: n => `#${n}`, gamesN: n => `${n} ${plural(n, 'игра', 'игры', 'игр')}`,
     tableNum: c => `Число таблицы после матча: ${c}`, calDone: 'калибровка пройдена', unrated: 'без рейтинга', vs: 'vs', min: 'мин',
     fin: { win: 'Победа', loss: 'Поражение', loss_leave: 'Уход', none: 'Без итога' },
@@ -53,7 +53,7 @@ const I18N = {
   en: { title: 'Elite Rating', home: 'Home', pre: 'Preseason', test: 'Test', player: 'Player', rating: 'Rating', games: 'Games', wl: 'W – L – Lv',
     ratingHint: 'Conservative rating: Glicko-2 minus two uncertainties (RD)', wlHint: 'Wins – losses – losses by leaving',
     cal: (k, n) => `calibration ${k}/${n}`, loading: 'Loading…', empty: 'Nobody has played this mode yet.', err: 'Could not load.',
-    stats: 'Player page', back: '← Back to the table', steam: 'Steam profile', recent: 'Recent matches', all: 'All', noGames: 'no games',
+    stats: 'Player page', back: 'Back to the table', steam: 'Steam profile', recent: 'Recent matches', all: 'All', noGames: 'no games',
     noMatches: 'No matches yet.', place: n => `#${n}`, gamesN: n => `${n} ${n === 1 ? 'game' : 'games'}`,
     tableNum: c => `The table's number after the match: ${c}`, calDone: 'calibration done', unrated: 'unrated', vs: 'vs', min: 'min',
     fin: { win: 'Win', loss: 'Loss', loss_leave: 'Left', none: 'No result' },
@@ -124,19 +124,19 @@ const LI = {
         watchers: 'observers', join: 'Join', joinT: 'Open Elite Launcher and join this lobby (Windows, the add-on “Join a lobby from the launcher”)' } };
 // ---------- texts: this page's own ----------
 const UI = {
-  ru: { tabTable: 'Рейтинг', tabHistory: 'Матчи', tabLive: 'Сейчас', chatLink: 'Чат', dlLauncher: 'Скачать лаунчер', back: '← К таблице',
+  ru: { tabTable: 'Рейтинг', tabHistory: 'Матчи', tabLive: 'Сейчас', chatLink: 'Чат', dlLauncher: 'Скачать лаунчер', back: 'Назад к таблице',
     gamesCol: 'Игры', wlCol: 'W–L', wlHint2: 'Победы – поражения (уход до конца матча — тоже поражение)', calT: (k, n) => `калибровка: сыграно ${k} из ${n}`, leavesT: n => `из них уходов: ${n}`, hoursHint: 'Часов в Retribution (Steam); видно, если профиль Steam открыт', hoursLine: h => `${fmtN(h)} ч в Retribution`,
     calHead: 'Калибровка', seasonL: s => `сезон ${s}`, foot: 'Dawn of War II: Retribution · рейтинг Elite по матчам нашего автоматча',
     tableNote: 'Нажмите на игрока — его страница: рейтинг в каждом режиме и матчи с изменением за каждый.',
     hTitle: 'История матчей — Elite Ladder', lTitle: 'Сейчас — Elite Ladder',
     prevSeason: s => `Предыдущий сезон (тест ${s})`, prevNote: 'до предсезона, по правилам теста; в рейтинг предсезона не идёт',
     menuT: 'Меню', smapsLink: 'Карты сезона',
-    smapsNote: 'Автоматч Elite в этом сезоне идёт только на этих картах: сервер выбирает одну из них случайно, баны карт в игре пока не действуют.' },
-  en: { tabTable: 'Rating', tabHistory: 'Matches', tabLive: 'Live', chatLink: 'Chat', dlLauncher: 'Download launcher', back: '← Back to the table',
+    smapsNote: 'Автоматч Elite в этом сезоне идёт только на этих картах: сервер выбирает одну из них случайно, баны карт в игре пока не действуют.', smapsNone: 'Для этого режима сезонного пула нет: автоматч берёт любую карту режима.' },
+  en: { tabTable: 'Rating', tabHistory: 'Matches', tabLive: 'Live', chatLink: 'Chat', dlLauncher: 'Download launcher', back: 'Back to the table',
     gamesCol: 'Games', wlCol: 'W–L', wlHint2: 'Wins – losses (leaving before the end is a loss too)', calT: (k, n) => `calibration: ${k} of ${n} played`, leavesT: n => `leaves among them: ${n}`, hoursHint: 'Hours in Retribution (Steam); shown when the Steam profile is public', hoursLine: h => `${fmtN(h)} h in Retribution`,
     calHead: 'Calibration', seasonL: s => `season ${s}`, foot: 'Dawn of War II: Retribution · the Elite rating of our automatch',
     tableNote: 'Click a player for his page: his rating in every mode and his matches with the change of each.',
     hTitle: 'Match history — Elite Ladder', lTitle: 'Live — Elite Ladder',
     prevSeason: s => `Previous season (test ${s})`, prevNote: 'before the preseason, by the test\'s rules; not in the preseason rating',
     menuT: 'Menu', smapsLink: 'Season maps',
-    smapsNote: 'This season the Elite automatch is played on these maps only: the server picks one of them at random; map bans in the game do not apply for now.' } };
+    smapsNote: 'This season the Elite automatch is played on these maps only: the server picks one of them at random; map bans in the game do not apply for now.', smapsNone: 'No season pool for this mode: the automatch takes any map of the mode.' } };

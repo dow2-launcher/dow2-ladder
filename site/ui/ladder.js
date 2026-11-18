@@ -37,7 +37,8 @@ function applyLang() {
   document.querySelectorAll('[data-h]').forEach(e => { e.title = T(e.dataset.h); });
   document.querySelectorAll('[data-tp]').forEach(e => { e.placeholder = T(e.dataset.tp); });
   document.querySelectorAll('#lang button').forEach(b => b.classList.toggle('on', b.dataset.l === LANG));
-  document.querySelectorAll('#tabs .tab').forEach(a => { a.href = viewUrl(a.dataset.v); });
+  document.querySelectorAll('#tabs .tab[data-v]').forEach(a => { a.href = viewUrl(a.dataset.v); });   // "Чат": a page of its own
+  document.querySelectorAll('#tabs .tab:not([data-v])').forEach(a => { a.href = '/ladder/chat' + qjoin(keepLang()); });
   $('#howText').innerHTML = T('how')(PRE);
   setTitle(); render(); renderPlayer();
   if (histInit) { hFillSelects(hMaps); if (hItems.length) hPaint(); }
@@ -67,7 +68,7 @@ function showView(v) {
   if (v === 'table') initTable(); else if (v === 'history') initHistory(); else if (v === 'live') initLive();
 }
 $('#tabs').addEventListener('click', e => {
-  const a = e.target.closest('.tab'); if (!a || PSTEAM || e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;   // the player page: a real link
+  const a = e.target.closest('.tab'); if (!a || !okView(a.dataset.v) || PSTEAM || e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;   // the player page: a real link
   e.preventDefault(); if (a.dataset.v === VIEW) return;
   history.pushState(null, '', viewUrl(a.dataset.v)); showView(a.dataset.v);
 });
@@ -120,7 +121,7 @@ function syncModes() { document.querySelectorAll('#modes button').forEach(b => b
 $('#modes').addEventListener('click', e => { const b = e.target.closest('button'); if (!b || b.dataset.m === MODE) return; MODE = b.dataset.m;
   history.replaceState(null, '', tableUrl(MODE) + (/^#(how|maps)$/.test(location.hash) ? location.hash : '')); syncModes(); DATA = null; loadTable();
   if (!$('#smaps').hidden) renderMaps();                 // 18.11.2026: the season's maps light the mode picked
-  document.querySelectorAll('#tabs .tab').forEach(a => { a.href = viewUrl(a.dataset.v); }); });
+  document.querySelectorAll('#tabs .tab[data-v]').forEach(a => { a.href = viewUrl(a.dataset.v); }); });
 
 // ---------- the player page ----------
 function hDate(t) { return new Date(t * 1000).toLocaleString(LANG === 'ru' ? 'ru-RU' : 'en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); }
@@ -131,8 +132,9 @@ function card(m, prev) {
   const r = ((prev || PDATA).ratings || []).find(x => x.mode === m && (prev || x.season === PDATA.season));
   const cn = PDATA.cal_games || 5;
   let v, s1 = '', s2 = '';
-  // the test's players are in the preseason's calibration from 0/5 (the table is not wiped, SirItos 17.11)
-  if (!r && !prev && (PDATA.cal_modes || []).includes(m)) v = `<div class="cv cal" title="${esc(T('calT')(0, cn))}"><span class="cal">${calCell(0, cn)}</span></div>`, s1 = esc(T('noGames'));
+  // the test's players are in the preseason's calibration from 0/5 (the table is not wiped, SirItos 17.11); 18.11.2026 (SirItos: "0/5
+  // everywhere, the same"): in the preseason every mode with no entry yet shows the skulls 0/5, not only the modes of his roster (cal_modes)
+  if (!r && !prev && (PDATA.preseason || (PDATA.cal_modes || []).includes(m))) v = `<div class="cv cal" title="${esc(T('calT')(0, cn))}"><span class="cal">${calCell(0, cn)}</span></div>`, s1 = esc(T('noGames'));
   else if (!r) v = `<div class="cv none">—</div>`, s1 = esc(T('noGames'));
   else {
     if (r.cons != null) v = `<div class="cv" title="${esc(r.rating + ' ± ' + r.rd)}">${r.cons}</div>`, s1 = `${esc(r.rating)} ± ${esc(r.rd)}`;

@@ -8,6 +8,9 @@
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>Чат — Elite Mod</title>
 <meta name="description" content="Общий чат игроков Dawn of War II: Retribution (Elite). Вход через Steam.">
+<!-- 18.11.2026 (SirItos: one header on every ladder page): the ladder's header on top - "Чат" its active item, the mirrors as buttons,
+     the phone's drawer (ladder-hdr.css + ladder-hdr.js, everything under .hdr); the chat below keeps its own look -->
+<link rel="stylesheet" href="/elite/ui/ladder-hdr.css?v=20261118c">
 <style>
 @font-face { font-family: Cinzel; src: url(/elite/fonts/cinzel-700.ttf); font-weight: 700; font-display: swap; }
 @font-face { font-family: Cinzel; src: url(/elite/fonts/cinzel-900.ttf); font-weight: 900; font-display: swap; }
@@ -19,13 +22,12 @@
 }
 * { box-sizing:border-box; }
 html, body { margin:0; height:100%; }
-body { background:var(--bg); color:var(--text); font:16px/1.5 Spectral,Georgia,serif;
+body { display:flex; flex-direction:column; background:var(--bg); color:var(--text); font:16px/1.5 Spectral,Georgia,serif;
   background-image:radial-gradient(ellipse at 50% -10%, #2a1d0933 0%, transparent 60%); -webkit-text-size-adjust:100%; }
 a { color:var(--gold2); text-decoration:none; }
-.wrap { max-width:760px; margin:0 auto; min-height:100%; display:flex; flex-direction:column; padding:0 14px; }
-header { display:flex; align-items:center; gap:12px; padding:16px 2px 10px; flex-wrap:wrap; }
+.wrap { width:100%; max-width:760px; margin:0 auto; flex:1 1 0; display:flex; flex-direction:column; padding:0 14px; }
+.wrap > header { display:flex; align-items:center; gap:12px; padding:16px 2px 10px; flex-wrap:wrap; }
 h1 { margin:0; font:900 clamp(22px,5vw,30px) Cinzel,serif; letter-spacing:.04em; color:var(--gold2); text-shadow:0 2px 0 #5a3f12; }
-header .back { margin-left:auto; font:700 13px Cinzel,serif; letter-spacing:.05em; color:var(--muted); }
 .lv { font:700 12px Cinzel,serif; letter-spacing:.04em; color:var(--muted); text-decoration:none; border:1px solid var(--line); border-radius:5px; padding:3px 8px; white-space:nowrap; }
 .lv:hover { color:var(--gold2); border-color:var(--gold2); }
 .me { display:flex; align-items:center; gap:10px; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:8px 12px; margin-bottom:10px; }
@@ -48,10 +50,10 @@ header .back { margin-left:auto; font:700 13px Cinzel,serif; letter-spacing:.05e
 .nk:hover { text-decoration:underline; color:var(--gold2); }
 .ou { cursor:pointer; }
 .ou:hover { border-color:#5a4a2e; }
-.tabs { display:flex; gap:0; border:1px solid #5a4a2e; border-radius:5px; overflow:hidden; width:max-content; margin-bottom:10px; }
-.tabs button { font:700 14px Cinzel,serif; letter-spacing:.05em; color:var(--muted); background:#0e0c09; border:0; padding:8px 20px; cursor:pointer; }
-.tabs button + button { border-left:1px solid #3a3124; }
-.tabs button.on { background:linear-gradient(#3a2a12,#22190c); color:var(--gold2); box-shadow:inset 0 -2px 0 var(--gold); }
+.rooms { display:flex; gap:0; border:1px solid #5a4a2e; border-radius:5px; overflow:hidden; width:max-content; margin-bottom:10px; }
+.rooms button { font:700 14px Cinzel,serif; letter-spacing:.05em; color:var(--muted); background:#0e0c09; border:0; padding:8px 20px; cursor:pointer; }
+.rooms button + button { border-left:1px solid #3a3124; }
+.rooms button.on { background:linear-gradient(#3a2a12,#22190c); color:var(--gold2); box-shadow:inset 0 -2px 0 var(--gold); }
 .msgs { flex:1; min-height:240px; overflow-y:auto; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:12px; }
 .m { display:flex; gap:10px; padding:7px 0; }
 .m + .m { border-top:1px solid #241f17; }
@@ -107,22 +109,33 @@ header .back { margin-left:auto; font:700 13px Cinzel,serif; letter-spacing:.05e
 .rbar button { border:0; background:none; color:var(--muted); font-size:18px; line-height:1; cursor:pointer; padding:0 2px; }
 .rbar button:hover { color:var(--text); }
 </style>
-<script defer src="/elite/ui/mirrors.js"></script>
+<script defer src="/elite/ui/ladder-hdr.js?v=20261118c"></script>
+<script defer src="/elite/ui/mirrors.js?v=20261118c"></script>
 </head>
 <body>
+<header class="hdr">
+  <button class="burger" id="burger" type="button" aria-controls="menu" aria-expanded="false" title="Меню" data-ht="menuT"><i></i></button>
+  <a class="brand" href="/ladder/" aria-label="Elite Ladder — Dawn of War II"><span class="dd-logo" aria-hidden="true"><b class="dd-ii">II</b><span class="dd-w">Dawn <em>of</em> War</span><span class="dd-sub">Elite Ladder</span></span></a>
+  <div class="menu" id="menu">
+    <nav class="tabs"><a class="tab" href="/ladder/" data-ht="tabTable">Рейтинг</a><a class="tab" href="/ladder/?view=history" data-ht="tabHistory">Матчи</a><a class="tab" href="/ladder/?view=live" data-ht="tabLive">Сейчас</a><a class="tab on" href="/ladder/chat" aria-current="page" data-ht="chatLink">Чат</a></nav>
+    <div class="hdr-r">
+      <a class="btn gold small" href="/elite/" data-ht="dlLauncher">Скачать лаунчер</a>
+      <span data-mirrors></span>
+    </div>
+  </div>
+  <div class="scrim"></div>
+</header>
 <div class="wrap">
   <header>
     <h1>Общий чат</h1>
     <a id="lv" class="lv" href="/elite/" title="Скачать актуальную версию лаунчера" style="display:none"></a>
-    <a class="back" href="/ladder/">← Ладдер</a>
-    <span data-mirrors></span>
   </header>
 
   <div id="meBox" class="me" style="display:none"></div>
 
   <div id="online" class="online" style="display:none"></div>
 
-  <div class="tabs" id="tabs">
+  <div class="rooms" id="tabs">
     <button data-room="all" class="on">Общий</button>
     <button data-room="ru">RU</button>
     <button data-room="en">EN</button>

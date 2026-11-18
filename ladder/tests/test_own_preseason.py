@@ -183,7 +183,12 @@ b = o.site_board('1v1', o.default_season()); rw = {p['steam']: p for p in b['row
 ok('roster: w (a rated Elite match before the start only) in calibration 0/5', 'w' in rw and rw['w']['calibrating'] and
    (rw['w']['cal_played'], rw['w']['games'], rw['w']['wins'], rw['w']['cal_left']) == (0, 0, 0, o.CAL_GAMES) and rw['w']['rank'] is None)
 ok('roster: the rated players unchanged, each once', [p['steam'] for p in b['rows']].count('x') == 1 and all(p['steam'] != 'w' for p in b['board']))
-ok('roster: not in another mode', all(p['steam'] != 'w' for p in o.site_board('2v2', o.default_season())['rows']))
+# 18.11.2026 (SirItos: "0/5 everywhere, the same"): a roster player is in every mode's table at 0/5, not only where he played the test
+for md in ('2v2', '3v3'):
+    rw2 = {p['steam']: p for p in o.site_board(md, o.default_season())['rows']}
+    ok('roster: w and x in the %s table too, calibration 0/5' % md, all(s in rw2 and rw2[s]['calibrating'] and
+       (rw2[s]['cal_played'], rw2[s]['games'], rw2[s]['cal_left']) == (0, 0, o.CAL_GAMES) for s in ('w', 'x')))
+ok('roster: where he has an entry (x 1v1) that entry, not a second 0/5 row', [p['steam'] for p in b['rows']].count('x') == 1 and rw['x']['games'] > 0)
 ok('roster: not in an old season\'s board', all(p['steam'] != 'w' for p in o.site_board('1v1', '2027-Q1')['rows']))
 ok('roster: own_ratings still the preseason only, w not in it; /own/all without him', q('SELECT DISTINCT season FROM own_ratings') == [('2027-pre',)]
    and q('SELECT COUNT(*) FROM own_ratings WHERE steam = "w"') == [(0,)] and 'w' not in o.site_all(o.default_season())['players'])
