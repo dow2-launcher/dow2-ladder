@@ -663,7 +663,7 @@ def _names(c, steams):
 
 def _roster(c, start, mode=None, steam=None):
     """17.11.2026 (SirItos: "do not wipe the table"): the players of the test before the preseason - a rated Elite match before its
-    start - stay in the preseason's table, in calibration 0/5 until they play. -> {(steam, mode)}"""
+    start - stay in the preseason's table, in calibration 0/5 until they play (18.11: in every mode's table). -> {(steam, mode)}"""
     q = ('SELECT DISTINCT p.steam, m.mode FROM own_match_players p JOIN own_matches m ON m.sid = p.sid '
          'WHERE m.rated = 1 AND m.modname = ? AND coalesce(m.started, 0) < ? AND coalesce(p.steam, "") != ""')
     a = [ELITE_MOD, start]
@@ -683,7 +683,9 @@ def site_board(mode, season):
         except sqlite3.OperationalError: rows, seasons = [], []          # no own_ratings yet (step 2 not run)
         cfg = season_cfg()
         have = {str(r[0]) for r in rows}
-        extra = sorted(s for s, _ in _roster(c, cfg['start'], mode) if s not in have) if cfg and season == cfg['label'] else []
+        # 18.11.2026 (SirItos: "0/5 everywhere, the same"): a roster player is in EVERY mode's table (calibration 0/5), not only in the
+        # modes he played in the test; a mode where he already has an entry shows that entry
+        extra = sorted({s for s, _ in _roster(c, cfg['start'])} - have) if cfg and season == cfg['label'] else []
         nm = _names(c, [r[0] for r in rows] + extra)
     board, cal = [], []
     for steam, rating, rd, games, wins, losses, leaves, cal_left, last in rows:
