@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="/favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -12,7 +12,7 @@
      the phone's drawer (ladder-hdr.css + ladder-hdr.js, everything under .hdr). 18.11.2026 (SirItos: "the chat must not stand out"):
      the chat itself in the site's look too (ladder-chat.css: the steel frame, the plates, the slate and teal; ids and classes as before) -->
 <link rel="stylesheet" href="/elite/ui/ladder-hdr.css?v=20261118e">
-<link rel="stylesheet" href="/elite/ui/ladder-chat.css?v=20261118f">
+<link rel="stylesheet" href="/elite/ui/ladder-chat.css?v=20261118g">
 <script defer src="/elite/ui/ladder-hdr.js?v=20261118e"></script>
 <script defer src="/elite/ui/mirrors.js?v=20261118e"></script>
 </head>
@@ -67,16 +67,6 @@
 <script>
 'use strict';
 const $ = id => document.getElementById(id);
-// 18.11.2026 (SirItos): the page is the visible screen and the messages scroll in #msgs (ladder-chat.css). A phone's keyboard shrinks the
-// visual viewport (iOS does not resize the page): the page follows it (--vvh), so the input stays in view; at the end of the list it
-// stays at the end
-if (window.visualViewport) {
-  const fit = () => { const b = $('msgs'), end = b && b.scrollTop + b.clientHeight > b.scrollHeight - 40;
-    const h = Math.round(visualViewport.height), r = document.documentElement;
-    r.style.setProperty('--vvh', h + 'px'); r.classList.toggle('short', h < 520); window.scrollTo(0, 0);   // short: the keyboard is up
-    if (end) b.scrollTop = b.scrollHeight; };
-  visualViewport.addEventListener('resize', fit); fit();
-}
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const api = (path, opt) => fetch('/ladder/api/c/' + path, Object.assign({ credentials: 'same-origin', cache: 'no-store' }, opt)).then(r => r.json());
 let toastT;
@@ -253,14 +243,6 @@ document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
   renderMsgs({ toEnd: true }); load();
 });
 $('msgs').addEventListener('scroll', () => { if ($('msgs').scrollTop < 60) loadOlder(CH.room); });
-// 18.11.2026: the list scrolls by itself now - while the reader is at its end it stays there when the list grows under him (the fonts
-// arrive and the lines reflow, an avatar loads); scrolled up - nothing moves
-let stickEnd = true;
-const toEndIfStuck = () => { const b = $('msgs'); if (stickEnd) b.scrollTop = b.scrollHeight; };
-$('msgs').addEventListener('scroll', () => { const b = $('msgs'); stickEnd = b.scrollTop + b.clientHeight > b.scrollHeight - 40; }, { passive: true });
-$('msgs').addEventListener('load', toEndIfStuck, true);
-if (document.fonts && document.fonts.ready) document.fonts.ready.then(toEndIfStuck);
-window.addEventListener('load', toEndIfStuck);
 document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.room === CH.room));
 
 $('steamBtn').onclick = signIn;
