@@ -12,7 +12,7 @@
      the phone's drawer (ladder-hdr.css + ladder-hdr.js, everything under .hdr). 18.11.2026 (SirItos: "the chat must not stand out"):
      the chat itself in the site's look too (ladder-chat.css: the steel frame, the plates, the slate and teal; ids and classes as before) -->
 <link rel="stylesheet" href="/elite/ui/ladder-hdr.css?v=20261118e">
-<link rel="stylesheet" href="/elite/ui/ladder-chat.css?v=20261118g">
+<link rel="stylesheet" href="/elite/ui/ladder-chat.css?v=20261119a">
 <script defer src="/elite/ui/ladder-hdr.js?v=20261118e"></script>
 <script defer src="/elite/ui/mirrors.js?v=20261118e"></script>
 </head>
@@ -79,7 +79,33 @@ try { CH.room = localStorage.getItem('chRoom') || 'all'; } catch (e) {}
 function avatar(src) { return src ? `<img src="${esc(src)}" alt="" loading="lazy">` : `<img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E" alt="">`; }
 function when(ts) { const d = new Date(ts * 1000); const now = new Date(); const t = d.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
   return d.toDateString() === now.toDateString() ? t : d.toLocaleDateString('ru', { day: '2-digit', month: '2-digit' }) + ' ' + t; }
-function body(text) { return esc(text).replace(/(^|\s)(@[^\s@]{1,32})/g, (m, s, a) => s + '<span class="at">' + a + '</span>'); }
+// <linkify> 18.11.2026 (SirItos, the same in the launcher's chat): links in the messages, at render time only (the text stays plain, so the
+// old messages get them too). Only http(s):// and bare www. addresses (-> https://), up to 500 characters; the sentence's punctuation
+// after one is not its part (a ")" stays when the address opened a "("). The plain parts go through fmt (escape + @mentions) and the
+// link through esc alone - a mention never breaks a link with "@" in it. Shown short (no scheme, ~60 characters), the whole in title.
+// tests: ladder/tests/test_chat_links.js
+function linkify(text, fmt, link) {
+  const s = String(text == null ? '' : text), re = /(^|[^\w@/.-])((?:https?:\/\/|www\.)[^\s<>"'`«»]+)/gi;
+  let out = '', last = 0, m;
+  while ((m = re.exec(s))) {
+    let u = m[2];
+    while (u) {
+      const c = u[u.length - 1];
+      if (c === ')' && u.split('(').length >= u.split(')').length) break;
+      if (!'.,;:!?)]»"\''.includes(c)) break;
+      u = u.slice(0, -1);
+    }
+    const href = /^www\./i.test(u) ? 'https://' + u : u, host = href.replace(/^https?:\/\//i, '').split(/[/?#]/)[0].replace(/^[^@]*@/, '').replace(/:\d+$/, '');
+    if (u.length > 500 || !/^[^.\s]+(\.[^.\s]+)+$/.test(host)) continue;
+    const start = m.index + m[1].length, shown = Array.from(u.replace(/^https?:\/\//i, ''));
+    out += fmt(s.slice(last, start)) + link(href, shown.length > 60 ? shown.slice(0, 57).join('') + '…' : shown.join(''));
+    last = re.lastIndex = start + u.length;
+  }
+  return out + fmt(s.slice(last));
+}
+// </linkify>
+const linkA = (href, shown) => `<a class="lk" href="${esc(href)}" title="${esc(href)}" target="_blank" rel="noopener noreferrer nofollow ugc">${esc(shown)}</a>`;
+function body(text) { return linkify(text, p => esc(p).replace(/(^|\s)(@[^\s@]{1,32})/g, (m, s, a) => s + '<span class="at">' + a + '</span>'), linkA); }
 
 // Reply: only on a server that says it can (msgs: features ["reply"]) and only signed in, like sending. The message goes with
 // reply_to and comes back with the quote of its original (reply: {id, steam, name, text, ru, en} or {id, deleted}); a click on
