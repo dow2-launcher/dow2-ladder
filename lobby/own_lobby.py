@@ -518,6 +518,7 @@ def nm_answer(x, pid=None):
     rows = [[str(x['sid']), str(x['mt']), max(1, int(v.get('in_pool') or 1)), 1, [[i, 1 if i == me['race'] else 0] for i in range(7)]]]
     if v.get('state') != 'matched': return [0, x['poll'], rows, -1, 0, '', -1, -1, -1, -1, '', '0', '0', []]
     me_host = v['host_pid'] == pid; mid = int(v['room']) if str(v.get('room') or '').isdigit() else 0
+    if mid and not me_host and not guest_turn(x, v, str(me['steam'])): mid = 0   # 20.11.2026: a poll must not hand out the room before his turn
     url = ''
     if not me_host and mid: url = '/' + ((ROOMS.get(mid) or {}).get('relay') or [v.get('relay') or 'relay'])[0]
     return [0, x['poll'], rows, v['host_pid'], mid, v['map'] if me_host else '', v['team'], 0, me['race'], x['sid'],
@@ -552,6 +553,30 @@ def lroom_turn(x, v, steam):
     return bool(t0 and now - t0 >= LROOM_GAP)
 
 
+NM_GUEST_GAP = float(os.environ.get('NM_GUEST_GAP', '1.5'))   # s between two guests of a native room getting its id (0 = all at once)
+NM_ROOM_T = {}                    # match -> when its room's id became known here (nm_hosted)
+
+
+def nm_guest_turn(v, steam, now=None):
+    """20.11.2026 (SirItos 19.11, players swapped in m19 / m20): the guests of a native room get its id one after another, the k-th
+    (in the ladder's order: the host's team, then the other team) NM_GUEST_GAP * k s after the room is up, so their games connect to
+    the game server and announce themselves to the host one at a time - the host numbers its guests in the order of their announces
+    (battle_relay.py "Peer numbers" fixes the numbering itself; this keeps two announces from racing at all). Time-based, never
+    waiting for a guest who does not come (the ladder's join timeout handles him). data/nm_stagger.off = all at once (as before)"""
+    if NM_GUEST_GAP <= 0 or flag('nm_stagger.off'): return True
+    order = [s_ for s_ in v.get('steams') or [] if s_ != v.get('host_steam')]
+    if steam not in order: return True                  # an observer (a launcher room's): with the first guest, as before
+    t0 = NM_ROOM_T.get(v.get('match'))
+    if t0 is None: return True
+    return (now or time.time()) - t0 >= NM_GUEST_GAP * order.index(steam)
+
+
+def guest_turn(x, v, steam):
+    """may this guest get the room's id now (the push and the polls' answers alike): a launcher room's in its seat order
+    (lroom_turn), a native room's NM_GUEST_GAP apart (nm_guest_turn)"""
+    return lroom_turn(x, v, steam) if v.get('lroom') else nm_guest_turn(v, steam)
+
+
 def nm_push_news(x):
     """AutomatchGameMessage to every player of this search who has news: the host at once, a guest once the room id is known
     (a launcher room's guests in its seat order, lroom_turn)"""
@@ -560,7 +585,7 @@ def nm_push_news(x):
     for m in nm_members(x):
         me_host = v['host_pid'] == m['pid']
         if (me_host or mid) and x['pushed'].get(str(m['pid'])) != [v['match'], 'host' if me_host else mid]:
-            if not me_host and v.get('lroom') and not lroom_turn(x, v, str(m['steam'])): continue
+            if not me_host and not guest_turn(x, v, str(m['steam'])): continue   # not his turn yet: the next 0.5 s sync tries again
             nm_push(x, m['pid'])
             if not me_host and v.get('lroom'): LROOM_PUSHED[(v['match'], str(m['steam']))] = time.time()
 
@@ -719,6 +744,8 @@ def nm_room(p, sess):
 
 def nm_hosted(x, mid, relay_ip):
     v = x['view']; v['room'] = mid
+    NM_ROOM_T.setdefault(v['match'], time.time())
+    for k in [k for k, t in NM_ROOM_T.items() if time.time() - t > 3600]: NM_ROOM_T.pop(k, None)
     log('native automatch %s: room %d is up (relay %s) - the others join' % (v['match'], mid, relay_ip))
     ladder_bg('room', {'steam': v['host_steam'], 'room': mid, 'relay': relay_ip})
     for y in NM_POLLS.values():                                              # the guests at once (the ladder's sync would take 0.5 s)

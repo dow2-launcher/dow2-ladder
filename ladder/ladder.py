@@ -592,14 +592,7 @@ def _try_match(mode):  # под MM_LOCK: нестрогий подбор с пр
         native = all(p.get('native') for p in grp)              # the game's own automatch (own_lobby): a map key of the mode's size
         if native: mmap = _nm_pick_map(grp, mode)               # nobody's banned map (06.11.2026)
         # команды: перебор всех разбиений, минимальная разница суммарного рейтинга (2v2: сильнейший + слабейший против двух средних)
-        import itertools
-        best_split, best_d = None, None
-        parties = [[i for i, p in enumerate(grp) if p.get('party') == pt] for pt in {p['party'] for p in grp if p.get('party')}]
-        for comb in itertools.combinations(range(len(grp)), n):
-            if 0 not in comb: continue                      # без зеркальных повторов
-            if any(len({i in comb for i in pi}) > 1 for pi in parties): continue   # a party plays in one team
-            d_ = abs(sum(grp[i]['rating'] for i in comb) - sum(grp[i]['rating'] for i in range(len(grp)) if i not in comb))
-            if best_d is None or d_ < best_d: best_d, best_split = d_, comb
+        best_split = _pick_split(grp, n, mode)
         host_team = [grp[i]['steam'] for i in best_split]
         guest_team = [grp[i]['steam'] for i in range(len(grp)) if i not in best_split]
         MM_SEQ[0] += 1; mid = 'm%d' % MM_SEQ[0]
@@ -620,6 +613,63 @@ def _try_match(mode):  # под MM_LOCK: нестрогий подбор с пр
                            'players': {p['steam']: {'name': p.get('name') or 'Player', 'rating': round(p['rating']), 'rsrc': p.get('rsrc', 'ladder'),
                                                     'race': p.get('race'), 'hero': p.get('hero')} for p in grp}}
 
+
+MM_RNG = random.Random()     # the matcher's own randomness (map, teams): the tests seed it
+MM_FAIR = os.environ.get('MM_FAIR', '1') != '0'   # 20.11.2026 map history + varied teams; MM_FAIR=0 = exactly the old picks (rollback, main-equivalence test)
+TEAM_TOL = float(os.environ.get('MM_TEAM_TOL', '50'))   # rating points: splits this close to the most even one are all fair (20.11.2026)
+MM_LAST_SPLIT = {}           # frozenset(steams of a match) -> its teams (a frozenset of two frozensets), the latest match of that group
+MM_MAP_RECENT = lambda n: max(0, min(n - 1, int(os.environ.get('MM_MAP_RECENT', '0')) or max(1, n - 2)))   # maps of the group's latest left out
+MM_RECENT_MAPS = []          # [(time, mode, map, steams)] of the matches made here (newest last), until own_matches has them
+
+def _split_key(grp, comb):
+    a = frozenset(grp[i]['steam'] for i in comb)
+    return frozenset((a, frozenset(p['steam'] for p in grp) - a))
+
+def _last_split(grp, mode):
+    """the teams of this very group's previous match (the same players, the same mode): this process's memory, else own_matches"""
+    who = frozenset(p['steam'] for p in grp)
+    if who in MM_LAST_SPLIT: return MM_LAST_SPLIT[who]
+    try:
+        with _db_lock, db() as c:
+            q = ','.join('?' * len(who))
+            for sid, in c.execute('SELECT m.sid FROM own_matches m JOIN own_match_players p ON p.sid = m.sid WHERE p.steam IN (%s) AND m.mode = ? '
+                                  'GROUP BY m.sid HAVING count(*) = ? ORDER BY m.started DESC LIMIT 5' % q, (*who, mode, len(who))):
+                rows = c.execute('SELECT steam, team FROM own_match_players WHERE sid = ?', (sid,)).fetchall()
+                if {r[0] for r in rows} != who: continue
+                t = {}
+                for st, tm in rows: t.setdefault(tm, set()).add(st)
+                if len(t) == 2: return frozenset(frozenset(v) for v in t.values())
+    except Exception as e: print('mm: last split: %r' % e, flush=True)
+    return None
+
+def _pick_split(grp, n, mode):
+    """20.11.2026 (SirItos 19.11: "the teams never change"): every split of grp into two teams of n (a party in one team), the
+    rating sums' difference; the fair ones = within TEAM_TOL of the most even; of those, one at random that is NOT the teams of
+    this group's previous match when there is such a one (with everybody at 1500 the old code always took the first - the queue
+    order, the same teams game after game). -> the indexes of the team with grp[0]"""
+    import itertools
+    parties = [[i for i, p in enumerate(grp) if p.get('party') == pt] for pt in {p['party'] for p in grp if p.get('party')}]
+    if not MM_FAIR:                                     # the old rule: the first of the most even splits
+        best_split, best_d = None, None
+        for comb in itertools.combinations(range(len(grp)), n):
+            if 0 not in comb: continue
+            if any(len({i in comb for i in pi}) > 1 for pi in parties): continue
+            d_ = abs(sum(grp[i]['rating'] for i in comb) - sum(grp[i]['rating'] for i in range(len(grp)) if i not in comb))
+            if best_d is None or d_ < best_d: best_d, best_split = d_, comb
+        return best_split
+    splits = []
+    for comb in itertools.combinations(range(len(grp)), n):
+        if 0 not in comb: continue                      # без зеркальных повторов
+        if any(len({i in comb for i in pi}) > 1 for pi in parties): continue   # a party plays in one team
+        splits.append((abs(sum(grp[i]['rating'] for i in comb) - sum(grp[i]['rating'] for i in range(len(grp)) if i not in comb)), comb))
+    best = min(d for d, _ in splits)
+    fair = [c for d, c in splits if d <= best + TEAM_TOL]
+    last = _last_split(grp, mode) if len(fair) > 1 else None
+    fresh = [c for c in fair if _split_key(grp, c) != last] if last else fair
+    pick = MM_RNG.choice(fresh or fair)
+    MM_LAST_SPLIT[frozenset(p['steam'] for p in grp)] = _split_key(grp, pick)
+    if len(MM_LAST_SPLIT) > 2000: MM_LAST_SPLIT.pop(next(iter(MM_LAST_SPLIT)))
+    return pick
 
 def _unit(x, waiting):  # x and his party (those of it searching in this pool), or just x
     pt = x.get('party')
@@ -1677,7 +1727,41 @@ def _nm_pick_map(grp, mode):
     allow = [set(p.get('maps') or full) for p in grp]
     votes = {k: sum(k in a for a in allow) for k in full}
     best = max(votes.values())
-    return random.choice([k for k in full if votes[k] == best])
+    cand = [k for k in full if votes[k] == best]
+    if not MM_FAIR: return random.choice(cand)          # the old rule
+    # 20.11.2026 (SirItos 19.11: "the map is always the same"): of those, one this group has not played lately - the newest
+    # MM_MAP_RECENT different maps of its players' matches of this mode are out (default len(pool) - 2: a pool of 4 -> none of the
+    # last 2, a random one of the other 2 - no repeat, yet no fixed rotation); when every one was played lately, the one played
+    # longest ago (never = first)
+    steams = [p.get('steam') for p in grp if p.get('steam')]
+    recent = _recent_maps(steams, mode)
+    window = []
+    for k in recent:
+        if k not in window: window.append(k)
+        if len(window) >= MM_MAP_RECENT(len(full)): break
+    fresh = [k for k in cand if k not in window]
+    if fresh: pick = MM_RNG.choice(fresh)
+    else:
+        age = {k: (recent.index(k) if k in recent else len(recent) + 1) for k in cand}
+        oldest = max(age.values()); pick = MM_RNG.choice([k for k in cand if age[k] == oldest])
+    print('mm: map pick %s: candidates %s, played lately %s -> %s' % (mode, cand, window, pick), flush=True)
+    MM_RECENT_MAPS.append((time.time(), mode, pick, frozenset(steams)))
+    del MM_RECENT_MAPS[:-200]
+    return pick
+
+def _recent_maps(steams, mode, limit=30):
+    """the maps of these players' latest matches of this mode, newest first: the ones made here (MM_RECENT_MAPS, until own_matches has
+    them) + own_matches (the started ones); [] on any trouble"""
+    out = [(t, mp) for t, md, mp, ss in MM_RECENT_MAPS if md == mode and ss & set(steams)]
+    if steams:
+        try:
+            with _db_lock, db() as c:
+                q = ','.join('?' * len(steams))
+                out += [(r[0] or 0, r[1]) for r in c.execute(
+                    'SELECT DISTINCT m.started, m.map FROM own_matches m JOIN own_match_players p ON p.sid = m.sid '
+                    'WHERE p.steam IN (%s) AND m.mode = ? AND m.map IS NOT NULL ORDER BY m.started DESC LIMIT ?' % q, (*steams, mode, limit))]
+        except Exception as e: print('mm: recent maps: %r' % e, flush=True)
+    return [mp for t, mp in sorted(out, key=lambda x: -x[0])][:limit]
 
 def _nm_view(p):  # under MM_LOCK: what own_lobby needs to answer the game
     if p['state'] == 'searching':

@@ -273,7 +273,7 @@ SHORT_MATCH_S = 240     # s from the start: a match over before this (a surrende
 REPEAT_N = 3            # 1v1: the same pair's rated matches in REPEAT_S before this one - from the (REPEAT_N+1)-th on ...
 REPEAT_S = 86400
 REPEAT_W = 0.25         # ... both players' rating change is scaled by this (anti-abuse 3b, 17.11.2026)
-UNELIGIBLE = ('not_full_teams', 'no_steam', 'room', 'no_history', 'not_elite')   # rule 1: a manual winner does not make these rated
+UNELIGIBLE = ('not_full_teams', 'no_steam', 'room', 'no_history', 'not_elite', 'peer_order')   # rule 1: a manual winner does not make these rated
 SEASON_FILE = 'own_season.json'   # <data>/own_season.json {"label": "2026-pre", "start": <unix ts>, "info": "https://..." (optional)}: the (pre)season of the own rating
 # 17.11.2026 (SirItos: «ливы в первые 2-3 минуты - игра не в рейтинг»): with own_season.json the early-leave window and the short-match
 # threshold are both 3 min, and only Elite matches are rated (a vanilla automatch match stays stored, unrated 'not_elite').
@@ -421,6 +421,9 @@ def _decide_rules(m, ps, early_before):
     elif m.get('kind') == 'room' and not ROOMS_RATED: why_el = 'room'
     elif m.get('kind') not in ('mm', 'room'): why_el = 'no_history'      # not known to come from our automatch / a room
     elif m.get('elite_only') and m.get('mod') != ELITE_MOD: why_el = 'not_elite'   # preseason: the Elite table only (vanilla kept, unrated)
+    # 20.11.2026 (SirItos 19.11, m19 / m20): the game server numbered two guests otherwise than the host's game did (battle_relay
+    # match_log "swapped") - each played the other's army, the results are on the wrong people: never rated
+    elif m.get('peer_order'): why_el = 'peer_order'
     tids = sorted(teams, key=lambda t: (t is None, t))
     def other(t): return tids[1] if t == tids[0] else tids[0]
     def done(why, src=None):
@@ -497,7 +500,8 @@ def _match_input(c, sid):
     logs = _loads(node_log, []) or []
     if not isinstance(logs, list): logs = [logs]
     best = max(logs, key=lambda x: x.get('ticks') or 0) if logs else {}
-    m = dict(kind=kind, started=started, end_est=False, all_gone_s=best.get('all_gone_within_s'), conflict=False, mod=mod_of(modname))
+    m = dict(kind=kind, started=started, end_est=False, all_gone_s=best.get('all_gone_within_s'), conflict=False, mod=mod_of(modname),
+             peer_order=any(isinstance(x, dict) and x.get('swapped') for x in logs))
     cols = 'steam, pid, team, report_result, report_t, leave_t, menu_t, ruined_t'
     pl = [dict(zip(cols.split(', '), x)) for x in c.execute('SELECT %s FROM own_match_players WHERE sid = ?' % cols, (sid,))]
     if rep.get('backfill'):                              # 06-09.11: only the first report + the ladder's outcome per pid, no times

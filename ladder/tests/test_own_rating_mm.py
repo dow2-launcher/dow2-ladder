@@ -151,6 +151,7 @@ import json, os, random, shutil, sqlite3, sys, tempfile
 app, out, season, scen = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 T = tempfile.mkdtemp(prefix='mmdrv_'); shutil.copytree(app, T + '/app', ignore=shutil.ignore_patterns('__pycache__', '*.bak*', 'tests'))
 os.makedirs(T + '/data'); sys.path.insert(0, T + '/app'); os.environ['LADDER_NO_CRAWL'] = '1'
+os.environ['MM_FAIR'] = '0'   # 20.11.2026: the map history / varied teams off - main's very picks (they are tested in test_mm_fair.py)
 json.dump({'elite': {'1v1': ['m1', 'm2', 'm3'], '2v2': ['n1', 'n2'], '3v3': ['k1']}, 'vanilla': {'1v1': ['v1']}}, open(T + '/data/nm_maps.json', 'w'))
 CLOCK = [1_800_000_000.0]
 import time as _time
