@@ -49,5 +49,8 @@ h = safe('too long', 'https://example.com/' + 'a'.repeat(500)); check('over 500 
 h = safe('two in a row', 'https://a.b https://c.d'); check('two links', JSON.stringify(hrefs(h)) === '["https://a.b","https://c.d"]', h);
 h = safe('user@host', 'https://u@evil.example/x'); check('a user part: still an https link, shown as typed', JSON.stringify(hrefs(h)) === '["https://u@evil.example/x"]', h);
 h = safe('nothing to link', 'просто текст @nick, без ссылок'); check('as before: escape + mention', h === 'просто текст <span class="at">@nick,</span> без ссылок', h);
+// 19.11.2026 (SirItos): the link's look - underlined always, never bold
+const css = fs.readFileSync(path.join(path.dirname(FILE), '..', 'site', 'ui', 'ladder-chat.css'), 'utf8'), rule = (css.match(/\.m \.t a\.lk \{[^}]*\}/) || [''])[0];
+check('the link style: underlined always, never bold', /text-decoration: underline/.test(rule) && /font-weight: 400/.test(rule), rule);
 console.log(fails ? '\n' + fails + ' failed' : '\nall ok');
 process.exit(fails ? 1 : 0);
