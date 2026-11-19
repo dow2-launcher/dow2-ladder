@@ -193,7 +193,7 @@ def replay_list(q='', mapk='', race='', mode='', page=0, n=30, version='', playe
             c = ru_fix(it['caption'])
             if it['sim']: it['caption'] = caption_show(it['id'], c)
             it['caption_en'] = caption_show(it['id'], to_en(c), True) if it['sim'] else to_en(c)
-    return {'total': len(out), 'page': page, 'items': pg, 'maps': sorted({i['map'] for i in out if i['map']})}
+    return {'total': len(out), 'page': page, 'items': add_steams(pg), 'maps': sorted({i['map'] for i in out if i['map']})}
 def version_list():
     with idb() as c: rows = c.execute('SELECT vhash, COUNT(*), MAX(uploaded) FROM replays WHERE hidden IS NULL GROUP BY vhash').fetchall()
     agg = {}
@@ -282,11 +282,47 @@ def steam_pid(steam):
         _pid_of[steam] = (time.time(), pid)
     return pid
 
+# 19.11.2026 (launcher 1.6.28, SirItos: "the Replays tab's names have a hover but no info on the player"): every player of a replay
+# gets his SteamID ("steam") - the launcher's player tip (the Elite / Relic rating) and menu go by it. Relicstats knows it by the
+# Relic profile id (/stats/api/steams: its cache, else Relic); here a cache of its own (a day; 15 min while not known); a list waits for
+# it at most RATING_WAIT, the rest comes on the next ask. The computer (4294967295) gets none.
+STEAMS_API = 'http://127.0.0.1:8216/stats/api/steams'
+_steam_of = {}; _steam_lock = threading.Lock()
+def steams_of(pids):
+    pids = {int(p) for p in pids if isinstance(p, int) and 0 < p < 4294967295}
+    with _steam_lock:
+        need = [p for p in pids if not (p in _steam_of and time.time() - _steam_of[p][0] < (86400 if _steam_of[p][1] else 900))]
+    def fetch(part):
+        try:
+            with urllib.request.urlopen(STEAMS_API + '?' + '&'.join('p=%d' % p for p in part), timeout=RATING_WAIT + 4) as r: got = json.load(r)
+        except Exception: return
+        with _steam_lock:
+            if len(_steam_of) > 50000: _steam_of.clear()
+            for p in part:
+                s = got.get(str(p)) if isinstance(got, dict) else None
+                _steam_of[p] = (time.time(), s if isinstance(s, str) and re.fullmatch(r'7656119\d{10}', s) else None)
+    if need:
+        fut = [_pool.submit(fetch, need[i:i + 60]) for i in range(0, len(need), 60)]
+        end = time.time() + RATING_WAIT
+        for f in fut:
+            try: f.result(timeout=max(0.05, end - time.time()))
+            except Exception: pass
+    with _steam_lock: return {p: _steam_of[p][1] for p in pids if p in _steam_of and _steam_of[p][1]}
+def add_steams(items):
+    try:
+        got = steams_of([p.get('pid') for it in items for p in it.get('players') or []])
+        for it in items:
+            for p in it.get('players') or []:
+                if got.get(p.get('pid')): p['steam'] = got[p['pid']]
+    except Exception: pass
+    return items
+
 def replay_meta(rid, steam=None):
     with idb() as c: r = c.execute(f'SELECT {COLS} FROM replays WHERE rid = ?', (rid,)).fetchone()
     if not r: return None
     it = item(r, steam); it.pop('caption', None)
     if it['sim']: it['result'] = result_text(rid); it['result_en'] = result_text(rid, True)
+    add_steams([it])
     return add_ratings(it)
 
 # ---------- download name (fb 1088): date, players with races per team, map, winner (only when the page's verdict names one: ?w=<team>) ----------
@@ -679,6 +715,9 @@ class H(BaseHTTPRequestHandler):
                 if played: out['me_pid'] = pid; out['signed_in'] = bool(u)
                 return J(200, out)
             except (ValueError, TypeError): return J(400, {})
+        if p == '/replay/api/steams':                 # 19.11.2026, launcher 1.6.28: the SteamIDs of the players of its own files ({pids}: Relic ids)
+            pids = [x for x in (self.body().get('pids') or [])[:200] if isinstance(x, int)]
+            return J(200, {str(k): v for k, v in steams_of(pids).items()})
         if p == '/replay/api/have':                   # which of the player's files are in the pool: sha256[:16] of a file -> its replay
             ids = [x for x in (self.body().get('ids') or [])[:2000] if isinstance(x, str) and re.fullmatch(r'[0-9a-f]{16}', x)]
             out = {}
