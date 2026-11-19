@@ -509,6 +509,14 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, open(f, 'rb').read(), CT.get(os.path.splitext(f)[1], 'application/octet-stream'), 'public, max-age=86400')
             if p == '/stats/api/meta': return self.send(200, meta(), cache='public, max-age=3600')
             if p == '/stats/api/ping': return self.send(200 if usage_ping(qs) else 400, {'ok': True})   # before the rate limiter: it would hold the address
+            # 19.11.2026 (launcher 1.6.28, SirItos: a player's tip on the Replays tab's names): Relic profile ids -> SteamIDs, for the replay
+            # service (replay/app.py players' "steam"). profiles_by_ids: the cache (a day), the rest from Relic in tens. Up to 60 ids; the
+            # computer's id (4294967295) and the unknown ones are left out. Our own services (no nginx header) are not rate-limited
+            internal = not (self.headers.get('X-Real-IP') or self.headers.get('CF-Connecting-IP') or self.headers.get('X-Forwarded-For'))
+            if p == '/stats/api/steams' and (internal or allow(self.ip())):
+                ids = [int(x) for x in qs.get('p', [])[:60] if x.isdigit() and 0 < int(x) < 4294967295]
+                got = profiles_by_ids(ids) if ids else {}
+                return self.send(200, {str(k): v['steam'] for k, v in got.items() if re.fullmatch(r'7656119\d{10}', v.get('steam') or '')})
             if not allow(self.ip()): return self.send(429, {'error': 'Too many requests, slow down a little.'})
             if p == '/stats/api/lobby':
                 names = [n[:64] for n in qs.get('n', []) if n.strip()][:12]
