@@ -1,0 +1,43 @@
+MIT License
+
+Copyright (c) 2026 pivolan and the Elite Mod contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+-------------------------------------------------------------------------------
+NOTICE: third-party files
+
+The MIT license above covers the code and texts written for this repository.
+It does NOT cover the following bundled third-party files; they remain under
+their own licenses / with their owners:
+
+- site/fonts/: Cinzel (Natanael Gama), Spectral (Production Type), Roboto
+  Condensed (The Roboto Condensed Project Authors) and Cormorant SC (Christian
+  Thalmann) - SIL Open Font License 1.1, see site/fonts/OFL.txt.
+- Game artwork and data of Warhammer 40,000: Dawn of War II - Retribution
+  (Relic Entertainment / SEGA, Games Workshop): site/assets/ (map, hero, race
+  and squad images), site/img/race_*.png, stats/static/icons/, the game data
+  tables replay/item_tables.json and replay/maps_points.json, and the
+  game-related imagery in the launcher screenshots site/img/launcher*.png.
+  Used for identification of in-game content only; no rights are granted.
+- Relic's public CA certificate: lobby/relic_ca.pem, tools/relicscan/relic_ca.pem.
+- gameserver/tests/data/ (*.bin, *.jsonl.gz): recorded game network traffic,
+  used as test fixtures only.
+- stats/static/*.zip: older builds of our own add-ons (LobbyStats, FrameProbe)
+  from dow2-launcher/Dow2-patches, under that repository's license.
