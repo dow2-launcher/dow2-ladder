@@ -214,6 +214,7 @@ class Gateway(asyncio.DatagramProtocol):
             for c in list(self.conns.values()):
                 if c.ready: c.core.tick(now)
             if len(self.addr_buckets) > 4096: self.addr_buckets.clear()
+            if len(self.limited) > 4096: self.limited.clear()          # (one entry per rate-limited address, never pruned before)
             if STATS_EVERY > 0 and now - last_stats >= STATS_EVERY:
                 self.conn_stats(now - last_stats); last_stats = now
 
