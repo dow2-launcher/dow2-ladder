@@ -598,10 +598,10 @@ def recompute_own(c, log=print, cfg=None):
                 nr, nrd, nv = g2(st[0], st[1], st[2], [(avg[ot][0], avg[ot][1], s)])
                 upd.append((st, st[0] + w * (nr - st[0]), nrd, nv, final, started, steam))
         for st, nr, nrd, nv, final, t, steam in upd:
-            before = st[0] if st[3] >= CAL_GAMES else None          # the shown rating = the mean (20.11.2026)
+            before = st[0] - 2 * st[1] if st[3] >= CAL_GAMES else None   # 20.11.2026 SirItos: back to Glicko-2 as it was (mean - 2*RD)
             st[0], st[1], st[2] = nr, nrd, nv
             st[3] += 1; st[4] += final == 'win'; st[5] += final != 'win'; st[6] += final == 'loss_leave'; st[7] = t
-            after = st[0] if st[3] >= CAL_GAMES else None
+            after = st[0] - 2 * st[1] if st[3] >= CAL_GAMES else None
             marks.append((after, after - before if after is not None and before is not None else None, st[3], sid, steam))
         n += not prev
     c.execute('UPDATE own_match_players SET own_c = NULL, own_d = NULL, own_n = NULL WHERE own_n IS NOT NULL')
@@ -612,7 +612,7 @@ def recompute_own(c, log=print, cfg=None):
             if not st[3]: continue
             c.execute('INSERT INTO %s VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)' % tbl,
                       (steam, mode, season, st[0], st[1], st[2], st[3], st[4], st[5], st[6], max(0, CAL_GAMES - st[3]),
-                       st[0], st[7]))                                  # cons = the shown rating = the mean
+                       st[0] - 2 * st[1], st[7]))                      # cons = the shown rating = mean - 2*RD (as before 20.11)
     log('own_matches: shadow rating from %d matches, %d player rows%s' % (n, sum(1 for v in R.values() if v[3]),
                                                                      ' (season %s from %d)' % (cfg['label'], cfg['start']) if cfg else ''))
     return n
