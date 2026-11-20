@@ -14,6 +14,12 @@ def P(steam, team, rep=None, rep_t=None, leave=None): return dict(steam=steam, t
 ps = [P('a', 1, 1, E, E + 10), P('b', 1, 1, E, E + 10), P('c', 2, 0, E, E + 30), P('d', 2, 0, E, E + 30)]
 r = o.decide(dict(kind='mm', started=T0, conflict=False), ps)
 ok('a clean 2v2 is rated', r['rated'] == 1 and r['why'] is None, r)
+# 20.11.2026: unrating a swap is opt-in (data/own_peer_order_unrate); without the file a swapped match is rated as usual
+import tempfile as _tf
+_d = _tf.mkdtemp(); o.DATA_DIR = _d
+r0 = o.decide(dict(kind='mm', started=T0, conflict=False, peer_order=True), ps)
+ok('without the switch file: a swapped match is rated as usual', r0['rated'] == 1 and r0['why'] != 'peer_order', r0)
+open(os.path.join(_d, 'own_peer_order_unrate'), 'w').close()
 r = o.decide(dict(kind='mm', started=T0, conflict=False, peer_order=True), ps)
 ok('the same with peer_order: unrated, why peer_order', r['rated'] == 0 and r['why'] == 'peer_order', r)
 r = o.decide(dict(kind='mm', started=T0, conflict=False, peer_order=True, override={'action': 'winner', 'team': 1}), ps)
