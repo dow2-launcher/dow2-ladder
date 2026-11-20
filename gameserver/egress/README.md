@@ -76,18 +76,19 @@ TCP as is from 83.217.192.34:47443/47445 to own_lobby / its stream check on rts 
 07.11.2026: TCP keepalive on both sockets and a connection idle both ways for 120 s (MIRROR_IDLE) is closed. Restart only with
 no connections through it: `ss -tn state established "( sport = :47443 or sport = :47445 )"`.
 
-**Mirror memory (20.11.2026, prepared, NOT installed):** since 18.11 04:13 UTC the mirror's rss sits at its 250M cap (it jumped
-21 -> 246 MB inside one 3.4-min stall with a single client, 112.205.36.138, not a player) and with swap allowed it stalls for
-minutes at a time (7 times by 19.11; the 16:10-16:14 UTC one threw a whole 3v3 out of its match). `tcp_mirror.py` here is now
-the live 17.11 copy (bounded: MAX_CONN 400, PER_IP 24, BUF_MAX 1 MB). Prepared drop-in: `dow2-lobbymirror.service.d/memory.conf`
-(MemorySwapMax=0, Restart=always, RestartSec=1 - at the cap killed and back in a second instead of a stall). Install on timeweb
-with no connections through it: copy to /etc/systemd/system/dow2-lobbymirror.service.d/ (it replaces the 17.11 memory.conf of
-the same name), `systemctl daemon-reload && systemctl restart dow2-lobbymirror`.
-What to look at for the growth (the buffers are bounded per connection, so it is not one stuck peer as such):
-- `journalctl -u dow2-lobbymirror --since 2026-11-18T04:00 --until 2026-11-18T04:20` - the minute lines around the jump; the
-  same minutes in `journalctl -k` (memory pressure) and `sar -r` (sysstat runs there);
-- the stats line misses `per_ip` growth only if handle() never ran its `finally` - count asyncio tasks and the StreamReader /
-  transport buffer sizes per connection in that line (`len(asyncio.all_tasks())`, `sum(w.transport.get_write_buffer_size())`);
-- `python3 -X tracemalloc=25` for one run (or `tracemalloc.start()` + a top-10 snapshot every 30 s into the log) right after a
-  restart, to see what keeps growing; and whether a 47445 stream check (64 KB each way) that is cut mid-way leaves its buffers;
-- a watchdog: a missing stats line for > 45 s = stalled (alert / restart), until the cause is found.
+**Mirror memory (20.11.2026, FOUND and fixed, installed on timeweb 20.11):** the OOMs since 18.11 (rss 21 -> 250 MB within
+seconds while 1-2 clients were connected, the whole mirror frozen for minutes, OOM kill 20.11 01:27:59 UTC) were one connection
+spinning, not many connections: the old read loop caught `asyncio.TimeoutError` as its own 10 s poll timeout and `continue`d, but
+since Python 3.11 that is the builtin `TimeoutError` = `OSError(ETIMEDOUT)` - the error a socket gets when the keepalive /
+TCP_USER_TIMEOUT kills it (a player who stopped reading, a dead NAT). The StreamReader keeps that exception and re-raises the same
+object on every read at once: ~200 000 iterations/s without yielding (no other connection served, no stats line), each raise
+adding frames to that exception's traceback and a cancelled timer to the loop (+15 MB/s; the OOM report: anon 255 MB, pymalloc
+page faults). Reproduced: a client that never reads behind an upstream that streams -> 1.8 GB in 2 min with the old file.
+`tcp_mirror.py` now uses asyncio Protocols (no read loops, no wait_for): back pressure by pause_reading at 64 KB unsent, a side
+that stays paused 30 s, half closed 15 s or idle 120 s closes the pair, a closing side is aborted after 5 s. Limits per client
+address AND listen port (owner: "one connection per user"; one game = 2 to 47443 (long poll + calls, 3 for a moment on reconnect),
+1 short one to 47445): 47443 -> 3, 47445 -> 2, x4 for shared prefixes (MIRROR_SHARED, default Cloudflare WARP 104.28.); a new one
+over the limit closes the OLDEST of that address+port and logs `LIMIT <ip> port <p> ...`; total 400 (the most idle one goes).
+The stats line (30 s) has `unsent` KB, `closing` and counters (replaced/evicted/idle/stalled/upfail).
+Restart only with no connections through it: `ss -tn state established "( sport = :47443 or sport = :47445 )"`.
+Drop-in `dow2-lobbymirror.service.d/memory.conf` (MemoryMax=250M, MemorySwapMax=0, Restart=always, RestartSec=1) is installed.
