@@ -166,7 +166,7 @@ var I18N = {
 var lang = "en", D = null;
 function t(k, v) { var s = (I18N[lang] && I18N[lang][k]) || I18N.en[k] || k; return s.replace(/\{(\w+)\}/g, function (_, x) { return v && v[x] != null ? v[x] : ""; }); }
 function L(o, k) { if (!o) return ""; var ru = o[(k || "") + "ru"], en = o[(k || "") + "en"]; return lang === "ru" ? (ru || en || "") : (en || ru || ""); }
-function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
 function ago(ts) { if (!ts) return ""; var s = Date.now() / 1000 - (typeof ts === "string" ? Date.parse(ts) / 1000 : ts);
   if (s < 90) return t("now"); if (s < 5400) return t("ago_m", { n: Math.round(s / 60) }); if (s < 172800) return t("ago_h", { n: Math.round(s / 3600) }); return t("ago_d", { n: Math.round(s / 86400) }); }
 function when(ts) { var d = new Date(ts * 1000); return d.toLocaleString(lang, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }); }

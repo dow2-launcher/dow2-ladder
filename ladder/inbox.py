@@ -65,6 +65,10 @@ def mint(ttl=INVITE_TTL):
     return k
 def invite_ok(k):
     return bool(k) and re.fullmatch(r'[0-9a-f]{48}', k) is not None and k in _invites()
+def invite_key(k):
+    """the stored invite equal to k (the server's own copy, put into the Set-Cookie header), or None"""
+    if not invite_ok(k): return None
+    return next((x for x in _invites() if hmac.compare_digest(x, k)), None)
 def _consume(k):
     with LOCK:
         d = _invites()
@@ -180,8 +184,9 @@ def handle_get(h, u, qs):
         inv = qs.get('inv', [''])[0]
         if inv:                              # keep the invite in a cookie (not in the address bar / history), then the bare page
             h.send_response(302)
-            if invite_ok(inv):
-                h.send_header('Set-Cookie', '%s=%s; Path=/ladder/; Max-Age=86400; Secure; HttpOnly; SameSite=Lax' % (INV_COOKIE, inv))
+            key = invite_key(inv)            # the stored key, not the query text (CodeQL py/http-response-splitting, py/cookie-injection)
+            if key:
+                h.send_header('Set-Cookie', '%s=%s; Path=/ladder/; Max-Age=86400; Secure; HttpOnly; SameSite=Lax' % (INV_COOKIE, key))
                 h.send_header('Location', '/ladder/inbox')
             else: h.send_header('Location', '/ladder/inbox?bad=1')
             h.send_header('Cache-Control', 'no-store'); h.send_header('Content-Length', '0'); h.end_headers(); return

@@ -2317,13 +2317,17 @@ class H(BaseHTTPRequestHandler):
             if u.path == '/ladder/api/fb/thread': return self.send(200, fb_thread(qs.get('uid', [''])[0], qs.get('after', ['0'])[0], qs.get('limit', [''])[0]), cache=0)
             if u.path.startswith('/ladder/api/fb/img/'):
                 fn = u.path.rsplit('/', 1)[-1]; uid = _fb_uid(qs.get('uid', [''])[0]); tok = qs.get('token', [''])[0]
-                if not re.fullmatch(r'[0-9]+_[0-9a-f]{8}\.(png|jpg|gif|webp)', fn): return self.send(404, {'error': 'img'})
+                im = re.fullmatch(r'[0-9]{1,20}_[0-9a-f]{8}\.(png|jpg|gif|webp)', fn) if len(fn) <= 40 else None
+                if not im: return self.send(404, {'error': 'img'})
                 c = fb_db()
                 try: row = c.execute('SELECT 1 FROM fb WHERE images LIKE ? AND (uid=? OR ?)', ('%' + fn + '%', uid or '', 1 if _fb_token_ok(tok) else 0)).fetchone()
                 finally: c.close()
                 if not row: return self.send(404, {'error': 'img'})
-                with open(FB_DIR + '/' + fn, 'rb') as f: b = f.read()
-                self.send_response(200); self.send_header('Content-Type', 'image/' + fn.rsplit('.', 1)[1].replace('jpg', 'jpeg'))
+                fp = os.path.normpath(os.path.join(FB_DIR, fn))   # stays inside FB_DIR (CodeQL py/path-injection; fn is matched above)
+                if not fp.startswith(os.path.normpath(FB_DIR) + os.sep): return self.send(404, {'error': 'img'})
+                with open(fp, 'rb') as f: b = f.read()
+                ctype = {'png': 'image/png', 'jpg': 'image/jpeg', 'gif': 'image/gif', 'webp': 'image/webp'}[im.group(1)]   # a constant header
+                self.send_response(200); self.send_header('Content-Type', ctype)
                 self.send_header('Content-Length', str(len(b))); self.send_header('Cache-Control', 'private, max-age=86400'); self.end_headers(); self.wfile.write(b); return
             if u.path == '/ladder/fb-login':
                 # 11.11.2026: a GET never spends the link. Telegram's preview bot opened the first link before the owner did,

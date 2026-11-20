@@ -18,6 +18,17 @@ def allow_upload(ip):
 def store_size():
     return sum(os.path.getsize(os.path.join(dp, f)) for dp, _, fs in os.walk(STORE) for f in fs)
 os.makedirs(STORE, exist_ok=True)
+RID_RE = re.compile(r'[0-9a-f]{16}')
+def under(base, rid, tail='', pre=''):
+    """<base>/<pre><rid><tail> for a replay id from a request. The routes match the id already; here it is checked once more and
+    the normalised path must stay inside base (CodeQL py/path-injection). Raises ValueError otherwise."""
+    if not isinstance(rid, str) or not RID_RE.fullmatch(rid): raise ValueError('bad replay id')
+    b = os.path.normpath(base); p = os.path.normpath(os.path.join(b, pre + rid + tail))
+    if not p.startswith(b + os.sep): raise ValueError('path outside ' + b)
+    return p
+def rdir(rid, f=''):
+    """data/<rid> or data/<rid>/<f> (checked, see under)"""
+    return under(STORE, rid, '/' + f if f else '')
 
 # ---------- индекс реплеев: один матч — один реплей ----------
 # После матча реплей присылает каждый участник (MMFind из игры). Файлы у всех разные (шапка), но поток команд один и тот же:
@@ -438,9 +449,9 @@ def _sim_calc(D):
             'names': {str(k): v for k, v in names.items()},
             'pts': {str(k): v for k, v in pts.items()}, 'sq': {str(k): v for k, v in sq.items()}, 'dur': s}
 def sim_result(rid):
-    f = f'{STORE}/{rid}/sim.json.gz'
+    f = rdir(rid, 'sim.json.gz')
     if not os.path.exists(f): return None
-    cf = f'{STORE}/{rid}/simresult.json'; mt = os.path.getmtime(f)
+    cf = rdir(rid, 'simresult.json'); mt = os.path.getmtime(f)
     try:
         c = json.load(open(cf))
         if c.get('mt') == mt and c.get('r', {}).get('v') == 2: return c['r']
@@ -503,7 +514,7 @@ def _pending(rid, en):
 def caption_show(rid, cap, en=False):
     """The summary line with the exact result in place of the guess; without sim data the guess stays with a note."""
     if not cap: return cap
-    try: key = (rid, en, cap, os.path.getmtime(f'{STORE}/{rid}/sim.json.gz'))
+    try: key = (rid, en, cap, os.path.getmtime(rdir(rid, 'sim.json.gz')))
     except OSError: key = None
     if key and key in _CAPC: return _CAPC[key]
     m = re.search(r' · (вероятный победитель|likely winner): .*$', cap)
@@ -555,9 +566,9 @@ SIMQ = ROOT + '/simq'; SIMDIR = ROOT + '/sim'
 SIM_VERSIONS = {'819567f8', 'd6805b7d', '161d19dd'}     # Elite 3.2.1, 3.2, vanilla Retribution (18.11): the runner has their game data
 SIM_MAXQ = 40
 def sim_state(rid):
-    if os.path.exists(f'{STORE}/{rid}/sim.json.gz'): return 'ready', None
+    if os.path.exists(rdir(rid, 'sim.json.gz')): return 'ready', None
     for st in ('fail', 'done', 'work', 'req'):
-        f = f'{SIMQ}/{rid}.{st}'
+        f = under(SIMQ, rid, '.' + st)
         if os.path.exists(f):
             if st == 'fail':
                 try: why = open(f).read().strip()[:200]
@@ -573,14 +584,14 @@ def sim_state(rid):
 def sim_request(rid):
     st, _ = sim_state(rid)
     if st == 'failed':
-        try: os.remove(f'{SIMQ}/{rid}.fail')
+        try: os.remove(under(SIMQ, rid, '.fail'))
         except OSError: pass
         st = 'none'
     if st != 'none': return st
     os.makedirs(SIMQ, exist_ok=True)
     if len([f for f in os.listdir(SIMQ) if f.endswith('.req')]) >= SIM_MAXQ: return 'busy'
-    tmp = f'{SIMQ}/.{rid}.tmp'
-    open(tmp, 'w').write(json.dumps({'rid': rid, 'ts': time.time()})); os.replace(tmp, f'{SIMQ}/{rid}.req')
+    tmp = under(SIMQ, rid, '.tmp', pre='.')
+    open(tmp, 'w').write(json.dumps({'rid': rid, 'ts': time.time()})); os.replace(tmp, under(SIMQ, rid, '.req'))
     return 'queued'
 def sim_builder():
     while True:
@@ -619,10 +630,11 @@ def add_view(rid, ip):
 def queue_story(rid, lang):
     # историю пишет отдельный процесс (replay_story_worker от root, Claude без инструментов): у этого сервиса
     # нет доступа ни к логину Claude, ни к ключам. Заявка — файл в очереди, результат — story_<lang>.md в папке разбора.
-    open(f'{QUEUE}/{rid}_{lang}.req', 'w').write(json.dumps({'rid': rid, 'lang': lang, 'ts': time.time()}))
+    if lang not in ('ru', 'en'): raise ValueError('bad language')
+    open(under(QUEUE, rid, '_' + lang + '.req'), 'w').write(json.dumps({'rid': rid, 'lang': lang, 'ts': time.time()}))
 
 def story_running(rid):
-    return [l for l in ('ru', 'en') if os.path.exists(f'{QUEUE}/{rid}_{l}.req') or os.path.exists(f'{QUEUE}/{rid}_{l}.work')]
+    return [l for l in ('ru', 'en') if os.path.exists(under(QUEUE, rid, f'_{l}.req')) or os.path.exists(under(QUEUE, rid, f'_{l}.work'))]
 
 def recent(n=15):
     items = []
@@ -655,9 +667,9 @@ class H(BaseHTTPRequestHandler):
             with idb() as c: r = c.execute('SELECT rid FROM replays WHERE lobby = ? ORDER BY ticks DESC LIMIT 1', (m.group(1),)).fetchone()
             return self.out(200 if r else 404, json.dumps({'id': r[0]} if r else {}), 'application/json')
         m = re.match(r'^/replay/api/r/([0-9a-f]{16})/replay\.rec$', p)
-        if m and os.path.exists(f'{STORE}/{m.group(1)}/replay.rec'):
-            nm = open(f'{STORE}/{m.group(1)}/name.txt').read() if os.path.exists(f'{STORE}/{m.group(1)}/name.txt') else 'replay.rec'
-            b = open(f'{STORE}/{m.group(1)}/replay.rec', 'rb').read()
+        if m and os.path.exists(rdir(m.group(1), 'replay.rec')):
+            nm = open(rdir(m.group(1), 'name.txt')).read() if os.path.exists(rdir(m.group(1), 'name.txt')) else 'replay.rec'
+            b = open(rdir(m.group(1), 'replay.rec'), 'rb').read()
             try:
                 w = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get('w', [''])[0]
                 with idb() as c: r = c.execute(f'SELECT {COLS} FROM replays WHERE rid = ?', (m.group(1),)).fetchone()
@@ -668,7 +680,7 @@ class H(BaseHTTPRequestHandler):
             self.send_header('Content-Disposition', disposition(fn)); self.end_headers(); self.wfile.write(b); return
         m = re.match(r'^/replay/api/r/([0-9a-f]{16})$', p)
         if m:
-            d = f'{STORE}/{m.group(1)}'
+            d = rdir(m.group(1))
             if not os.path.isdir(d): return self.out(404, '{}', 'application/json')
             rd = lambda f: open(f'{d}/{f}').read() if os.path.exists(f'{d}/{f}') else None
             return self.out(200, json.dumps({'name': rd('name.txt'), 'caption': caption_show(m.group(1), ru_fix(rd('caption.txt'))) if sim_state(m.group(1))[0] == 'ready' else ru_fix(rd('caption.txt')), 'report': report_show(m.group(1), ru_fix(rd('report.md'))),
@@ -682,8 +694,8 @@ class H(BaseHTTPRequestHandler):
         if p == '/replay/sim.js':   # the match player (sim_view.py data); read per request so a deploy needs no restart
             return self.out(200, open(APP + '/sim.js', encoding='utf-8').read(), 'application/javascript; charset=utf-8')
         m = re.match(r'^/replay/api/r/([0-9a-f]{16})/sim\.json$', p)
-        if m and os.path.exists(f'{STORE}/{m.group(1)}/sim.json.gz'):
-            b = open(f'{STORE}/{m.group(1)}/sim.json.gz', 'rb').read()
+        if m and os.path.exists(rdir(m.group(1), 'sim.json.gz')):
+            b = open(rdir(m.group(1), 'sim.json.gz'), 'rb').read()
             if 'gzip' not in (self.headers.get('Accept-Encoding') or ''): b = gzip.decompress(b); enc = None
             else: enc = 'gzip'
             self.send_response(200); self.send_header('Content-Type', 'application/json'); self.send_header('Content-Length', str(len(b)))
@@ -691,8 +703,8 @@ class H(BaseHTTPRequestHandler):
             if enc: self.send_header('Content-Encoding', enc)
             self.end_headers(); self.wfile.write(b); return
         m = re.match(r'^/replay/api/r/([0-9a-f]{16})/report(_en)?\.md$', p)
-        if m and os.path.exists(f'{STORE}/{m.group(1)}/report.md'):
-            t = ru_fix(open(f'{STORE}/{m.group(1)}/report.md').read())
+        if m and os.path.exists(rdir(m.group(1), 'report.md')):
+            t = ru_fix(open(rdir(m.group(1), 'report.md')).read())
             return self.out(200, report_show(m.group(1), to_en(t), True) if m.group(2) else report_show(m.group(1), t), 'text/markdown; charset=utf-8')
         self.out(404, 'not found', 'text/plain')
     def body(self, limit=64 * 1024):
@@ -794,16 +806,16 @@ class H(BaseHTTPRequestHandler):
             return self.out(200, json.dumps({'id': rid, 'mine': bool(u)}), 'application/json')
         m = re.match(r'^/replay/api/r/([0-9a-f]{16})/view$', p)
         if m:                                         # the match player was started (counted once per viewer per day)
-            if not os.path.exists(f'{STORE}/{m.group(1)}/sim.json.gz'): return J(404, {'error': 'not_found'})
+            if not os.path.exists(rdir(m.group(1), 'sim.json.gz')): return J(404, {'error': 'not_found'})
             return J(200, {'views': add_view(m.group(1), client_ip(self))})
         m = re.match(r'^/replay/api/r/([0-9a-f]{16})/sim$', p)
         if m:                                         # ask for the detailed analysis (the game's own simulation)
-            if not os.path.exists(f'{STORE}/{m.group(1)}/replay.rec'): return J(404, {'error': 'not_found'})
+            if not os.path.exists(rdir(m.group(1), 'replay.rec')): return J(404, {'error': 'not_found'})
             st = sim_request(m.group(1))
             return J(429 if st == 'busy' else 400 if st == 'unsupported' else 200, {'state': st})
         m = re.match(r'^/replay/api/r/([0-9a-f]{16})/story/(ru|en)$', p)
         if m:
-            rid, lang = m.groups(); d = f'{STORE}/{rid}'
+            rid, lang = m.groups(); d = rdir(rid)
             if not os.path.exists(f'{d}/report.md'): return self.out(404, '{}', 'application/json')
             if os.path.exists(f'{d}/story_{lang}.md') or lang in story_running(rid): return self.out(200, '{"ok":true}', 'application/json')
             day = time.strftime('%F')
