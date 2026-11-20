@@ -96,7 +96,7 @@ function render() {
     const href = esc(playerUrl(p.steam, DATA.mode || MODE));
     html += p.calibrating
       ? `<a class="tr p cr" href="${href}" title="${tip}"><span class="l rk">—</span><span class="l">${name}</span><span class="cal" title="${esc(T('calT')(p.cal_played, p.cal_needed))}">${calCell(p.cal_played, p.cal_needed)}</span><span>${p.games}</span>${wl}</a>`
-      : `<a class="tr p${p.rank <= 3 ? ' top top' + p.rank : ''}" href="${href}" title="${tip}"><span class="l rk">${p.rank}</span><span class="l">${name}</span><span class="rv" title="${esc('± ' + p.rd)}">${p.cons}</span><span>${p.games}</span>${wl}</a>`;
+      : `<a class="tr p${p.rank <= 3 ? ' top top' + p.rank : ''}" href="${href}" title="${tip}"><span class="l rk">${p.rank}</span><span class="l">${name}</span><span class="rv" title="${esc(p.rating + ' ± ' + p.rd)}">${p.cons}</span><span>${p.games}</span>${wl}</a>`;
   }
   tb.innerHTML = html;
 }
@@ -137,7 +137,7 @@ function card(m, prev) {
   if (!r && !prev && (PDATA.preseason || (PDATA.cal_modes || []).includes(m))) v = `<div class="cv cal" title="${esc(T('calT')(0, cn))}"><span class="cal">${calCell(0, cn)}</span></div>`, s1 = esc(T('noGames'));
   else if (!r) v = `<div class="cv none">—</div>`, s1 = esc(T('noGames'));
   else {
-    if (r.cons != null) v = `<div class="cv" title="${esc('± ' + r.rd)}">${r.cons}</div>`;   // 20.11.2026: the shown rating = the Glicko mean; RD only in the tip
+    if (r.cons != null) v = `<div class="cv" title="${esc(r.rating + ' ± ' + r.rd)}">${r.cons}</div>`, s1 = `${esc(r.rating)} ± ${esc(r.rd)}`;
     else v = `<div class="cv cal" title="${esc(T('calT')(r.games, PDATA.cal_games || 5))}"><span class="cal">${calCell(r.games, PDATA.cal_games || 5)}</span></div>`;
     s2 = `<span title="${esc(T('wlHint2') + (r.leaves ? ' · ' + T('leavesT')(r.leaves) : ''))}">W–L ${r.wins}–${r.losses + r.leaves}</span> · ${esc(T('gamesN')(r.games))}`;
   }
