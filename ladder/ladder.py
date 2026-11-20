@@ -1233,7 +1233,24 @@ def history(q='', mode='', mapk='', race='', page=0, n=30, off=None):
         out.append(it)
     page = max(0, int(page or 0)); n = max(1, min(100, int(n or 30)))
     off = max(0, int(off)) if off not in (None, '') else page * n          # off — сколько уже показано (страницы разного размера)
-    return {'total': len(out), 'page': page, 'items': out[off:off + n],
+    items = out[off:off + n]
+    # 20.11.2026 (SirItos: "why do other tabs show a rating that is not the conservative one"): a player's "rating" here is the queue's
+    # (for our own rating its Glicko mean); the site shows the table's number - own_c (mean - 2*RD after the match), own_d (its change),
+    # own_n (his games in the mode after it: in calibration own_c is none) of our own record of the match (own_matches, by the lobby)
+    lobbies = [i['lobby'] for i in items if i.get('lobby')]
+    if lobbies:
+        try:
+            with db() as c:
+                got = {}
+                for lb, pid, cc, dd, nn in c.execute('SELECT m.lobby, p.pid, p.own_c, p.own_d, p.own_n FROM own_match_players p JOIN own_matches m ON m.sid = p.sid '
+                                                     'WHERE m.lobby IN (%s) AND p.own_n IS NOT NULL' % ','.join('?' * len(lobbies)), lobbies):
+                    got[(lb, pid)] = (cc, dd, nn)
+            for it in items:
+                for p in it['players']:
+                    g = got.get((it['lobby'], p.get('pid')))
+                    if g: p['own_c'] = None if g[0] is None else round(g[0]); p['own_d'] = None if g[1] is None else round(g[1]); p['own_n'] = g[2]
+        except sqlite3.OperationalError: pass          # no own tables yet
+    return {'total': len(out), 'page': page, 'items': items,
             'maps': sorted({i['map'] for i in out if i['map']})}
 
 STEAM_NOW = {'t': 0, 'n': None}

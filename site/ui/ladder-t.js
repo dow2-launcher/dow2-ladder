@@ -102,7 +102,7 @@ function plural(n, one, few, many) { const a = n % 10, b = n % 100; return a ===
 const RI = I18N;
 // ---------- texts: the history and the live tabs (the old /ladder/ page's) ----------
 const LI = {
-  ru: { ingame: 'в DoW II', online: 'онлайн', queue: 'в очереди', playing: 'играют', searching: 'Сейчас ищут', matches: 'Матчи',
+  ru: { ingame: 'в DoW II', online: 'онлайн', queue: 'в очереди', playing: 'играют', searching: 'Сейчас ищут', matches: 'Матчи автоматча', autoMatch: 'Автоматч',
         maps: 'карт', anyMap: 'любая карта', anyOpp: 'любой соперник',
         ratingDiff: 'рейтинга', waits: 'ждёт', nobody: 'Никто не ищет. Нажмите «Find a Game» в игре.', rooms: 'Открытые лобби', roomsSub: 'Кастомки, которые сейчас собираются в игре, — тот же список, что в браузере игр (Custom Games). Обновляется раз в 15 секунд.', noRooms: 'Сейчас никто не собирает игру.', pw: 'с паролем', obs: 'наблюдатели', rnd: 'Случайная раса', cpu: 'Компьютер', vanilla: 'ваниль', otherMod: 'другой мод', freeSlot: 'свободно', noMatchesNow: 'Сейчас матчей нет.',
         hostMap: 'карта на выбор хоста', sec: 'с', agoNow: 'только что', agoMin: 'мин назад', agoHour: 'ч назад', agoDay: 'дн назад', error: 'Ошибка загрузки.',
@@ -112,7 +112,7 @@ const LI = {
         hist: 'История матчей', hq: 'Ник, карта или лобби', allModes: 'Все режимы', allRaces: 'Все расы', allMaps: 'Все карты', more: 'Показать ещё', dbgLabel: 'Детали (отладка)',
         replay: 'Реплей', conf: { 'высокая': 'высокая', 'средняя': 'средняя', 'низкая': 'низкая' }, mmrAfter: 'MMR после матча', estResult: 'по реплею', estHint: 'Предположительный итог по реплею (парсер, пока Relic не отдал результат); обновится точным.', noReplay: 'реплея нет', hNone: 'Матчей с такими условиями нет.', hRes: { finished: '', playing: 'идёт', unknown: 'итог неизвестен' },
         watchers: 'зрители', join: 'Войти', joinT: 'Открыть Elite Launcher и войти в это лобби (Windows, дополнение «Вход в лобби из лаунчера»)' },
-  en: { ingame: 'in DoW II', online: 'online', queue: 'in queue', playing: 'playing', searching: 'Searching now', matches: 'Matches',
+  en: { ingame: 'in DoW II', online: 'online', queue: 'in queue', playing: 'playing', searching: 'Searching now', matches: 'Automatch matches', autoMatch: 'Automatch',
         maps: 'maps', anyMap: 'any map', anyOpp: 'any opponent',
         ratingDiff: 'rating', waits: 'waiting', nobody: 'Nobody is searching. Press “Find a Game” in the game.', rooms: 'Open lobbies', roomsSub: 'Custom games being set up in the game right now - the same list as the game browser (Custom Games). Refreshed every 15 seconds.', noRooms: 'Nobody is setting up a game right now.', pw: 'password', obs: 'observers', rnd: 'Random race', cpu: 'Computer', vanilla: 'vanilla', otherMod: 'other mod', freeSlot: 'open', noMatchesNow: 'No matches right now.',
         hostMap: 'map picked by the host', sec: 's', agoNow: 'just now', agoMin: 'min ago', agoHour: 'h ago', agoDay: 'd ago', error: 'Loading error.',
@@ -124,19 +124,19 @@ const LI = {
         watchers: 'observers', join: 'Join', joinT: 'Open Elite Launcher and join this lobby (Windows, the add-on “Join a lobby from the launcher”)' } };
 // ---------- texts: this page's own ----------
 const UI = {
-  ru: { tabTable: 'Рейтинг', tabHistory: 'Матчи', tabLive: 'Сейчас', chatLink: 'Чат', dlLauncher: 'Скачать лаунчер', back: 'Назад к таблице',
+  ru: { tabTable: 'Рейтинг', tabHistory: 'История матчей', tabLive: 'Идущие матчи', chatLink: 'Чат', dlLauncher: 'Скачать лаунчер', back: 'Назад к таблице',
     gamesCol: 'Игры', wlCol: 'W–L', wlHint2: 'Победы – поражения (уход до конца матча — тоже поражение)', calT: (k, n) => `калибровка: сыграно ${k} из ${n}`, leavesT: n => `из них уходов: ${n}`, hoursHint: 'Часов в Retribution (Steam); видно, если профиль Steam открыт', hoursLine: h => `${fmtN(h)} ч в Retribution`,
     calHead: 'Калибровка', seasonL: s => `сезон ${s}`, foot: 'Dawn of War II: Retribution · рейтинг Elite по матчам нашего автоматча',
     tableNote: 'Нажмите на игрока — его страница: рейтинг в каждом режиме и матчи с изменением за каждый.',
-    hTitle: 'История матчей — Elite Ladder', lTitle: 'Сейчас — Elite Ladder',
+    hTitle: 'История матчей — Elite Ladder', lTitle: 'Идущие матчи — Elite Ladder',
     prevSeason: s => `Предыдущий сезон (тест ${s})`, prevNote: 'до предсезона, по правилам теста; в рейтинг предсезона не идёт',
     menuT: 'Меню', smapsLink: 'Карты сезона',
     smapsNote: 'Автоматч Elite в этом сезоне идёт только на этих картах: сервер выбирает одну из них случайно, баны карт в игре пока не действуют.', smapsNone: 'Для этого режима сезонного пула нет: автоматч берёт любую карту режима.' },
-  en: { tabTable: 'Rating', tabHistory: 'Matches', tabLive: 'Live', chatLink: 'Chat', dlLauncher: 'Download launcher', back: 'Back to the table',
+  en: { tabTable: 'Rating', tabHistory: 'Match history', tabLive: 'Live matches', chatLink: 'Chat', dlLauncher: 'Download launcher', back: 'Back to the table',
     gamesCol: 'Games', wlCol: 'W–L', wlHint2: 'Wins – losses (leaving before the end is a loss too)', calT: (k, n) => `calibration: ${k} of ${n} played`, leavesT: n => `leaves among them: ${n}`, hoursHint: 'Hours in Retribution (Steam); shown when the Steam profile is public', hoursLine: h => `${fmtN(h)} h in Retribution`,
     calHead: 'Calibration', seasonL: s => `season ${s}`, foot: 'Dawn of War II: Retribution · the Elite rating of our automatch',
     tableNote: 'Click a player for his page: his rating in every mode and his matches with the change of each.',
-    hTitle: 'Match history — Elite Ladder', lTitle: 'Live — Elite Ladder',
+    hTitle: 'Match history — Elite Ladder', lTitle: 'Live matches — Elite Ladder',
     prevSeason: s => `Previous season (test ${s})`, prevNote: 'before the preseason, by the test\'s rules; not in the preseason rating',
     menuT: 'Menu', smapsLink: 'Season maps',
     smapsNote: 'This season the Elite automatch is played on these maps only: the server picks one of them at random; map bans in the game do not apply for now.', smapsNone: 'No season pool for this mode: the automatch takes any map of the mode.' } };
