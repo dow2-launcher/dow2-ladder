@@ -1,0 +1,10 @@
+# gitleaks: test fixtures, not secrets (fake tokens like 'tok-me-0123456789abc' in replay/tests/test_played.py, a test key in an old test_season_maps.py) - 20.11.2026
+f7a15c7fa992a5ba4cd77bce28b189ac220df66b:ladder/tests/test_season_maps.py:generic-api-key:86
+1d219f560cab8726640604e27c75062bdc614e5c:replay/tests/test_played.py:generic-api-key:46
+1d219f560cab8726640604e27c75062bdc614e5c:replay/tests/test_played.py:generic-api-key:49
+1d219f560cab8726640604e27c75062bdc614e5c:replay/tests/test_played.py:generic-api-key:51
+1d219f560cab8726640604e27c75062bdc614e5c:replay/tests/test_played.py:generic-api-key:52
+1d219f560cab8726640604e27c75062bdc614e5c:replay/tests/test_played.py:generic-api-key:53
+1d219f560cab8726640604e27c75062bdc614e5c:replay/tests/test_played.py:generic-api-key:55
+1d219f560cab8726640604e27c75062bdc614e5c:replay/tests/test_played.py:generic-api-key:60
+1d219f560cab8726640604e27c75062bdc614e5c:replay/tests/test_played.py:generic-api-key:61
