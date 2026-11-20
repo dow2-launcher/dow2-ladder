@@ -75,3 +75,19 @@ udp_gateway/battle_relay and gave the same stability.
 TCP as is from 83.217.192.34:47443/47445 to own_lobby / its stream check on rts (OwnLobby.dll tries Moscow first). Since
 07.11.2026: TCP keepalive on both sockets and a connection idle both ways for 120 s (MIRROR_IDLE) is closed. Restart only with
 no connections through it: `ss -tn state established "( sport = :47443 or sport = :47445 )"`.
+
+**Mirror memory (20.11.2026, prepared, NOT installed):** since 18.11 04:13 UTC the mirror's rss sits at its 250M cap (it jumped
+21 -> 246 MB inside one 3.4-min stall with a single client, 112.205.36.138, not a player) and with swap allowed it stalls for
+minutes at a time (7 times by 19.11; the 16:10-16:14 UTC one threw a whole 3v3 out of its match). `tcp_mirror.py` here is now
+the live 17.11 copy (bounded: MAX_CONN 400, PER_IP 24, BUF_MAX 1 MB). Prepared drop-in: `dow2-lobbymirror.service.d/memory.conf`
+(MemorySwapMax=0, Restart=always, RestartSec=1 - at the cap killed and back in a second instead of a stall). Install on timeweb
+with no connections through it: copy to /etc/systemd/system/dow2-lobbymirror.service.d/ (it replaces the 17.11 memory.conf of
+the same name), `systemctl daemon-reload && systemctl restart dow2-lobbymirror`.
+What to look at for the growth (the buffers are bounded per connection, so it is not one stuck peer as such):
+- `journalctl -u dow2-lobbymirror --since 2026-11-18T04:00 --until 2026-11-18T04:20` - the minute lines around the jump; the
+  same minutes in `journalctl -k` (memory pressure) and `sar -r` (sysstat runs there);
+- the stats line misses `per_ip` growth only if handle() never ran its `finally` - count asyncio tasks and the StreamReader /
+  transport buffer sizes per connection in that line (`len(asyncio.all_tasks())`, `sum(w.transport.get_write_buffer_size())`);
+- `python3 -X tracemalloc=25` for one run (or `tracemalloc.start()` + a top-10 snapshot every 30 s into the log) right after a
+  restart, to see what keeps growing; and whether a 47445 stream check (64 KB each way) that is cut mid-way leaves its buffers;
+- a watchdog: a missing stats line for > 45 s = stalled (alert / restart), until the cause is found.

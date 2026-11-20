@@ -7,10 +7,17 @@ OwnLobby.dll 2 tries this mirror first. Bytes are passed as they are (TLS end to
 hangs here forever (own_lobby closes idle game connections at 55 s itself, as Relic does at 60 s).
   tcp_mirror.py LISTEN_HOST:PORT=TARGET:PORT [...]     e.g. 83.217.192.34:47443=37.27.234.236:47443"""
 import asyncio, os, socket, sys, time
+# 17.11.2026: OOM on timeweb (894 MB, no swap) - the mirror grew to ~500-550 MB (53 kills since 07.11, the node froze 2-3 min
+# each time with dow2-battle/udpgw: a 3v3 lost at 21:55 MSK). Bounded now: MAX_CONN 400 (~100 MB worst case), at most
+# PER_IP connections from one address, a write that can't drain in DRAIN_S is dropped, the count is logged every minute.
 
-MAX_CONN = 2000
+MAX_CONN = int(os.environ.get('MIRROR_MAX_CONN', '400'))
+PER_IP = int(os.environ.get('MIRROR_PER_IP', '24'))
+DRAIN_S = 30
+BUF_MAX = 1 << 20   # a connection whose unsent buffer passes 1 MB is closed (one stuck peer must not eat the node)
 IDLE = int(os.environ.get('MIRROR_IDLE', '120'))   # s without a byte either way
 active = 0
+per_ip = {}
 
 def log(s): print(time.strftime('%H:%M:%S'), s, flush=True)
 
@@ -33,8 +40,11 @@ async def pipe(r, w, seen):
                 continue
             if not b: break
             seen[0] = time.monotonic()
-            w.write(b); await w.drain()
-    except (ConnectionError, OSError, asyncio.CancelledError): pass
+            w.write(b)
+            if w.transport.get_write_buffer_size() > BUF_MAX:
+                log('closing: unsent %d B to %s' % (w.transport.get_write_buffer_size(), w.get_extra_info('peername'))); break
+            await asyncio.wait_for(w.drain(), DRAIN_S)
+    except (ConnectionError, OSError, asyncio.CancelledError, asyncio.TimeoutError): pass
     finally:
         try: w.close()
         except Exception: pass
@@ -42,8 +52,9 @@ async def pipe(r, w, seen):
 def server(th, tp):
     async def handle(cr, cw):
         global active
-        if active >= MAX_CONN: cw.close(); return
-        active += 1
+        ip = (cw.get_extra_info('peername') or ('?',))[0]
+        if active >= MAX_CONN or per_ip.get(ip, 0) >= PER_IP: cw.close(); return
+        active += 1; per_ip[ip] = per_ip.get(ip, 0) + 1
         try:
             keepalive(cw.get_extra_info('socket'))
             try: ur, uw = await asyncio.wait_for(asyncio.open_connection(th, tp), 5)
@@ -52,8 +63,18 @@ def server(th, tp):
             keepalive(uw.get_extra_info('socket'))
             seen = [time.monotonic()]
             await asyncio.gather(pipe(cr, uw, seen), pipe(ur, cw, seen))
-        finally: active -= 1
+        finally:
+            active -= 1; per_ip[ip] -= 1
+            if per_ip[ip] <= 0: per_ip.pop(ip, None)
     return handle
+
+async def stats():
+    while True:
+        await asyncio.sleep(30)
+        top = sorted(per_ip.items(), key=lambda x: -x[1])[:3]
+        try: rss = int(open('/proc/self/statm').read().split()[1]) * 4 // 1024
+        except Exception: rss = -1
+        log('active %d, addresses %d, rss %d MB, top %s' % (active, len(per_ip), rss, top))
 
 async def main():
     srvs = []
@@ -62,6 +83,6 @@ async def main():
         lh, lp = l.rsplit(':', 1); th, tp = t.rsplit(':', 1)
         srvs.append(await asyncio.start_server(server(th, int(tp)), lh, int(lp), reuse_address=True))
         log('%s -> %s' % (l, t))
-    await asyncio.gather(*(s.serve_forever() for s in srvs))
+    await asyncio.gather(stats(), *(s.serve_forever() for s in srvs))
 
 asyncio.run(main())

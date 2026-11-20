@@ -273,7 +273,7 @@ SHORT_MATCH_S = 240     # s from the start: a match over before this (a surrende
 REPEAT_N = 3            # 1v1: the same pair's rated matches in REPEAT_S before this one - from the (REPEAT_N+1)-th on ...
 REPEAT_S = 86400
 REPEAT_W = 0.25         # ... both players' rating change is scaled by this (anti-abuse 3b, 17.11.2026)
-UNELIGIBLE = ('not_full_teams', 'no_steam', 'room', 'no_history', 'not_elite')   # rule 1: a manual winner does not make these rated
+UNELIGIBLE = ('not_full_teams', 'no_steam', 'room', 'no_history', 'not_elite', 'peer_order')   # rule 1: a manual winner does not make these rated
 SEASON_FILE = 'own_season.json'   # <data>/own_season.json {"label": "2026-pre", "start": <unix ts>, "info": "https://..." (optional)}: the (pre)season of the own rating
 # 17.11.2026 (SirItos: «ливы в первые 2-3 минуты - игра не в рейтинг»): with own_season.json the early-leave window and the short-match
 # threshold are both 3 min, and only Elite matches are rated (a vanilla automatch match stays stored, unrated 'not_elite').
@@ -421,6 +421,9 @@ def _decide_rules(m, ps, early_before):
     elif m.get('kind') == 'room' and not ROOMS_RATED: why_el = 'room'
     elif m.get('kind') not in ('mm', 'room'): why_el = 'no_history'      # not known to come from our automatch / a room
     elif m.get('elite_only') and m.get('mod') != ELITE_MOD: why_el = 'not_elite'   # preseason: the Elite table only (vanilla kept, unrated)
+    # 20.11.2026 (SirItos 19.11, m19 / m20): the game server numbered two guests otherwise than the host's game did (battle_relay
+    # match_log "swapped") - each played the other's army, the results are on the wrong people: never rated
+    elif m.get('peer_order'): why_el = 'peer_order'
     tids = sorted(teams, key=lambda t: (t is None, t))
     def other(t): return tids[1] if t == tids[0] else tids[0]
     def done(why, src=None):
@@ -497,7 +500,8 @@ def _match_input(c, sid):
     logs = _loads(node_log, []) or []
     if not isinstance(logs, list): logs = [logs]
     best = max(logs, key=lambda x: x.get('ticks') or 0) if logs else {}
-    m = dict(kind=kind, started=started, end_est=False, all_gone_s=best.get('all_gone_within_s'), conflict=False, mod=mod_of(modname))
+    m = dict(kind=kind, started=started, end_est=False, all_gone_s=best.get('all_gone_within_s'), conflict=False, mod=mod_of(modname),
+             peer_order=any(isinstance(x, dict) and x.get('swapped') for x in logs))
     cols = 'steam, pid, team, report_result, report_t, leave_t, menu_t, ruined_t'
     pl = [dict(zip(cols.split(', '), x)) for x in c.execute('SELECT %s FROM own_match_players WHERE sid = ?' % cols, (sid,))]
     if rep.get('backfill'):                              # 06-09.11: only the first report + the ladder's outcome per pid, no times
@@ -553,10 +557,20 @@ def resolve(sid, c, cfg=None):
     return r
 
 
+def shown(prev, cons, final):
+    """20.11.2026 (SirItos, variant B): the DISPLAYED rating - the table, the launcher, the player page and its match list - never goes
+    up after a loss nor down after a win. Glicko (mean, RD) stays as it is (the queue uses the mean); the displayed number is the
+    conservative rating (mean - 2*RD) made monotonic by the result: the first = the conservative at the end of calibration, after a
+    win max(previous, conservative), after a loss / a leave min(previous, conservative) (0 where the real number moved the other way)"""
+    if prev is None: return cons
+    return max(prev, cons) if final == 'win' else min(prev, cons)
+
+
 def recompute_own(c, log=print, cfg=None):
     """the shadow rating from scratch: Glicko-2 of the ladder over own_matches rated=1 (+ the leaver's own loss in an 'early_leave' /
     'short_match' match), in the order of the start; one match = one period, against the other team's average (as ladder.recompute);
-    the weight w < 1 scales his rating change. -> own_ratings (cons = rating - 2*RD, cal_left = calibration games left).
+    the weight w < 1 scales his rating change. -> own_ratings (cons = the DISPLAYED rating, see shown(); cal_left = calibration games
+    left); own_match_players own_c / own_d = the displayed rating after the match and its change.
     cfg = season_cfg() (the preseason): only the matches started at/after cfg['start'], all under cfg['label']; None = every match,
     its own quarter season (as before 17.11.2026). With cfg the matches before its start go to own_ratings_prev (the previous season:
     the old test, its quarter season, as it was before the preseason) - the player page shows them apart"""
@@ -566,7 +580,7 @@ def recompute_own(c, log=print, cfg=None):
                    'WHERE (rated = 1 OR why_unrated IN (?, ?)) '
                    'ORDER BY started, sid', ('early_leave', 'short_match')).fetchall()
     n, marks, D = 0, [], R
-    def get(steam, mode, season): return D.setdefault((steam, mode, season), [1500.0, 350.0, 0.06, 0, 0, 0, 0, 0])
+    def get(steam, mode, season): return D.setdefault((steam, mode, season), [1500.0, 350.0, 0.06, 0, 0, 0, 0, 0, None])
     for sid, started, season, rated, why, win in ms:
         prev = bool(cfg) and (started or 0) < cfg['start']
         D = P if prev else R
@@ -590,10 +604,11 @@ def recompute_own(c, log=print, cfg=None):
                 nr, nrd, nv = g2(st[0], st[1], st[2], [(avg[ot][0], avg[ot][1], s)])
                 upd.append((st, st[0] + w * (nr - st[0]), nrd, nv, final, started, steam))
         for st, nr, nrd, nv, final, t, steam in upd:
-            before = st[0] - 2 * st[1] if st[3] >= CAL_GAMES else None
+            before = st[8]
             st[0], st[1], st[2] = nr, nrd, nv
             st[3] += 1; st[4] += final == 'win'; st[5] += final != 'win'; st[6] += final == 'loss_leave'; st[7] = t
-            after = st[0] - 2 * st[1] if st[3] >= CAL_GAMES else None
+            st[8] = shown(st[8], st[0] - 2 * st[1], final) if st[3] >= CAL_GAMES else None
+            after = st[8]
             marks.append((after, after - before if after is not None and before is not None else None, st[3], sid, steam))
         n += not prev
     c.execute('UPDATE own_match_players SET own_c = NULL, own_d = NULL, own_n = NULL WHERE own_n IS NOT NULL')
@@ -603,7 +618,8 @@ def recompute_own(c, log=print, cfg=None):
         for (steam, mode, season), st in D.items():
             if not st[3]: continue
             c.execute('INSERT INTO %s VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)' % tbl,
-                      (steam, mode, season, st[0], st[1], st[2], st[3], st[4], st[5], st[6], max(0, CAL_GAMES - st[3]), st[0] - 2 * st[1], st[7]))
+                      (steam, mode, season, st[0], st[1], st[2], st[3], st[4], st[5], st[6], max(0, CAL_GAMES - st[3]),
+                       st[8] if st[8] is not None else st[0] - 2 * st[1], st[7]))
     log('own_matches: shadow rating from %d matches, %d player rows%s' % (n, sum(1 for v in R.values() if v[3]),
                                                                      ' (season %s from %d)' % (cfg['label'], cfg['start']) if cfg else ''))
     return n
@@ -677,7 +693,7 @@ def site_board(mode, season):
     """/ladder/api/own: the table (cal_left = 0, by cons = rating - 2*RD) and the players still in calibration (no rating shown)"""
     with _db() as c:
         try:
-            rows = c.execute('SELECT steam, rating, rd, games, wins, losses, leaves, cal_left, last FROM own_ratings '
+            rows = c.execute('SELECT steam, rating, rd, games, wins, losses, leaves, cal_left, last, cons FROM own_ratings '
                              'WHERE mode = ? AND season = ? ORDER BY cons DESC, games DESC', (mode, season)).fetchall()
             seasons = [r[0] for r in c.execute('SELECT DISTINCT season FROM own_ratings ORDER BY season DESC')]
         except sqlite3.OperationalError: rows, seasons = [], []          # no own_ratings yet (step 2 not run)
@@ -688,12 +704,12 @@ def site_board(mode, season):
         extra = sorted({s for s, _ in _roster(c, cfg['start'])} - have) if cfg and season == cfg['label'] else []
         nm = _names(c, [r[0] for r in rows] + extra)
     board, cal = [], []
-    for steam, rating, rd, games, wins, losses, leaves, cal_left, last in rows:
+    for steam, rating, rd, games, wins, losses, leaves, cal_left, last, cons in rows:
         p = {'steam': steam, 'name': nm.get(steam) or steam, 'games': games, 'wins': wins,
              'losses': losses - leaves, 'leaves': leaves, 'last': last, 'hours_played': hours_of(steam)}
         if cal_left > 0: p['cal_left'] = cal_left; cal.append(p)
         else:
-            p.update(rank=len(board) + 1, cons=round(rating - 2 * rd), rating=round(rating), rd=round(rd)); board.append(p)
+            p.update(rank=len(board) + 1, cons=round(cons), rating=round(rating), rd=round(rd)); board.append(p)   # cons = the displayed (shown())
     for steam in extra:                  # the test's players with no preseason game yet: calibration 0/5 (the table is not wiped)
         cal.append({'steam': steam, 'name': nm.get(steam) or steam, 'games': 0, 'wins': 0, 'losses': 0, 'leaves': 0, 'last': None,
                     'hours_played': hours_of(steam), 'cal_left': CAL_GAMES})
@@ -715,15 +731,15 @@ def site_all(season):
     the losses without the leaves, as site_board"""
     with _db() as c:
         try:
-            rows = c.execute('SELECT steam, mode, rating, rd, games, wins, losses, leaves, cal_left FROM own_ratings '
+            rows = c.execute('SELECT steam, mode, rating, rd, games, wins, losses, leaves, cal_left, cons FROM own_ratings '
                              'WHERE season = ? ORDER BY mode, cons DESC, games DESC', (season,)).fetchall()
         except sqlite3.OperationalError: rows = []          # no own_ratings yet (step 2 not run)
     players, place = {}, {}
-    for steam, mode, rating, rd, games, wins, losses, leaves, cal_left in rows:
+    for steam, mode, rating, rd, games, wins, losses, leaves, cal_left, cons in rows:
         p = {'g': games, 'w': wins, 'l': losses - leaves, 'lv': leaves, 'cal': cal_left}
         if cal_left <= 0:
             place[mode] = place.get(mode, 0) + 1
-            p.update(c=round(rating - 2 * rd), rank=place[mode])
+            p.update(c=round(cons), rank=place[mode])
         players.setdefault(steam, {'hours_played': hours_of(steam)})[mode] = p   # 17.11.2026: + his hours (null = not known)
     return {'season': season, 'cal_games': CAL_GAMES, 'players': players}
 
@@ -734,7 +750,7 @@ def site_player(steam, race_key=lambda rc, modname: None, limit=50):
     cfg = season_cfg()
     with _db() as c:
         try:
-            rt = c.execute('SELECT mode, season, rating, rd, games, wins, losses, leaves, cal_left, last FROM own_ratings '
+            rt = c.execute('SELECT mode, season, rating, rd, games, wins, losses, leaves, cal_left, last, cons FROM own_ratings '
                            'WHERE steam = ? ORDER BY season DESC, mode', (steam,)).fetchall()
         except sqlite3.OperationalError: rt = []
         sids = [r[0] for r in c.execute('SELECT p.sid FROM own_match_players p JOIN own_matches m ON m.sid = p.sid '
@@ -766,7 +782,7 @@ def site_player(steam, race_key=lambda rc, modname: None, limit=50):
             cal_modes = sorted(m for _, m in _roster(c, cfg['start'], steam=steam) if m in MODES_ALL)
             try:
                 ps = c.execute('SELECT MAX(season) FROM own_ratings_prev').fetchone()[0]
-                pr = c.execute('SELECT mode, season, rating, rd, games, wins, losses, leaves, cal_left, last FROM own_ratings_prev '
+                pr = c.execute('SELECT mode, season, rating, rd, games, wins, losses, leaves, cal_left, last, cons FROM own_ratings_prev '
                                'WHERE steam = ? AND season = ? ORDER BY mode', (steam, ps)).fetchall() if ps else []
             except sqlite3.OperationalError: ps, pr = None, []
             if pr: prev = {'season': ps, 'ratings': [_rating_row(r, _rank(c, 'own_ratings_prev', r) if r[8] <= 0 else None) for r in pr]}
@@ -777,12 +793,12 @@ def site_player(steam, race_key=lambda rc, modname: None, limit=50):
 def _rank(c, tbl, r):
     """the place of a calibrated row (mode, season, rating, rd, games, ...) in its table: the board's order, cons then games"""
     return 1 + c.execute('SELECT COUNT(*) FROM %s WHERE mode = ? AND season = ? AND cal_left <= 0 AND '
-                         '(cons > ? OR (cons = ? AND games > ?))' % tbl, (r[0], r[1], r[2] - 2 * r[3], r[2] - 2 * r[3], r[4])).fetchone()[0]
+                         '(cons > ? OR (cons = ? AND games > ?))' % tbl, (r[0], r[1], r[10], r[10], r[4])).fetchone()[0]
 
 
 def _rating_row(r, rank):
     return {'mode': r[0], 'season': r[1], 'games': r[4], 'wins': r[5], 'losses': r[6] - r[7], 'leaves': r[7], 'cal_left': r[8], 'last': r[9],
-            **({} if r[8] > 0 else {'cons': round(r[2] - 2 * r[3]), 'rating': round(r[2]), 'rd': round(r[3]), 'rank': rank})}
+            **({} if r[8] > 0 else {'cons': round(r[10]), 'rating': round(r[2]), 'rd': round(r[3]), 'rank': rank})}
 
 
 # ---------- 17.11.2026: the own rating for the matchmaking and the launcher (read only) ----------
@@ -800,9 +816,9 @@ def _season_rows(season):
     rows = {}
     try:
         with _db() as c:
-            for steam, mode, r, rd, g, w, l, lv, cl in c.execute('SELECT steam, mode, rating, rd, games, wins, losses, leaves, cal_left '
-                                                                   'FROM own_ratings WHERE season = ?', (season,)):
-                rows.setdefault(str(steam), {})[mode] = (r, rd, g, w, l, lv, cl)
+            for steam, mode, r, rd, g, w, l, lv, cl, cn in c.execute('SELECT steam, mode, rating, rd, games, wins, losses, leaves, cal_left, '
+                                                                       'cons FROM own_ratings WHERE season = ?', (season,)):
+                rows.setdefault(str(steam), {})[mode] = (r, rd, g, w, l, lv, cl, cn)
     except Exception as e:
         if not isinstance(e, sqlite3.OperationalError): _log('own cache', e)
         rows = _CACHE['rows'] if _CACHE['season'] == season else {}
@@ -821,9 +837,10 @@ def own_mode(row):
     if not row:
         return {'rating': None, 'rd': None, 'conservative': None, 'games': 0, 'wins': 0, 'losses': 0, 'leaves': 0,
                 'calibrating': True, 'cal_played': 0, 'cal_needed': CAL_GAMES}
-    r, rd, g, w, l, lv, cl = row
+    r, rd, g, w, l, lv, cl = row[:7]
+    cn = row[7] if len(row) > 7 and row[7] is not None else r - 2 * rd      # 20.11.2026: the displayed rating (shown())
     cal = cl > 0
-    return {'rating': None if cal else round(r), 'rd': None if cal else round(rd), 'conservative': None if cal else round(r - 2 * rd),
+    return {'rating': None if cal else round(r), 'rd': None if cal else round(rd), 'conservative': None if cal else round(cn),
             'games': g, 'wins': w, 'losses': l - lv, 'leaves': lv, 'calibrating': cal, 'cal_played': min(g, CAL_GAMES), 'cal_needed': CAL_GAMES}
 
 

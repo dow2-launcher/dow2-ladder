@@ -3,7 +3,8 @@
 send every game turn across the ocean. Protocol learned from captures (capture_proxy.py, 27.10.2026):
 
   frame:  u16 BE length + message, message[0] = type
-  15  hello      15 <sid u32 LE> 00000000 <id 8> <flag>        -> join session sid, echo back. Peer index = join order (1..)
+  15  hello      15 <sid u32 LE> 00000000 <id 8> <flag>        -> join session sid, echo back. Peer number: the host at its
+                                                                   hello, a guest at his first peer announce (see "Peer numbers")
   14  ping       14 <stamp 4>                                   -> echo back
   13  to peer    13 <dst> <src> <inner>                         -> to peer #dst unchanged; inner "0f 05.." (peer announce)
                                                                    goes to everyone in the session, header stripped
@@ -63,6 +64,17 @@ it. "DWRL" + sid (4) + from record (u32 LE) + delay s (u32 LE) + game (1: 0 Elit
 connection closes: "DWLR" ver flags available ticks header_len header body_len records[from:available] json_len json (all u32
 LE; flags 1 = over and all given, 2 = not started / no lobby state, 4 = no such session). The ladder asks (its /live/ API).
 A session that ended stays LIVE_KEEP s for the spectators who are behind.
+Peer numbers (20.11.2026, SirItos 19.11 "one nick shown, another player plays"): the host's game never sees a guest's hello - it
+numbers its guests in the order their peer announces (13 00 .. 0f 05, passed on header stripped) reach it. Numbering at the hello
+(as before) gave two guests that connected close together each other's number whenever the later hello's announce came first
+(a chained guest: its first node answers the hello itself and passes hello + announce on together, a direct one waits for the
+echo) - each then played the other's army (m19 / m20 of 19.11). Now a guest gets his number when his FIRST announce is passed
+on, in the same step (no await between): the host sees the announces in exactly our numbering. The first player of a session
+(its host) and a reconnecting player (by_pid) are numbered at the hello as before. A guest that overtook an earlier hello is
+logged (ev=order_mismatch) and kept in the session's "match_log" line (order_mismatch, swapped); RELAY_NUMBER_AT=hello = the old
+numbering (then such a match is a real swap: swapped=true, the ladder leaves it unrated - why_unrated 'peer_order').
+FIN grace (20.11.2026, OFF unless RELAY_FIN_GRACE >= 0): a player whose game closed its connection itself (FIN - it left the match
+to the menu) stays "away" only that many seconds instead of GRACE / LONG_GRACE (the others' "wait for him?" lines for 170 s).
 Monitoring (05.11.2026): every RELAY_STATS_EVERY s (15) one ev=session_stats line per live session: members, and per player
 for that interval turns, stalls (gaps > GAP), the longest stall, messages/s and KB/s that came from him, his send buffer.
 Node quality per player (06.11.2026): the "leave" line of a player carries his Steam id (from his peer announce) and "solo" /
@@ -79,6 +91,8 @@ except Exception: live_rec = None
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 47100
 BIND = sys.argv[2] if len(sys.argv) > 2 else '127.0.0.1'
 TICK = 0.1
+NUMBER_AT = 'hello' if os.environ.get('RELAY_NUMBER_AT', 'announce').strip().lower() == 'hello' else 'announce'   # see "Peer numbers"
+FIN_GRACE = float(os.environ.get('RELAY_FIN_GRACE', '-1'))    # s for a player that closed with FIN; < 0 = off (GRACE / LONG_GRACE as before)
 IDLE = 60
 HISTORY = int(os.environ.get('RELAY_HISTORY', '72000'))   # ticks a session keeps for reconnects (2 h of 0.1 s)
 GRACE = float(os.environ.get('RELAY_RECONNECT_GRACE', '45'))  # s a player whose connection broke mid-game stays in the ticks (silent)
@@ -170,6 +184,9 @@ class Peer:
         self.turn_mark = 0                                # the session's turn count at his last turn
         self.why = None                                   # why the connection ended: fin / reset / idle / replaced / vote_drop / error
         self.pl = None                                    # his record in Session.plog (the match protocol)
+        self.hello_n = 0                                  # his place in the session's hello order (new players only; 0 = none)
+        self.hello_t = None                               # when his hello came (the match protocol's join_t)
+        self.announced = False                            # his first peer announce passed on already
 
     def stats(self):
         i = tcp_info(self.w)
@@ -203,11 +220,13 @@ class Session:
         self.votes = {}                                   # number waited for -> player ids that voted "don't wait"
         self.started = time.time(); self.ticks = 0; self.turn_msgs = 0; self.late = 0; self.max_late = 0.0
         self.plog = {}                                    # player id -> his record for the "match_log" line (10.11.2026)
+        self.hello_seq = 0                                # hellos of new players so far (Peer.hello_n)
+        self.mismatch = []                                # guests whose first announce overtook an earlier hello: [{idx, pid, overtook}]
 
     def _plog_join(self, p, a):
         r = self.plog.get(p.pid)
         if r is None:
-            r = self.plog[p.pid] = dict(idx=p.idx, join_t=round(time.time(), 3), rejoins=0, ftt=None, ltt=None, leave_t=None,
+            r = self.plog[p.pid] = dict(idx=p.idx, join_t=round(p.hello_t or time.time(), 3), rejoins=0, ftt=None, ltt=None, leave_t=None,
                                         leave_tick=None, leave_turns=None, reason=None, away_s=0.0, solo=0, max_solo_ms=0,
                                         gaps=0, max_gap_ms=0, turns=0, drops=[], peer=p.addr)
         else:
@@ -241,7 +260,8 @@ class Session:
         lt = [x['leave_t'] for x in pl if x['leave_t']]
         return dict(ev='match_log', v=1, sid=int.from_bytes(self.sid, 'little'), node=NODE, started=round(self.started, 3),
                     t0=round(self.tick_t[0], 3) if self.tick_t else None, t_end=round(now, 3), ticks=self.ticks, turns=self.turn_msgs,
-                    late_ticks=self.late, players=pl,
+                    late_ticks=self.late, players=pl, numbering=NUMBER_AT, order_mismatch=self.mismatch,
+                    swapped=bool(self.mismatch) and NUMBER_AT == 'hello',
                     all_gone_within_s=round(max(lt) - min(lt), 1) if lt and len(lt) == len(pl) else None)
 
     def join(self, p):
@@ -253,28 +273,66 @@ class Session:
             self.peers.remove(q); q.why = q.why or 'replaced'
             try: q.w.close()
             except Exception: pass
-        if p.pid in self.by_pid: p.idx = self.by_pid[p.pid]
-        else: p.idx = self.by_pid[p.pid] = self.next_idx; self.next_idx += 1
+        p.hello_t = time.time()
+        if p.pid in self.by_pid: p.idx = self.by_pid[p.pid]; p.announced = True          # a reconnect keeps his number
+        else:
+            self.hello_seq += 1; p.hello_n = self.hello_seq
+            if NUMBER_AT == 'hello' or not any(q.idx for q in self.peers) and not self.by_pid: self._number(p)   # the session's first (host)
+            else: p.idx = 0                               # a guest: numbered at his first peer announce (Session.announced)
         p.sess = self; self.peers.append(p)
         a = self.away.pop(p.pid, None)
-        try: self._plog_join(p, a)
-        except Exception as e: mlog_err('join', e)
+        if p.idx:
+            try: self._plog_join(p, a)
+            except Exception as e: mlog_err('join', e)
         if a:
             log(ev='back', sid=int.from_bytes(self.sid, 'little'), idx=p.idx, peer=p.addr, after_s=round(time.monotonic() - a[2], 1))
             self.votes.pop(p.idx, None)
             self.notice(a[0], None)
 
+    def _number(self, p):
+        p.idx = self.by_pid[p.pid] = self.next_idx; self.next_idx += 1
+
+    def announced(self, p, first_kind='announce'):
+        """p's first peer announce is being passed on (or, failing that, his first other game message): in announce numbering a
+        guest gets his number here, right before the announce goes out - the host's game numbers its guests in this very order.
+        Either way: a guest whose announce overtook an earlier hello (that one not announced yet) is logged - in hello numbering
+        that is a swap of numbers between the two games"""
+        if p.announced: return
+        p.announced = True
+        over = [q for q in self.peers if q is not p and q.hello_n and q.hello_n < p.hello_n and not q.announced and q.hello_n > 1]
+        if p.idx == 0:
+            self._number(p)
+            try: self._plog_join(p, None)
+            except Exception as e: mlog_err('number', e)
+            log(ev='number', sid=int.from_bytes(self.sid, 'little'), idx=p.idx, peer=p.addr, pid=p.pid.hex(), by=first_kind,
+                hello_n=p.hello_n)
+        if over and p.hello_n > 1:
+            e = dict(idx=p.idx, pid=p.pid.hex(), overtook=[q.pid.hex() for q in over], by=first_kind)
+            if len(self.mismatch) < 20: self.mismatch.append(e)
+            log(ev='order_mismatch', sid=int.from_bytes(self.sid, 'little'), numbering=NUMBER_AT,
+                swapped=NUMBER_AT == 'hello', **e)
+
     def leave(self, p, why=None):
         if p in self.peers: self.peers.remove(p)
+        if not p.idx:                                     # a guest that never announced: never a number, nothing to wait for
+            if not self.peers and not self.away: self.end()
+            return
         try: self._plog_leave(p, p.why or why or 'closed')
         except Exception as e: mlog_err('leave', e)
         # 06.11.2026: a player whose connection breaks in the match stays in the ticks as silent for GRACE s - the game reconnects
         # by itself 15 s after the break; a player missing from a tick (neither sent nor silent) is dropped by the others at once
         if self.ticks and GRACE > 0 and p.pid and p.pid not in self.gone and not any(q.pid == p.pid for q in self.peers):
             g = LONG_GRACE if p.rejoin else GRACE
-            self.away[p.pid] = (p.idx, time.monotonic() + g, p.last_turn or time.monotonic())   # away since his last turn
-            log(ev='away', sid=int.from_bytes(self.sid, 'little'), idx=p.idx, peer=p.addr, grace=g, name=self.names.get(p.idx, ''))
+            if FIN_GRACE >= 0 and (p.why or why) == 'fin': g = min(g, FIN_GRACE)   # his game left by itself (FIN): a short wait
             self.lagging.discard(p.idx)
+            if g <= 0:                                    # FIN_GRACE 0: dropped at once (missing from the next tick: the games drop him)
+                self.gone.add(p.pid); log(ev='fin_drop', sid=int.from_bytes(self.sid, 'little'), idx=p.idx, name=self.names.get(p.idx, ''))
+                try: self._plog_gone(p.pid, 'fin_drop', None)
+                except Exception as e: mlog_err('fin', e)
+                self.notice(p.idx, None)
+            else:
+                self.away[p.pid] = (p.idx, time.monotonic() + g, p.last_turn or time.monotonic())   # away since his last turn
+                log(ev='away', sid=int.from_bytes(self.sid, 'little'), idx=p.idx, peer=p.addr, grace=g, name=self.names.get(p.idx, ''))
         if not self.peers and not self.away: self.end()   # everyone away (the node's own network?): the ticks go on until GRACE
 
     def end(self):
@@ -294,7 +352,7 @@ class Session:
         waited = idx in self.lagging or any(a[0] == idx for a in self.away.values())
         if not waited or p.idx == idx: return
         v = self.votes.setdefault(idx, set()); v.add(p.pid)
-        need = {q.pid for q in self.peers if q.idx != idx}
+        need = {q.pid for q in self.peers if q.idx and q.idx != idx}
         log(ev='vote', sid=int.from_bytes(self.sid, 'little'), idx=idx, by=p.idx, votes=len(v & need), need=len(need))
         if not need <= v:
             a = next((a for a in self.away.values() if a[0] == idx), None) or (idx, None, time.monotonic())
@@ -320,7 +378,7 @@ class Session:
             left = 0xFFFE if a[1] is None else max(0, min(0xFFFD, int(a[1] - now)))   # 0xFFFE: connected but silent (not dropped yet)
         else: left, gone = 0xFFFF, 0
         nm = (self.names.get(idx) or '').encode()[:60]
-        need = [q.pid for q in self.peers if q.idx != idx]
+        need = [q.pid for q in self.peers if q.idx and q.idx != idx]
         got = len(self.votes.get(idx, set()) & set(need))
         m = (bytes([NOTICE, idx]) + min(left, 0xFFFF).to_bytes(2, 'big') + min(gone, 0xFFFF).to_bytes(2, 'big') + bytes([len(nm)]) + nm
              + bytes([min(got, 255), min(len(need), 255)]))                # Relay 25: "don't wait" votes / players asked
@@ -361,7 +419,7 @@ class Session:
             if late > 0.5: nxt = time.monotonic()            # after a long hold: carry on from now, no burst of catch-up ticks
             q, self.queue = self.queue, []
             sent = {i for i, _ in q}
-            silent = [p.idx for p in self.peers if p.idx not in sent]
+            silent = [p.idx for p in self.peers if p.idx and p.idx not in sent]
             now = time.monotonic()
             if self.ticks % 10 == 0 and len(self.peers) > 1:              # connected but silent: the others wait for him already
                 for p in self.peers:
@@ -545,12 +603,14 @@ def handle_msg(p, m, echo=True):
         return
     s = p.sess
     if s is None: log(ev='no_session', type=t, peer=p.addr); return
+    if not p.announced and not (t == 0x13 and m[3:5] == b'\x0f\x05'): s.announced(p, 'msg_%02x' % t)   # a game message before any announce
     if t == 0x13:
         inner = m[3:]
         if inner[:2] == b'\x0f\x05' and m[1] == 0 and len(s.peers) == 1:   # a guest (does not know its number yet) alone here:
             log(ev='mixed', sid=int.from_bytes(s.sid, 'little'), peer=p.addr)  # this lobby's host plays on Relic's servers
             p.w.write(b'DWRERR:mixed\n'); p.w.close(); return              # Relay.dll 7 shows why and closes the game
         if inner[:2] == b'\x0f\x05':                                 # peer announce: everyone, header stripped
+            s.announced(p)                                           # a guest's number: now, before it goes out (Peer numbers)
             if p.idx not in s.names:
                 nm, st = announce_who(inner)
                 if nm: s.names[p.idx] = nm
