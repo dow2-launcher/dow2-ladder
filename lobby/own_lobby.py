@@ -553,7 +553,7 @@ def lroom_turn(x, v, steam):
     return bool(t0 and now - t0 >= LROOM_GAP)
 
 
-NM_GUEST_GAP = float(os.environ.get('NM_GUEST_GAP', '1.5'))   # s between two guests of a native room getting its id (0 = all at once)
+NM_GUEST_GAP = float(os.environ.get('NM_GUEST_GAP', '0.5'))   # s between two guests of a native room getting its id (0 = all at once)
 NM_ROOM_T = {}                    # match -> when its room's id became known here (nm_hosted)
 
 

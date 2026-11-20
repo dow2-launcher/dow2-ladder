@@ -446,12 +446,29 @@ def _own_mm(steam, mode, game, base):
     try: return own_matches.mm_rating(steam, mode)
     except Exception as e: print('mm: own rating of %s: %r' % (steam, e), flush=True); return base
 
-def _own_window(waiting):  # under MM_LOCK: the rating window of a pool (own_matches.mm_window), None = no window (as before 17.11)
+MM_ALONE_S = float(os.environ.get('MM_ALONE_S', '10'))   # s: a pool of exactly one match's players, nobody new for this long -> they play
+MM_ALONE_LOGGED = set()
+
+def _own_window(waiting, need=None):  # under MM_LOCK: the rating window of a pool (own_matches.mm_window), None = no window (as before 17.11)
     if not waiting or not str(waiting[0].get('game') or '').lower().startswith('elite') or not own_matches.season_cfg(): return None
     now = time.time()
     def ok(g):
         w = own_matches.mm_window(now - min(p['ts'] for p in g), max(p.get('rd') or 0 for p in g))
         return w is None or max(p['rating'] for p in g) - min(p['rating'] for p in g) <= w
+    # 20.11.2026 (SirItos): exactly the players of one match in the pool (a party counts with all its members) and nobody new for
+    # MM_ALONE_S: they play whatever the window - nobody else is there to wait for
+    last = max(p.get('jts') or p['ts'] for p in waiting)
+    if need and len(waiting) == need and now - last >= MM_ALONE_S:
+        def alone(g):
+            if not ok(g):
+                key = frozenset(p['steam'] for p in g)
+                if key not in MM_ALONE_LOGGED:
+                    MM_ALONE_LOGGED.add(key)
+                    if len(MM_ALONE_LOGGED) > 500: MM_ALONE_LOGGED.clear()
+                    print('mm: quick match - only these %d in the %s pool for %.0f s, the rating window (spread %.0f) ignored' % (
+                        len(g), g[0].get('mode'), now - last, max(p['rating'] for p in g) - min(p['rating'] for p in g)), flush=True)
+            return True
+        return alone
     return ok
 
 OWN_RETRY = [0.0]
@@ -556,7 +573,7 @@ def _try_match(mode):  # под MM_LOCK: нестрогий подбор с пр
         # everyone else (compatible, or without the add-on) plays with anybody. Whoever waits longest anchors a match he fits in.
         forced = lambda x: x.get('own') and not x.get('compat')
         fits = lambda g: not any(forced(x) for x in g) or all(x.get('own') for x in g)
-        win = _own_window(waiting)                              # 17.11.2026 preseason: a rating window widening with the wait
+        win = _own_window(waiting, need)                        # 17.11.2026 preseason: a rating window widening with the wait
         if win: fits = (lambda f0: lambda g: f0(g) and win(g))(fits)
         grp = None
         # 18.11.2026 (SirItos): Elite with a season pool (own_season.json "maps", _season_pool) - the players' map wishes neither
