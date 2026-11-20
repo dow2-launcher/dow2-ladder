@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DoW2 Replay Analyzer</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js" integrity="sha512-xeUh+KxNyTufZOje++oQHstlMQ8/rpyzPuM+gjMFYK3z5ILJGE7l2NvYL+XfliKURMpBIKKp1XoPN/qswlSMFA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <style>
 :root { --bg:#0f1012; --panel:#17191c; --line:#2a2d32; --text:#e6e3dc; --muted:#9a968c; --gold:#e6c35c; --red:#b0413e; }
 @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg:#f4f1ea; --panel:#ffffff; --line:#ddd6c8; --text:#1f1d1a; --muted:#6b665c; --gold:#9a7a1c; --red:#a33a37; } }
@@ -145,9 +145,11 @@ function applyLang() {
   $('len').classList.toggle('on', L === 'en'); $('lru').classList.toggle('on', L === 'ru');
 }
 function setLang(l) { L = l; try { localStorage.setItem('lang', l); } catch (e) {} applyLang(); if (rid) loadResult(); else { fillSel(MAPS); loadList(); } }
-const esc = s => (s || '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+// esc: text and attribute values (quotes too); escMd: the markdown source before marked (quotes stay as typed, code spans unchanged)
+const esc = s => (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const escMd = s => (s || '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 // ники в реплее задаёт кто угодно: сырой HTML экранируем, итог чистим DOMPurify; без библиотек — просто текст
-const md = s => (window.marked && window.DOMPurify) ? DOMPurify.sanitize(marked.parse(esc(s))) : '<pre>' + esc(s) + '</pre>';
+const md = s => (window.marked && window.DOMPurify) ? DOMPurify.sanitize(marked.parse(escMd(s))) : '<pre>' + esc(s) + '</pre>';
 
 async function upload(f) {
   if (!f) return;

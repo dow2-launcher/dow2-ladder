@@ -33,7 +33,10 @@
     // the page may have moved (tabs, #how, ?mode=) since it was drawn: the link takes where it is at the click
     var at = function (e) {
       var a = e.target.closest && e.target.closest('a[data-h]');
-      if (a) a.href = 'https://' + a.getAttribute('data-h') + location.pathname + location.search + location.hash;
+      if (!a) return;
+      var h = a.getAttribute('data-h'), host = null;   // the host is taken from M, never from the page's text (CodeQL js/xss-through-dom)
+      for (var i = 0; i < M.length; i++) if (M[i][0] === h) host = M[i][0];
+      if (host) a.href = 'https://' + host + location.pathname + location.search + location.hash;
     };
     ['mouseover', 'focusin', 'click', 'auxclick', 'touchstart'].forEach(function (n) { box.addEventListener(n, at, { passive: true }); });
   }

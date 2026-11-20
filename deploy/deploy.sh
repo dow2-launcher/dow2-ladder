@@ -103,8 +103,8 @@ if has lobby/ && [ -d /srv/ownlobby/app ]; then
   since=$(date '+%Y-%m-%d %H:%M:%S'); systemctl reload dow2-ownlobby; sleep 3
   if journalctl -u dow2-ownlobby --since "$since" --no-pager | grep -q "taken over"; then done_parts="$done_parts лобби"
   else
-    rooms=$(curl -s -m 5 http://127.0.0.1:47444/ | python3 -c 'import json,sys
-try: print(len(json.load(sys.stdin).get("rooms", [])))
+    rooms=$(python3 -c 'import json, urllib.request   # the lobby status port, read without a curl pipe (Scorecard)
+try: print(len(json.load(urllib.request.urlopen("http://127.0.0.1:47444/", timeout=5)).get("rooms", [])))
 except Exception: print(0)')
     if [ "${rooms:-0}" -gt 0 ]; then pending="$pending
 lobby/"; else systemctl restart dow2-ownlobby && done_parts="$done_parts лобби"; fi

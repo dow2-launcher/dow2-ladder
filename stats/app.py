@@ -491,7 +491,9 @@ class H(BaseHTTPRequestHandler):
         os.makedirs(LOGDIR, exist_ok=True)
         rid = time.strftime('%Y%m%d-%H%M%S') + '-' + os.urandom(3).hex()
         who = re.sub(r'[^\w.-]', '_', (qs.get('who', ['anon'])[0]))[:32] or 'anon'
-        dst = f'{LOGDIR}/{rid}_{who}.txt.gz'
+        dst = os.path.normpath(os.path.join(LOGDIR, f'{rid}_{who}.txt.gz'))   # one file right in LOGDIR (CodeQL py/path-injection)
+        if not dst.startswith(os.path.normpath(LOGDIR) + os.sep) or os.path.dirname(dst) != os.path.normpath(LOGDIR):
+            return self.send(400, {'error': 'bad name'})
         uid = (qs.get('uid', [''])[0])
         if re.fullmatch(r'[A-Za-z0-9_-]{16,64}', uid):        # the launcher chat id: the answer about these logs goes into that chat
             with open(f'{LOGDIR}/{rid}.uid', 'w') as f: f.write(uid)

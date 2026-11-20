@@ -312,7 +312,7 @@ var I18N = {"ru": {"live_ingame": "Сейчас в DoW II:", "live_launcher": "�
     for (var i = 0; i < els.length; i++) { var k = els[i].getAttribute("data-i"); if (d[k] != null) els[i].innerHTML = d[k]; }
     var shots = document.querySelectorAll("img[data-ru]");   // the launcher screenshots: Russian ones for the Russian page
     for (var q = 0; q < shots.length; q++) { var im = shots[q]; if (!im.getAttribute("data-en")) im.setAttribute("data-en", im.getAttribute("src"));
-      var want = im.getAttribute(lang === "ru" ? "data-ru" : "data-en"); if (im.getAttribute("src") !== want) im.setAttribute("src", want); }
+      var want = encodeURI(im.getAttribute(lang === "ru" ? "data-ru" : "data-en") || ""); if (want && im.getAttribute("src") !== want) im.setAttribute("src", want); }
     setOS(os);
     document.title = d.title; document.documentElement.lang = lang;
     var ls = document.querySelectorAll("#langs a");
