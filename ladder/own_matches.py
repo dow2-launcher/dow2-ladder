@@ -422,8 +422,10 @@ def _decide_rules(m, ps, early_before):
     elif m.get('kind') not in ('mm', 'room'): why_el = 'no_history'      # not known to come from our automatch / a room
     elif m.get('elite_only') and m.get('mod') != ELITE_MOD: why_el = 'not_elite'   # preseason: the Elite table only (vanilla kept, unrated)
     # 20.11.2026 (SirItos 19.11, m19 / m20): the game server numbered two guests otherwise than the host's game did (battle_relay
-    # match_log "swapped") - each played the other's army, the results are on the wrong people: never rated
-    elif m.get('peer_order'): why_el = 'peer_order'
+    # match_log "swapped") - each played the other's army, the results are on the wrong people: never rated.
+    # 20.11.2026 (SirItos: "don't mark it yet - we aim for no swaps at all"): only with data/own_peer_order_unrate present;
+    # otherwise the match is rated as usual and the swap stays in the node's log / the match's notes
+    elif m.get('peer_order') and os.path.exists(os.path.join(DATA_DIR, 'own_peer_order_unrate')): why_el = 'peer_order'
     tids = sorted(teams, key=lambda t: (t is None, t))
     def other(t): return tids[1] if t == tids[0] else tids[0]
     def done(why, src=None):
