@@ -10,6 +10,11 @@ Both runs: the relay's log must have ev=order_mismatch and the session's match_l
 Then RELAY_FIN_GRACE: a player whose game closes its connection (FIN) is out of the ticks at once with RELAY_FIN_GRACE=0, and stays
 in them as silent (the old wait) with it off (-1)."""
 import asyncio, json, os, socket, subprocess, sys, tempfile, time
+
+
+def _tmpfile(**kw):
+    """a new empty temp file's path (mkstemp: created atomically and only for us; CodeQL: no mktemp)"""
+    fd, path = tempfile.mkstemp(**kw); os.close(fd); return path
 HERE = os.path.dirname(os.path.abspath(__file__)); RELAY = os.path.join(HERE, '..', 'battle_relay.py')
 SID = (777001).to_bytes(4, 'little')
 fails = []
@@ -98,7 +103,7 @@ def events(logf):
 
 
 def order_case(mode):
-    logf = tempfile.mktemp(prefix='relay_order_', suffix='.jsonl')
+    logf = _tmpfile(prefix='relay_order_', suffix='.jsonl')
     srv, port = relay({'RELAY_NUMBER_AT': mode}, logf)
     try: num, got, snd = asyncio.run(order_run(port)); time.sleep(2.0)   # the away grace (0.5 s) runs out: the session ends, match_log
     finally: srv.terminate(); srv.communicate(timeout=5)
@@ -131,7 +136,7 @@ async def fin_run(port):
 
 
 def fin_case(val, grace='30'):
-    logf = tempfile.mktemp(prefix='relay_fin_', suffix='.jsonl')
+    logf = _tmpfile(prefix='relay_fin_', suffix='.jsonl')
     s = socket.socket(); s.bind(('127.0.0.1', 0)); port = s.getsockname()[1]; s.close()
     env = dict(os.environ, RELAY_PEERS='', RELAY_STATS_EVERY='0', RELAY_LOG=logf, RELAY_RECONNECT_GRACE=grace, RELAY_FIN_GRACE=val)
     srv = subprocess.Popen([sys.executable, RELAY, str(port), '127.0.0.1'], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)

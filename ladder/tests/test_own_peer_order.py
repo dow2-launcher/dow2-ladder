@@ -16,6 +16,11 @@ r = o.decide(dict(kind='mm', started=T0, conflict=False), ps)
 ok('a clean 2v2 is rated', r['rated'] == 1 and r['why'] is None, r)
 # 20.11.2026: unrating a swap is opt-in (data/own_peer_order_unrate); without the file a swapped match is rated as usual
 import tempfile as _tf
+
+
+def _tmpfile(**kw):
+    """a new empty temp file's path (mkstemp: created atomically and only for us; CodeQL: no mktemp)"""
+    fd, path = tempfile.mkstemp(**kw); os.close(fd); return path
 _d = _tf.mkdtemp(); o.DATA_DIR = _d
 r0 = o.decide(dict(kind='mm', started=T0, conflict=False, peer_order=True), ps)
 ok('without the switch file: a swapped match is rated as usual', r0['rated'] == 1 and r0['why'] != 'peer_order', r0)
@@ -25,7 +30,7 @@ ok('the same with peer_order: unrated, why peer_order', r['rated'] == 0 and r['w
 r = o.decide(dict(kind='mm', started=T0, conflict=False, peer_order=True, override={'action': 'winner', 'team': 1}), ps)
 ok('a manual winner keeps it unrated (rule 1)', r['rated'] == 0 and r['why'] == 'peer_order' and r['winner_team'] == 1, r)
 # _match_input reads the node's match_log: swapped true -> peer_order; corrected (announce numbering) -> rated as usual
-db = tempfile.mktemp(suffix='.sqlite'); c = sqlite3.connect(db); o.migrate(c)
+db = _tmpfile(suffix='.sqlite'); c = sqlite3.connect(db); o.migrate(c)
 def put(sid, logs):
     c.execute('INSERT INTO own_matches (sid, lobby, kind, mode, map, modname, started, node_log) VALUES (?,?,?,?,?,?,?,?)',
               (sid, 'NM-%d' % sid, 'mm', '2v2', '4p_settlement', 'Elite', T0, json.dumps(logs)))
