@@ -137,7 +137,8 @@ function card(m, prev) {
   if (!r && !prev && (PDATA.preseason || (PDATA.cal_modes || []).includes(m))) v = `<div class="cv cal" title="${esc(T('calT')(0, cn))}"><span class="cal">${calCell(0, cn)}</span></div>`, s1 = esc(T('noGames'));
   else if (!r) v = `<div class="cv none">—</div>`, s1 = esc(T('noGames'));
   else {
-    if (r.cons != null) v = `<div class="cv" title="${esc(r.rating + ' ± ' + r.rd)}">${r.cons}</div>`, s1 = `${esc(r.rating)} ± ${esc(r.rd)}`;
+    // 20.11.2026 (SirItos: one number everywhere - the table's, mean - 2*RD): the mean ± RD only in the tip, not as a line
+    if (r.cons != null) v = `<div class="cv" title="${esc(T('ratingHint') + ': ' + r.rating + ' ± ' + r.rd)}">${r.cons}</div>`;
     else v = `<div class="cv cal" title="${esc(T('calT')(r.games, PDATA.cal_games || 5))}"><span class="cal">${calCell(r.games, PDATA.cal_games || 5)}</span></div>`;
     s2 = `<span title="${esc(T('wlHint2') + (r.leaves ? ' · ' + T('leavesT')(r.leaves) : ''))}">W–L ${r.wins}–${r.losses + r.leaves}</span> · ${esc(T('gamesN')(r.games))}`;
   }

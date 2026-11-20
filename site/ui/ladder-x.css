@@ -35,6 +35,13 @@
 .stat.q b { color: var(--wa); text-shadow: 0 0 10px rgba(232, 161, 74, .4); } .stat.play b { color: var(--ok); text-shadow: 0 0 10px rgba(98, 227, 154, .4); }
 .stat span { font: 600 11.5px var(--fb); letter-spacing: .1em; text-transform: uppercase; color: var(--mu); }
 .live2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+/* 20.11.2026 (SirItos): who is searching, per mode (the name his page, his number / calibration as the table); our automatch's
+   matches as the open lobbies' cards (roomCard), one column in the half */
+.lsg + .lsg { margin-top: 12px; }
+.lsh { display: flex; align-items: center; gap: 8px; padding: 2px 0 6px; border-bottom: 1px solid var(--sep); }
+.li .lnm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.li .cal { font-size: 13px; gap: 5px; } .li .cal .csk { width: 9px; height: 12px; }
+.rooms-grid.auto { grid-template-columns: minmax(0, 1fr); }
 .cnt { font: 700 16px var(--fh); color: var(--gd); }
 .li { padding: 8px 2px; border-bottom: 1px solid var(--sep); font-size: 14.5px; }
 .li:last-child { border-bottom: 0; }

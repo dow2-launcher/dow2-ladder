@@ -33,13 +33,22 @@ function heroImg(p) {
 function tzLabel(t) { const off = -new Date(t * 1000).getTimezoneOffset(); if (!off) return 'UTC'; const a = Math.abs(off), hh = Math.floor(a / 60), mm = a % 60; return 'UTC' + (off > 0 ? '+' : '−') + hh + (mm ? ':' + String(mm).padStart(2, '0') : ''); }
 function hUTC(t) { return new Date(t * 1000).toISOString().replace('T', ' ').slice(0, 16) + ' UTC'; }
 function humanAgo(t) { const s = Math.floor(Date.now() / 1000) - t; if (s < 45) return T('agoNow'); const m = Math.round(s / 60); if (m < 60) return m + ' ' + T('agoMin'); const h = Math.round(s / 3600); if (h < 24) return h + ' ' + T('agoHour'); return Math.round(s / 86400) + ' ' + T('agoDay'); }
+// 20.11.2026 (SirItos: "why do other tabs show a rating that is not the conservative one"): one number everywhere - our own rating as
+// the table shows it (mean - 2*RD; the history: own_c after the match and own_d its change, calibration k/5); Relic's number marked R
+const relicNum = n => `${esc(n)}<sup class="meta"> R</sup>`;
+function hRating(p) {
+  if (p.own_n != null) return p.own_c != null
+    ? `<span class="r" title="${esc(T('tableNum')(p.own_c))}">${esc(p.own_c)}</span>` + (p.own_d != null ? `<span class="d ${p.own_d >= 0 ? 'up' : 'dn'}">${p.own_d >= 0 ? '▲ +' + p.own_d : '▼ ' + p.own_d}</span>` : '')
+    : `<span class="r" title="${esc(T('calT')(Math.min(p.own_n, 5), 5))}">${esc(Math.min(p.own_n, 5))}/5</span>`;
+  if (p.rsrc === 'relic' && p.rating) return `<span class="r" title="${esc(T('relicT'))}">${relicNum(p.rating)}</span>`;
+  return '';      // our own queue's number (its Glicko mean) or a newcomer: not shown - the table's number is the one
+}
 function hCard(m) {
   const side = t => {
     const ps = m.players.filter(p => p.team === t);
     const cls = m.winner ? (m.winner === t ? 'win' : 'lose') : '';
-    return `<div class="side ${cls}">` + ps.map(p => `<div class="pl">${heroImg(p)}<span class="n">${esc(p.name || 'Player')}</span>` +
-      (p.rating && p.rsrc !== 'new' ? `<span class="r">${p.rating}</span>` : '') +
-      (p.mmr_delta != null ? `<span class="d ${p.mmr_delta >= 0 ? 'up' : 'dn'}" title="${esc(T('mmrAfter'))}: ${p.mmr}${m.estimated ? ' (' + esc(T('estResult')) + ')' : ''}">${m.estimated ? '≈' : ''}${p.mmr_delta >= 0 ? '▲ +' + p.mmr_delta : '▼ ' + p.mmr_delta}</span>` : '') + `</div>`).join('') + `</div>`;
+    return `<div class="side ${cls}">` + ps.map(p => `<div class="pl">${heroImg(p)}<span class="n">${esc(p.name || 'Player')}</span>` + hRating(p) +
+      (p.own_n == null && p.mmr_delta != null ? `<span class="d ${p.mmr_delta >= 0 ? 'up' : 'dn'}" title="${esc(T('mmrAfter'))}: ${p.mmr}${m.estimated ? ' (' + esc(T('estResult')) + ')' : ''}">${m.estimated ? '≈' : ''}${p.mmr_delta >= 0 ? '▲ +' + p.mmr_delta : '▼ ' + p.mmr_delta}</span>` : '') + `</div>`).join('') + `</div>`;
   };
   const mk = mapKey(m), mm = ASSETS.maps[mk], mini = mm && mm.minimap ? `style="background-image:url('${A + esc(thumb(mm.minimap))}')"` : '';
   const res = (m.estimated || m.state === 'finished') ? '' : T('hRes')[m.state];
@@ -85,6 +94,7 @@ function who(p) {   // the name with a link to his Steam profile, SteamID in the
 function rt(p) {     // the queue's rating; Relic marked; a newcomer without a number
   if (p.rsrc === 'new') return `<span class="meta" title="${esc(T('newT'))}">${esc(T('newbie'))}</span>`;
   if (p.rsrc === 'relic') return `<span title="${esc(T('relicT'))}">${esc(p.rating)}<sup class="meta"> R</sup></span>`;
+  if (String(p.rsrc || '').startsWith('own')) return '—';     // 20.11.2026: our own rating only as the table shows it (ownCell)
   return esc(p.rating);
 }
 function race(r) { return r ? esc(RACE[r] || r) : ''; }
@@ -92,23 +102,49 @@ function pingStr(pg) { if (!pg || !Object.keys(pg).length) return '—'; return 
 function srvKind(p) { return p.own ? (p.compat ? 'relay-compat' : 'own-srv') : 'relic'; }
 function dbgLine(p) { return `<div class="dbgx">pool <b>${esc(p.pool || '—')}</b> · ${srvKind(p)} · grp:${esc(p.group || '—')} · maps:${esc(p.maps)} · ±${esc(p.maxdiff || 0)} · ping:${esc(pingStr(p.ping))}${(p.ver || p.elite) ? ` · v:${esc(p.ver || '?')}${p.elite ? '/' + esc(p.elite) : ''}` : ''}${p.os ? ' · ' + esc(p.os) : ''}${p.ua ? ` · <span title="${esc(p.ua)}">ua</span>` : ''}</div>`; }
 function dbgTag(p) { return (p.pool != null || p.own != null) ? ` <span class="dbgx" style="display:inline" title="pool ${esc(p.pool || '—')} · ${srvKind(p)} · grp ${esc(p.group || '—')}${p.ver ? ' · v' + esc(p.ver) : ''}">[${srvKind(p)}${p.group ? '·' + esc(p.group) : ''}]</span>` : ''; }
+// 20.11.2026 (SirItos): who is searching - a list per mode, each name his page on the site, his Elite number or calibration as the
+// table shows them (/ladder/api/own/all, once a minute; the queue's own number for one the table does not know)
+let OWNALL = null, ownAt = 0;
+async function ownAll() {
+  if (Date.now() - ownAt > 60000) { ownAt = Date.now(); try { const d = await (await fetch('/ladder/api/own/all')).json(); OWNALL = d.players || {}; OWNALL._k = d.cal_games || 5; } catch (e) {} }
+}
+function ownOf(steam, mode) { const e = OWNALL && steam && OWNALL[steam]; return e && e[mode] || null; }
+function ownCell(p, mode) {
+  const e = ownOf(p.steam, mode), k = (OWNALL && OWNALL._k) || 5;
+  if (e && e.c != null) return `<span class="rt">${esc(e.c)}</span>`;
+  if (e || p.rsrc === 'own_new') return `<span class="cal" title="${esc(T('calT')((e && e.g) || 0, k))}">${calCell((e && e.g) || 0, k)}</span>`;   // not in the table yet: 0/5
+  return `<span class="rt">${rt(p)}</span>`;
+}
+const pLink = (p, mode) => p.steam ? `<a href="${esc(playerUrl(p.steam, mode))}">${esc(p.name || 'Player')}</a>` : esc(p.name || 'Player');
+// 20.11.2026 (SirItos): a match of our automatch is drawn as a lobby of the open lobbies (roomCard): the map, two teams of race /
+// hero icons, names, numbers; its state and time in the head
+function autoRoom(m) {
+  const am = ASSETS.maps[m.map] || {}, n = parseInt(m.mode, 10) || 1;
+  const k = (OWNALL && OWNALL._k) || 5;
+  const num = p => { const e = ownOf(p.steam, m.mode); return e ? (e.c != null ? e.c : `${Math.min(e.g || 0, k)}/${k}`) : String(p.rsrc || '').startsWith('own') ? `0/${k}` : p.rating; };
+  const pl = team => p => ({ name: p.name, team, steam: p.steam, race: p.race && p.race !== 'random' ? p.race : '', random: p.race === 'random',
+    hero: Number.isInteger(p.hero) ? p.hero : null, rating: num(p), rsrc: ownOf(p.steam, m.mode) || String(p.rsrc || '').startsWith('own') ? 'own' : p.rsrc });
+  return { auto: true, state: m.state, mode: m.mode, game: 'elite', name: T('autoMatch') + ' · ' + dur(m.since), map: m.map, cap: n * 2,
+    map_title: am.name ? am.name.replace(/^\(\d+p\)\s*/, '') : '', minimap: am.minimap || '',
+    players: (m.team1 || []).map(pl(0)).concat((m.team2 || []).map(pl(1))).concat((m.watchers || []).map(w => ({ name: w.name, observer: true }))), ai: [] };
+}
 async function loadLive() {
   try {
     const dbg = $('#dbg').checked;
-    const d = await (await fetch('/ladder/api/mm/live' + (dbg ? '?debug=1' : ''), { cache: 'no-store' })).json();
+    const [d] = await Promise.all([fetch('/ladder/api/mm/live' + (dbg ? '?debug=1' : ''), { cache: 'no-store' }).then(r => r.json()), ownAll(), loadAssets()]);
     const S = d.searching || [], M = d.matches || [];
     $('#l-n').textContent = S.length; $('#l-m').textContent = M.length;
-    $('#l-search').innerHTML = S.length ? S.map(p => {
-      const lim = [p.maps ? `${esc(T('maps'))}: ${esc(p.maps)}` : esc(T('anyMap')), p.max_diff ? `±${esc(p.max_diff)} ${esc(T('ratingDiff'))}` : esc(T('anyOpp'))].join(' · ');
-      return `<div class="li"><div class="top"><span><span class="tag m st">${esc(p.mode)}</span>${who(p)}</span>
-        <span class="rt">${rt(p)}</span></div><div class="meta">${race(p.race) ? race(p.race) + ' · ' : ''}${lim} · ${esc(T('waits'))} ${dur(p.waiting)}</div>${dbg ? dbgLine(p) : ''}</div>`;
+    $('#l-search').innerHTML = S.length ? MODES.concat([...new Set(S.map(p => p.mode))].filter(m => !MODES.includes(m))).map(mode => {
+      const ps = S.filter(p => p.mode === mode); if (!ps.length) return '';
+      return `<div class="lsg"><div class="lsh"><span class="tag md">${esc(String(mode).replace('v', ' vs '))}</span><span class="cnt">${ps.length}</span></div>` + ps.map(p => {
+        const lim = [p.maps ? `${esc(T('maps'))}: ${esc(p.maps)}` : esc(T('anyMap')), p.max_diff ? `±${esc(p.max_diff)} ${esc(T('ratingDiff'))}` : esc(T('anyOpp'))].join(' · ');
+        return `<div class="li"><div class="top"><span class="lnm">${pLink(p, mode)}</span>${ownCell(p, mode)}</div>`
+          + `<div class="meta">${race(p.race) ? race(p.race) + ' · ' : ''}${lim} · ${esc(T('waits'))} ${dur(p.waiting)}</div>${dbg ? dbgLine(p) : ''}</div>`;
+      }).join('') + '</div>';
     }).join('') : `<div class="empty">${esc(T('nobody'))}</div>`;
-    $('#l-matches').innerHTML = M.length ? M.map(m => {
-      const t = ps => ps.map(p => `${who(p)} <span class="rt">${rt(p)}</span>${p.race ? ' <span class="meta">(' + race(p.race) + ')</span>' : ''}${dbg ? dbgTag(p) : ''}`).join(', ');
-      return `<div class="li"><div class="top"><span><span class="tag st ${esc(m.state)}">${esc(STATE[m.state] || m.state)}</span><span class="tag m">${esc(m.mode)}</span></span>
-        <span class="meta">${dur(m.since)}</span></div><div>${t(m.team1)}<span class="vs">vs</span>${t(m.team2)}</div>
-        <div class="meta">${mapName(m.map)}${dbg && ('relay' in m) ? ' · relay: ' + esc(m.relay || 'relic') : ''}</div></div>`;
-    }).join('') : `<div class="empty">${esc(T('noMatchesNow'))}</div>`;
+    $('#l-matches').innerHTML = M.length ? '<div class="rooms-grid auto">' + M.map(m => roomCard(autoRoom(m))
+      + (dbg ? `<div class="dbgx">${(m.team1 || []).concat(m.team2 || []).map(dbgTag).join(' ')}${'relay' in m ? ' · relay: ' + esc(m.relay || 'relic') : ''}</div>` : '')).join('') + '</div>'
+      : `<div class="empty">${esc(T('noMatchesNow'))}</div>`;
     $('#s-ingame').textContent = (d.ingame ?? '—');
     $('#s-online').textContent = d.online ?? '—';
     const q = d.queue || {}; $('#s-queue').textContent = (q['1v1'] || 0) + (q['2v2'] || 0) + (q['3v3'] || 0);
@@ -129,7 +165,7 @@ function roomCard(r) {
   const icon = p => p.race && okKey(p.race) && (p.hero == null || okKey(p.hero)) ? `<img src="${A}${p.hero != null ? 'heroes/' + p.race + '_' + p.hero : 'races/' + p.race}.png" alt="" onerror="this.onerror=null;this.src='${A}races/${p.race}.png'">` : (p.random ? RND : '');
   const rn = p => p.race ? RACE[p.race === 't_tau' ? 'tau' : p.race === 'chaos_marines' ? 'chaos_space_marines' : p.race] || p.race : (p.random ? T('rnd') : '');
   const pl = p => `<div class="rp${p.host ? ' host' : ''}" title="${esc(rn(p) + (p.host ? ' · host' : ''))}">`
-    + icon(p) + `<span>${roomFlag(p.country)}</span><span class="nm2">${esc(p.name)}</span>${p.rating ? ' <span class="rt">' + esc(p.rating) + '</span>' : ''}</div>`;
+    + icon(p) + `<span>${roomFlag(p.country)}</span><span class="nm2">${esc(p.name)}</span>${p.rating ? ' <span class="rt">' + (p.rsrc === 'relic' ? relicNum(p.rating) : esc(p.rating)) + '</span>' : ''}</div>`;
   const cpu = c => `<div class="rp cpu" title="${esc(rn(c))}">${icon(c)}<span class="nm2">${esc(T('cpu'))}</span></div>`;
   const per = cap ? Math.max(1, Math.round(cap / 2)) : 0;
   const play = (r.players || []).filter(p => !p.observer), obs = (r.players || []).filter(p => p.observer);
@@ -145,7 +181,7 @@ function roomCard(r) {
   const obsRow = obs.length ? `<div class="robs" title="${esc(T('obs'))}">${EYE}${obs.map(p => `<span>${roomFlag(p.country)}</span><span class="nm2">${esc(p.name)}</span>`).join(' · ')}</div>` : '';
   const mm = r.minimap && /^[\w./-]+$/.test(r.minimap) && !r.minimap.includes('..') ? `background-image:url('${A}${thumb(r.minimap)}')` : '';
   return `<div class="room card"><div class="mmap" style="${mm}"></div><div style="min-width:0">
-    <div class="rh">${r.mode ? `<span class="tag m">${esc(r.mode)}</span>` : ''}${gameTag}${r.password ? '<span class="tag m">🔒</span>' : ''}<span class="rn">${esc(r.name || '—')}</span>${joinA}</div>
+    <div class="rh">${r.auto ? `<span class="tag st ${esc(r.state)}">${esc(STATE[r.state] || r.state)}</span>` : ''}${r.mode ? `<span class="tag md">${esc(r.mode)}</span>` : ''}${gameTag}${r.password ? '<span class="tag md">🔒</span>' : ''}<span class="rn">${esc(r.name || '—')}</span>${joinA}</div>
     <div class="rmap">${esc(r.map_title || '') || mapName(r.map)}${cap ? ' · ' + (play.length + (r.ai || []).length) + '/' + cap : ''}</div>
     <div class="teams">${teams}</div>${obsRow}
     <div class="rfoot">${r.observers ? esc(T('obs')) + ': ' + esc(r.observers) + ' · ' : ''}${r.password ? esc(T('pw')) : ''}</div></div></div>`;

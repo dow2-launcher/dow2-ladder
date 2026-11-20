@@ -7,8 +7,8 @@
 (function () {
   const H = document.querySelector('.hdr'), B = document.getElementById('burger');
   if (!H || !B || H.dataset.hdrOn) return; H.dataset.hdrOn = '1';
-  const TX = { ru: { tabTable: 'Рейтинг', tabHistory: 'Матчи', tabLive: 'Сейчас', chatLink: 'Чат', dlLauncher: 'Скачать лаунчер', menuT: 'Меню' },
-    en: { tabTable: 'Rating', tabHistory: 'Matches', tabLive: 'Live', chatLink: 'Chat', dlLauncher: 'Download launcher', menuT: 'Menu' } };
+  const TX = { ru: { tabTable: 'Рейтинг', tabHistory: 'История матчей', tabLive: 'Идущие матчи', chatLink: 'Чат', dlLauncher: 'Скачать лаунчер', menuT: 'Меню' },
+    en: { tabTable: 'Rating', tabHistory: 'Match history', tabLive: 'Live matches', chatLink: 'Chat', dlLauncher: 'Download launcher', menuT: 'Menu' } };
   if (H.querySelector('[data-ht]')) {
     let l = new URLSearchParams(location.search).get('lang');
     if (l === 'ru' || l === 'en') H.querySelectorAll('.tab[href^="/ladder"]').forEach(a => { a.href += (a.href.includes('?') ? '&' : '?') + 'lang=' + l; });
