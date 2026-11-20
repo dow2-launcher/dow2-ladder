@@ -285,7 +285,7 @@ MIGRATE = [('own_matches', 'notes', 'TEXT'), ('own_matches', 'resolved', 'INTEGE
            ('own_match_players', 'weight', 'REAL'), ('own_match_players', 'early_leave', 'INTEGER'),
            ('own_match_players', 'note', 'TEXT'),
            # 17.11.2026 (the player page /ladder/player/<steam>): what this match did to the number of the table (recompute_own) -
-           # own_c = his conservative rating (rating - 2*RD) after it, NULL while he still calibrates; own_d = its change, only when he
+           # own_c = his shown rating (since 20.11.2026 the Glicko mean) after it, NULL while he still calibrates; own_d = its change, only when he
            # was out of calibration before it too (the hidden rating never leaks); own_n = his games in the mode/season after it
            ('own_match_players', 'own_c', 'REAL'), ('own_match_players', 'own_d', 'REAL'), ('own_match_players', 'own_n', 'INTEGER')]
 RATINGS_SCHEMA = '''
@@ -559,20 +559,12 @@ def resolve(sid, c, cfg=None):
     return r
 
 
-def shown(prev, cons, final):
-    """20.11.2026 (SirItos, variant B): the DISPLAYED rating - the table, the launcher, the player page and its match list - never goes
-    up after a loss nor down after a win. Glicko (mean, RD) stays as it is (the queue uses the mean); the displayed number is the
-    conservative rating (mean - 2*RD) made monotonic by the result: the first = the conservative at the end of calibration, after a
-    win max(previous, conservative), after a loss / a leave min(previous, conservative) (0 where the real number moved the other way)"""
-    if prev is None: return cons
-    return max(prev, cons) if final == 'win' else min(prev, cons)
-
-
 def recompute_own(c, log=print, cfg=None):
     """the shadow rating from scratch: Glicko-2 of the ladder over own_matches rated=1 (+ the leaver's own loss in an 'early_leave' /
     'short_match' match), in the order of the start; one match = one period, against the other team's average (as ladder.recompute);
-    the weight w < 1 scales his rating change. -> own_ratings (cons = the DISPLAYED rating, see shown(); cal_left = calibration games
-    left); own_match_players own_c / own_d = the displayed rating after the match and its change.
+    the weight w < 1 scales his rating change. -> own_ratings (cons = the SHOWN rating = the Glicko mean, 20.11.2026 SirItos: as
+    chess.com / Lichess - a loss always minus, a win always plus; cal_left = calibration games left); own_match_players own_c / own_d =
+    the mean after the match and its change (NULL while he calibrates).
     cfg = season_cfg() (the preseason): only the matches started at/after cfg['start'], all under cfg['label']; None = every match,
     its own quarter season (as before 17.11.2026). With cfg the matches before its start go to own_ratings_prev (the previous season:
     the old test, its quarter season, as it was before the preseason) - the player page shows them apart"""
@@ -582,7 +574,7 @@ def recompute_own(c, log=print, cfg=None):
                    'WHERE (rated = 1 OR why_unrated IN (?, ?)) '
                    'ORDER BY started, sid', ('early_leave', 'short_match')).fetchall()
     n, marks, D = 0, [], R
-    def get(steam, mode, season): return D.setdefault((steam, mode, season), [1500.0, 350.0, 0.06, 0, 0, 0, 0, 0, None])
+    def get(steam, mode, season): return D.setdefault((steam, mode, season), [1500.0, 350.0, 0.06, 0, 0, 0, 0, 0])
     for sid, started, season, rated, why, win in ms:
         prev = bool(cfg) and (started or 0) < cfg['start']
         D = P if prev else R
@@ -606,11 +598,10 @@ def recompute_own(c, log=print, cfg=None):
                 nr, nrd, nv = g2(st[0], st[1], st[2], [(avg[ot][0], avg[ot][1], s)])
                 upd.append((st, st[0] + w * (nr - st[0]), nrd, nv, final, started, steam))
         for st, nr, nrd, nv, final, t, steam in upd:
-            before = st[8]
+            before = st[0] if st[3] >= CAL_GAMES else None          # the shown rating = the mean (20.11.2026)
             st[0], st[1], st[2] = nr, nrd, nv
             st[3] += 1; st[4] += final == 'win'; st[5] += final != 'win'; st[6] += final == 'loss_leave'; st[7] = t
-            st[8] = shown(st[8], st[0] - 2 * st[1], final) if st[3] >= CAL_GAMES else None
-            after = st[8]
+            after = st[0] if st[3] >= CAL_GAMES else None
             marks.append((after, after - before if after is not None and before is not None else None, st[3], sid, steam))
         n += not prev
     c.execute('UPDATE own_match_players SET own_c = NULL, own_d = NULL, own_n = NULL WHERE own_n IS NOT NULL')
@@ -621,7 +612,7 @@ def recompute_own(c, log=print, cfg=None):
             if not st[3]: continue
             c.execute('INSERT INTO %s VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)' % tbl,
                       (steam, mode, season, st[0], st[1], st[2], st[3], st[4], st[5], st[6], max(0, CAL_GAMES - st[3]),
-                       st[8] if st[8] is not None else st[0] - 2 * st[1], st[7]))
+                       st[0], st[7]))                                  # cons = the shown rating = the mean
     log('own_matches: shadow rating from %d matches, %d player rows%s' % (n, sum(1 for v in R.values() if v[3]),
                                                                      ' (season %s from %d)' % (cfg['label'], cfg['start']) if cfg else ''))
     return n
@@ -692,7 +683,7 @@ def _roster(c, start, mode=None, steam=None):
 
 
 def site_board(mode, season):
-    """/ladder/api/own: the table (cal_left = 0, by cons = rating - 2*RD) and the players still in calibration (no rating shown)"""
+    """/ladder/api/own: the table (cal_left = 0, by cons = the shown rating, the Glicko mean) and the players still in calibration (no rating shown)"""
     with _db() as c:
         try:
             rows = c.execute('SELECT steam, rating, rd, games, wins, losses, leaves, cal_left, last, cons FROM own_ratings '
@@ -711,7 +702,7 @@ def site_board(mode, season):
              'losses': losses - leaves, 'leaves': leaves, 'last': last, 'hours_played': hours_of(steam)}
         if cal_left > 0: p['cal_left'] = cal_left; cal.append(p)
         else:
-            p.update(rank=len(board) + 1, cons=round(cons), rating=round(rating), rd=round(rd)); board.append(p)   # cons = the displayed (shown())
+            p.update(rank=len(board) + 1, cons=round(cons), rating=round(rating), rd=round(rd)); board.append(p)   # cons = the shown rating (the mean)
     for steam in extra:                  # the test's players with no preseason game yet: calibration 0/5 (the table is not wiped)
         cal.append({'steam': steam, 'name': nm.get(steam) or steam, 'games': 0, 'wins': 0, 'losses': 0, 'leaves': 0, 'last': None,
                     'hours_played': hours_of(steam), 'cal_left': CAL_GAMES})
@@ -728,7 +719,7 @@ def site_board(mode, season):
 def site_all(season):
     """/ladder/api/own/all (launcher 1.6.20, 17.11.2026): the whole table of a season in one answer - every player, every mode -
     for the launcher, which shows the Elite rating of any player it lists (Online, the lobbies, the tips) without asking per player.
-    players: {steam: {mode: {c, g, w, l, lv, cal, rank}, hours_played}} - c = the number of the site's table (cons = rating - 2*RD, absent while
+    players: {steam: {mode: {c, g, w, l, lv, cal, rank}, hours_played}} - c = the number of the site's table (cons = the Glicko mean, absent while
     calibrating), rank = the place among the calibrated of that mode (the site's order: cons, then games), cal = calibration games left;
     the losses without the leaves, as site_board"""
     with _db() as c:
@@ -840,7 +831,7 @@ def own_mode(row):
         return {'rating': None, 'rd': None, 'conservative': None, 'games': 0, 'wins': 0, 'losses': 0, 'leaves': 0,
                 'calibrating': True, 'cal_played': 0, 'cal_needed': CAL_GAMES}
     r, rd, g, w, l, lv, cl = row[:7]
-    cn = row[7] if len(row) > 7 and row[7] is not None else r - 2 * rd      # 20.11.2026: the displayed rating (shown())
+    cn = row[7] if len(row) > 7 and row[7] is not None else r               # 20.11.2026: the shown rating = the mean
     cal = cl > 0
     return {'rating': None if cal else round(r), 'rd': None if cal else round(rd), 'conservative': None if cal else round(cn),
             'games': g, 'wins': w, 'losses': l - lv, 'leaves': lv, 'calibrating': cal, 'cal_played': min(g, CAL_GAMES), 'cal_needed': CAL_GAMES}
