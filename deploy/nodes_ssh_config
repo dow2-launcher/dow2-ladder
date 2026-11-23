@@ -9,7 +9,9 @@ Host node-polsha
     HostName 15.220.68.107
 Host node-rupivolan
     HostName 91.107.122.186
-Host node-timeweb node-iggy node-polsha node-rupivolan
+Host node-azurepl
+    HostName 74.248.144.168
+Host node-timeweb node-iggy node-polsha node-rupivolan node-azurepl
     User dow2deploy
     IdentityFile /root/.ssh/dow2deploy_ed25519
     IdentitiesOnly yes

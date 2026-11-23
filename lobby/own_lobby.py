@@ -54,7 +54,7 @@ SLOW_LOG = 2.0                    # s: calls to Relic slower than this go to the
 FAIL_BODY = b'[1]'                # the ordinary failure answer of a call (what the game gets when Relic does not answer twice)
 LADDER_DB = os.environ.get('LADDER_DB', '/srv/ladder/data/ladder.sqlite')
 RELAYS = [(h.rsplit(':', 1)[0], int(h.rsplit(':', 1)[1])) for h in
-          os.environ.get('LOBBY_RELAYS', '15.220.68.107:47100,116.202.106.150:47100').split(',') if ':' in h]
+          os.environ.get('LOBBY_RELAYS', '74.248.144.168:47100,15.220.68.107:47100,116.202.106.150:47100').split(',') if ':' in h]
 MID_BASE, MID_TOP = 2_000_000_000, 2_100_000_000
 SECRET_PARAMS = {'sessionid', 'auth', 'authticket', 'platformuserid', 'password', 'steamticket', 'ticket', 'token'}
 TELEM_RE = re.compile(rb'(\["RL_TELEMKINESIS[A-Z_]*",\s*")[^"]*(")')
