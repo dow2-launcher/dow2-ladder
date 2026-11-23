@@ -4,7 +4,7 @@ v2 17.11.2026: several egress nodes, warm flows, VLESS before straight TCP).
 
 battle_relay (uid of dow2-battle) opens TCP to the Relic relay (27000-27099); iptables nat REDIRECTs it here (127.0.0.1:12349,
 rule kept by relic-egress). We read the address it wanted (SO_ORIGINAL_DST) and carry the bytes, the first way that works:
-  1. UDP (DU) to udp_gateway of the egress nodes in order (iggy 116.202.106.150:47100, then Poland 15.220.68.107:47100): the
+  1. UDP (DU) to udp_gateway of the egress nodes in order (iggy 116.202.106.150:47100, then Poland: Azure 74.248.144.168:47100 from 23.11.2026, AWS 15.220.68.107:47100 until it closes): the
      preamble "DWR3" + IPv4 + port (BE) of that Relic relay goes into the stream, that node's battle_relay bridges to Relic.
   2. VLESS to iggy (xray-relic dokodemo 127.0.0.1:12348 -> iggy's battle_relay), the same preamble - TCP over the tunnel.
   3. straight TCP to Relic from Russia (as without us) - only when nothing else answers; logged with TCP stats per flow.
@@ -21,7 +21,7 @@ Status for relic-egress (no probe sockets of its own any more): TCP 127.0.0.1:ST
 Protocol (see udp_gateway.py, the other side): "DU" + type + cid (u32 LE) + body
   1 SYN version | 2 SYNACK [version] | 3 DATA seq ack sack bytes | 4 ACK ack sack | 5 FIN | 6 PING | 7 PONG
   8 DATA2 seq ack sack k k*(seq u32, len u16, bytes) bytes | 9 ACK2 ack sack k copies
-Usage: du_egress.py [listen port] [egress list] (default 12349 iggy=116.202.106.150:47100,polsha=15.220.68.107:47100);
+Usage: du_egress.py [listen port] [egress list] (default 12349 iggy=116.202.106.150:47100,azurepl=74.248.144.168:47100,polsha=15.220.68.107:47100);
        an old single "host:port" still works. Env: DU_EGRESS_VLESS (127.0.0.1:12348, empty = no VLESS step),
        DU_EGRESS_STATUS (12350, 0 = none), DU_EGRESS_SOCKS (4).
        du_egress.py probe <egress host:port | none> <relic ip:port> [secs]  - one flow with the preamble through that egress
@@ -36,7 +36,7 @@ sys.path[1:1] = [os.path.dirname(os.path.abspath(__file__)), '/srv/dow2battle']
 import du_proto
 from du_proto import SYN, SYNACK, FIN, PING, PONG, MAXP
 
-DEFAULT_EGRESS = 'iggy=116.202.106.150:47100,polsha=15.220.68.107:47100'
+DEFAULT_EGRESS = 'iggy=116.202.106.150:47100,azurepl=74.248.144.168:47100,polsha=15.220.68.107:47100'
 OPEN = 3.0             # s for the UDP handshake over all egress nodes, then VLESS, then straight TCP
 STAGGER = 1.0          # s egress k has alone (when healthy) before egress k+1 joins
 SYN_EVERY = 0.15       # s between SYN rounds

@@ -51,7 +51,7 @@ STATQ, STATA = 10, 11   # the launcher's connection test: what this end saw of a
 PER_IP = 16            # connections per address
 # our nodes: no per-address limit - all bridges of a Moscow node (du_egress, 03.11.2026) and all players another node passes on
 # here (battle_relay over du_client, the relay chain 04.11.2026) come from that node's one address
-TRUSTED = set(os.environ.get('UDPGW_TRUSTED', '83.217.192.34,91.107.122.186,15.220.68.107,116.202.106.150').split(','))
+TRUSTED = set(os.environ.get('UDPGW_TRUSTED', '83.217.192.34,91.107.122.186,15.220.68.107,116.202.106.150,74.248.144.168').split(','))
 ADDR_RATE = float(os.environ.get('UDPGW_ADDR_RATE', '1000'))   # packets/s from one player address (all its connections)
 ADDR_BURST = 2 * ADDR_RATE
 # the newest we speak: 2 = DATA2 with copies. UDPGW_VERSION=1 (05.11.2026, owner): no copies at all - a bare SYNACK, so every

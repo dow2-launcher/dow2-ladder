@@ -102,7 +102,7 @@ VOTE = 0x7d                                         # Relay 25: "don't wait" fro
 NOTICE = 0x7e                                       # our own frame to "DWR5" games: who is away and how long more; Relay.dll takes it out
 DECIDE = 5                                          # s: no peer announce from a new session's first peer -> it's the host
 RETRY = 8                                           # s: a guest whose session no node has yet asks our other nodes again (DWR1 / native)
-PEERS = [h for h in os.environ.get('RELAY_PEERS', '83.217.192.34,116.202.106.150,15.220.68.107,91.107.122.186').split(',') if h]
+PEERS = [h for h in os.environ.get('RELAY_PEERS', '83.217.192.34,116.202.106.150,15.220.68.107,91.107.122.186,74.248.144.168').split(',') if h]
 PEER_DU = os.environ.get('RELAY_PEER_DU', '1') != '0' and du_client is not None   # our other nodes over UDP (udp_gateway), else TCP
 
 

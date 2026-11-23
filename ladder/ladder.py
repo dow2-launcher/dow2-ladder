@@ -732,7 +732,7 @@ def _assign_watchers():  # под MM_LOCK: зрителей — в собира�
                 break
 
 RELAYS_FILE = ROOT + '/data/relays.json'   # источник правды сети релеев (publish_relays.py от root подписывает Ed25519); сервис только читает
-_RELAYS = {'mtime': 0, 'ips': ['15.220.68.107', '116.202.106.150', '83.217.192.34'], 'doc': None}
+_RELAYS = {'mtime': 0, 'ips': ['15.220.68.107', '116.202.106.150', '83.217.192.34', '74.248.144.168'], 'doc': None}
 def _relays():   # кэш по mtime: правка relays.json применяется без рестарта; при сбое — последний валидный список
     try:
         st = os.stat(RELAYS_FILE)

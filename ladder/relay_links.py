@@ -11,7 +11,7 @@ import json, os, subprocess, sys, time
 
 RELAYS = '/srv/ladder/data/relays.json'
 OUT = '/srv/ladder/data/relay_links.json'
-SSH = {'83.217.192.34': 'node-timeweb', '116.202.106.150': 'node-iggy', '15.220.68.107': 'node-polsha', '91.107.122.186': 'node-rupivolan'}  # ~/.ssh/config: User dow2deploy (no root on the nodes)
+SSH = {'83.217.192.34': 'node-timeweb', '116.202.106.150': 'node-iggy', '15.220.68.107': 'node-polsha', '91.107.122.186': 'node-rupivolan', '74.248.144.168': 'node-azurepl'}  # ~/.ssh/config: User dow2deploy (no root on the nodes)
 PROBE = r'''
 import json, os, socket, struct, sys, time
 out = {}
