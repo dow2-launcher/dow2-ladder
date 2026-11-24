@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Карты Elite</title>
+<meta name="robots" content="noindex">
+<!-- 24.11.2026 (SirItos: "сделай страничку со всеми картами, которые есть в игре, в картинках, и я скажу, какие брать"):
+     every map of the Elite catalog by mode (/ladder/api/lroom/catalog), the season's automatch pool marked (/ladder/api/own/season),
+     checkboxes -> the chosen keys as own_season.json "maps" to copy. Static: no server code. -->
+<style>
+:root{--bg:#0d0b09;--panel:#16130f;--line:#3a3124;--gold:#d9b25f;--text:#e6dccb;--muted:#a39782;--pick:#2f6b3a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{padding:16px;border-bottom:1px solid var(--line);background:var(--panel)}
+header h1{margin:0 0 4px;font-size:22px;color:var(--gold)}
+header p{margin:4px 0;color:var(--muted);max-width:900px}
+a{color:var(--gold)}
+nav{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+nav button{background:transparent;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 14px;font:inherit;cursor:pointer}
+nav button.on{border-color:var(--gold);color:var(--gold)}
+main{padding:16px;padding-bottom:200px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px;cursor:pointer;position:relative;user-select:none}
+.card:hover{border-color:var(--muted)}
+.card.sel{border-color:#5fbf6e;box-shadow:0 0 0 2px var(--pick) inset}
+.card img{width:100%;aspect-ratio:1;object-fit:contain;background:#000;border-radius:4px;display:block}
+.card .nm{margin-top:6px;font-weight:600}
+.card .key{color:var(--muted);font-size:12px;word-break:break-all}
+.badge{position:absolute;top:12px;left:12px;background:var(--gold);color:#000;font-size:11px;font-weight:700;padding:2px 6px;border-radius:4px}
+.tick{position:absolute;top:12px;right:12px;width:22px;height:22px;border-radius:50%;border:2px solid var(--muted);background:#000a}
+.card.sel .tick{background:#5fbf6e;border-color:#5fbf6e}
+.card.sel .tick::after{content:"✓";color:#000;font-weight:900;display:block;text-align:center;line-height:18px}
+footer{position:fixed;left:0;right:0;bottom:0;background:var(--panel);border-top:1px solid var(--line);padding:10px 16px}
+footer .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+footer textarea{width:100%;height:70px;margin-top:6px;background:#000;color:var(--text);border:1px solid var(--line);border-radius:6px;font:12px/1.4 ui-monospace,monospace;padding:6px;resize:vertical}
+footer button{background:var(--gold);color:#000;border:0;border-radius:6px;padding:6px 14px;font:inherit;font-weight:600;cursor:pointer}
+footer button.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
+.muted{color:var(--muted)}
+.err{color:#e07a6a}
+</style>
+</head>
+<body>
+<header>
+  <h1>Карты Elite</h1>
+  <p>Все карты игры по режимам. Значок <b style="color:var(--gold)">СЕЗОН</b> — карта сейчас в пуле автоматча.
+     Нажмите на карты, которые нужны в пуле, — внизу соберётся список; скопируйте его и пришлите разработчику.</p>
+  <p class="muted">All Elite maps by mode. SEASON = in the automatch pool now. Click the maps you want; copy the list at the bottom.</p>
+  <nav id="tabs"></nav>
+</header>
+<main><div id="grid" class="grid"><p class="muted">Загрузка…</p></div></main>
+<footer>
+  <div class="row">
+    <span id="count" class="muted"></span>
+    <button id="copy">Скопировать список</button>
+    <button id="fromSeason" class="ghost">Отметить текущий пул</button>
+    <button id="clear" class="ghost">Снять все</button>
+  </div>
+  <textarea id="out" readonly></textarea>
+</footer>
+<script>
+'use strict';
+const MODES = ['1v1', '2v2', '3v3'];
+let cat = {}, season = {}, mode = '1v1';
+const sel = {'1v1': [], '2v2': [], '3v3': []};
+try { const s = JSON.parse(localStorage.getItem('eliteMapsPick') || 'null'); if (s) MODES.forEach(m => { if (Array.isArray(s[m])) sel[m] = s[m]; }); } catch (e) {}
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+function save() { try { localStorage.setItem('eliteMapsPick', JSON.stringify(sel)); } catch (e) {} }
+function tabs() {
+  $('tabs').innerHTML = MODES.map(m => `<button data-m="${m}" class="${m === mode ? 'on' : ''}">${m} · ${(cat[m] || []).length}</button>`).join('');
+  $('tabs').querySelectorAll('button').forEach(b => b.onclick = () => { mode = b.dataset.m; render(); });
+}
+function img(k) {
+  k = k.replace(/'/g, '');                       // the asset files drop the apostrophe (6p_myggyrid'isil -> 6p_myggyridisil.webp)
+  const im = new Image(); im.loading = 'lazy'; im.alt = '';
+  im.src = '/elite/assets/maps_m/' + encodeURIComponent(k) + '.webp';
+  im.onerror = () => { if (!im.dataset.f) { im.dataset.f = 1; im.src = '/elite/assets/maps/' + encodeURIComponent(k) + '.png'; } };
+  return im;
+}
+function render() {
+  tabs();
+  const inSeason = new Set((season[mode] || []).map(x => x.key));
+  const g = $('grid'); g.innerHTML = '';
+  (cat[mode] || []).forEach(m => {
+    const c = document.createElement('div');
+    c.className = 'card' + (sel[mode].includes(m.key) ? ' sel' : '');
+    c.appendChild(img(m.key));
+    c.insertAdjacentHTML('beforeend', (inSeason.has(m.key) ? '<span class="badge">СЕЗОН</span>' : '') +
+      `<span class="tick"></span><div class="nm">${esc(m.name)}</div><div class="key">${esc(m.key)}</div>`);
+    c.onclick = () => {
+      const i = sel[mode].indexOf(m.key);
+      if (i < 0) sel[mode].push(m.key); else sel[mode].splice(i, 1);
+      c.classList.toggle('sel', i < 0); out();
+    };
+    g.appendChild(c);
+  });
+  out();
+}
+function out() {
+  save();
+  $('count').textContent = MODES.map(m => `${m}: ${sel[m].length}`).join(' · ');
+  const doc = {}; MODES.forEach(m => { if (sel[m].length) doc[m] = sel[m]; });
+  $('out').value = Object.keys(doc).length ? JSON.stringify({maps: doc}, null, 1) : '';
+}
+$('copy').onclick = () => { const t = $('out'); t.select(); (navigator.clipboard ? navigator.clipboard.writeText(t.value) : Promise.reject()).catch(() => document.execCommand('copy')); };
+$('fromSeason').onclick = () => { sel[mode] = (season[mode] || []).map(x => x.key); render(); };
+$('clear').onclick = () => { sel[mode] = []; render(); };
+Promise.all([
+  fetch('/ladder/api/lroom/catalog?game=elite').then(r => r.json()),
+  fetch('/ladder/api/own/season').then(r => r.json()).catch(() => ({}))
+]).then(([c, s]) => { cat = c.maps || {}; season = s.maps || {}; render(); })
+  .catch(e => { $('grid').innerHTML = '<p class="err">Не удалось загрузить список карт: ' + esc(e) + '</p>'; });
+</script>
+</body>
+</html>
