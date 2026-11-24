@@ -2,8 +2,8 @@
 # 16.11.2026 (owner, launcher 1.6.17): the lobby's chat - (1) the feed's own lines (open, join, join_obs, leave, gone, kick, to_obs,
 # to_seat, host) and who gets them (the lobby's people only, never the room's view that goes to everybody); (2) verb say: say_pre
 # (no room, empty, the pace, the moderation) outside MM_LOCK, then the message (obs flag, a reply's quote, a retry by cid), its
-# translation after it (lroom_msg_tr); (3) verb seat with slot "obs": a player into the observers (never the owner, not past the
-# seats), an observer back onto a seat.
+# translation after it (lroom_msg_tr); (3) verb seat with slot "obs": a player into the observers (not past the seats; the
+# owner too since 24.11.2026 - test_lroom_host_obs_kick.py), an observer back onto a seat.
 # usage: python3 ladder/tests/test_lroom_chat.py [<repo dir>]   (temp copies, empty data dirs; nothing live)
 import os, shutil, sys, tempfile, threading, time
 REPO = sys.argv[1] if len(sys.argv) > 1 else os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -86,7 +86,6 @@ fresh()
 rid = R.api('create', A, {'game': 'elite', 'ver': '3.2', 'mode': '3v3', 'map': '6p_angelgate'})['room']['id']   # 3v3: 2 observer seats
 for s in (B, C, D): R.api('join', s, {'id': rid})
 r = R.ROOMS[rid]
-check('the owner: no (owner)', R.api('seat', A, {'slot': 'obs'}), {'ok': False, 'error': 'owner'})
 v = R.api('seat', B, {'slot': 'obs'})
 check('a player: into the observers, his seat free', (v['ok'], B in [s['steam'] for s in r['slots'] if s], [o['steam'] for o in r['obs']]), (True, False, [B]))
 check('  ... "to_obs" in the feed, the room\'s note', (lines(rid)[-1], r['note']['k']), (('to_obs', B), 'to_obs'))
