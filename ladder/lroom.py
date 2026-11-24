@@ -29,6 +29,11 @@
 # 16.11.2026 (owner, launcher 1.6.17): the lobby's chat - the general chat in a room of its own for the lobby's people (verb say,
 # see "the lobby's chat" below), its feed carries who came in, left and moved; a player goes into the observers (verb seat with
 # slot "obs"; never the owner - the match is started from his game).
+# 24.11.2026 (owner, launcher 1.6.32): (1) the owner may go into the observers too - the match's host is picked among the seated
+# players anyway (_launch), his Play (start / stop) and the ready check stay his; a room lives while it has a seated player OR its
+# owner among the observers (_alive), so a caster can set a room up for others from an observer seat. (2) A kicked player is kept
+# out of that room for KICK_BAN s (5 min); the owner's invitation lets him back at once (the ban dropped), another player's
+# invitation of him is refused ("kicked": only the owner may call him back).
 # 17.11.2026 (SirItos, team lead): the countdown is 5 s (was 10; CD below - the launchers draw it from the view's cd_end), and a room
 # is CLOSED once its match has really started. SirItos' review of PR #28: not at the start message, only when the games are in it -
 # (1) the ladder's nm_started (own_lobby sent MatchStartMessage to every game: the match record is in MM_PLAYING) and then (2) EVERY
@@ -46,7 +51,7 @@ L = None                    # the ladder module (ladder.py sets it right after t
 ROOMS = {}                  # id -> room
 BY = {}                     # steam -> room id (one room per player)
 KICKED = {}                 # (room id, steam) -> until when he can't come back (KICK_BAN s after a kick; 0 = never kept out)
-KICK_BAN = 0                # 1.5.8 (owner 12.11.2026): a removed player may come back at once - a kick by mistake is fixed by Join or an invitation
+KICK_BAN = 300              # 24.11.2026 (owner): 5 min out of that room after a kick (1.5.8 had 0); the owner's invitation lets him back
 INVITED = {}                # (room id, steam) -> until when he is not invited into that room again
 INVITE_GAP = 30             # s between two invitations of one player into one room
 INVITE_MAX = 10             # invitations one player may send in a minute (into any rooms)
@@ -146,6 +151,11 @@ def _obs(r, steam): return next((o for o in r.setdefault('obs', []) if o['steam'
 
 
 def _everyone(r): return _members(r) + [o['steam'] for o in r.setdefault('obs', [])]
+
+
+def _alive(r):
+    """24.11.2026: a room goes on while a player is seated or its owner watches from an observer seat"""
+    return bool(_members(r)) or _obs(r, r['owner']) is not None
 
 
 def _name(steam):
@@ -736,7 +746,7 @@ def tick(now):
             _close(r, 'gone while playing'); continue
         elif r['state'] == 'playing' and now - r['launch'].get('started', now) > PLAY_KEEP:
             r['state'] = 'lobby'; r['launch'] = None; _note(r, 'played'); ch = True
-        if not _members(r) and r['id'] in ROOMS: _close(r, 'empty'); continue
+        if not _alive(r) and r['id'] in ROOMS: _close(r, 'empty'); continue
         if ch: _pub(r)
     for k in [k for k, t in KICKED.items() if t < now]: KICKED.pop(k, None)
     for k in [k for k, t in INVITED.items() if t < now]: INVITED.pop(k, None)
@@ -802,7 +812,7 @@ def api(verb, steam, d):
         game = 'vanilla' if d.get('game') == 'vanilla' else 'elite'
         mode = d.get('mode') if d.get('mode') in L.MODES else '1v1'
         if r and r['state'] not in ('lobby', 'countdown'): return {'ok': False, 'error': 'busy'}
-        if r: _leave(r, steam); _note(r, 'left', [steam]); (_pub(r) if _members(r) else _close(r, 'empty'))
+        if r: _leave(r, steam); _note(r, 'left', [steam]); (_pub(r) if _alive(r) else _close(r, 'empty'))
         if len(ROOMS) >= MAX_ROOMS: return {'ok': False, 'error': 'too_many'}
         maps = _maps(game, mode); mp = d.get('map') if d.get('map') in maps else (maps[0] if maps else '')
         name = _clean(d.get('name'), NAME_MAX) or ('%s: %s' % (_name(steam), mode))
@@ -821,11 +831,11 @@ def api(verb, steam, d):
         if t['state'] not in ('lobby', 'countdown'): return {'ok': False, 'error': 'state'}
         if d.get('as') == 'obs':
             if len(t.setdefault('obs', [])) >= _obs_cap(t): return {'ok': False, 'error': 'obs_full'}
-            if r: _leave(r, steam); _note(r, 'left', [steam]); (_pub(r) if _members(r) else _close(r, 'empty'))
+            if r: _leave(r, steam); _note(r, 'left', [steam]); (_pub(r) if _alive(r) else _close(r, 'empty'))
             t['obs'].append({'steam': steam, 'seen': now, 'gst': ''}); BY[steam] = t['id']; _note(t, 'joined_obs', [steam]); INVITED.pop((t['id'], steam), None)
             _sys(t, 'join_obs', steam); _pub(t); return {'ok': True, 'room': mine(t)}
         if all(t['slots']): return {'ok': False, 'error': 'full'}
-        if r: _leave(r, steam); _note(r, 'left', [steam]); (_pub(r) if _members(r) else _close(r, 'empty'))
+        if r: _leave(r, steam); _note(r, 'left', [steam]); (_pub(r) if _alive(r) else _close(r, 'empty'))
         _seat(t, steam); _unready(t, 'joined', [steam]); _note(t, 'joined', [steam]); INVITED.pop((t['id'], steam), None)
         _sys(t, 'join', steam); _pub(t); return {'ok': True, 'room': mine(t)}
     if not r: return {'ok': False, 'error': 'no_room'}
@@ -895,17 +905,23 @@ def api(verb, steam, d):
             if (L.MM.get(steam) or {}).get('lroom') == r['id']: L.MM.pop(steam, None)
             m = L.MM_MATCHES.get((r.get('launch') or {}).get('match') or '')
             if m and steam in m.get('watchers', []): m['watchers'].remove(steam); m.get('players', {}).pop(steam, None)
-            _leave(r, steam); _note(r, 'left', [steam]); _pub(r); return {'ok': True}
+            _leave(r, steam); _note(r, 'left', [steam])
+            if _alive(r): _pub(r)
+            else: _close(r, 'empty')
+            return {'ok': True}
         if r['state'] == 'launching': _cancel_launch(r, 'left', [steam])
         elif r['state'] == 'playing': pass                                  # the match goes on; he just leaves the room
         _leave(r, steam); _note(r, 'left', [steam])
-        if _members(r): _pub(r)
+        if _alive(r): _pub(r)
         else: _close(r, 'empty')
         return {'ok': True}
     if verb == 'invite':                                                    # 1.5.3: anybody in the room invites a player (his stream)
         t = str(d.get('steam') or '')
         if not re.fullmatch(r'\d{1,20}', t) or t == steam or t in _everyone(r): return {'ok': False, 'error': 'bad'}   # a SteamID only
         if r['state'] not in ('lobby', 'countdown'): return {'ok': False, 'error': 'state'}
+        if KICKED.get((r['id'], t), 0) > now:                               # 24.11.2026: kicked - only the owner calls him back
+            if steam != r['owner']: return {'ok': False, 'error': 'inv_kicked', 'left': int(KICKED[(r['id'], t)] - now)}
+            KICKED.pop((r['id'], t), None)
         if INVITED.get((r['id'], t), 0) > now: return {'ok': True, 'again': True}   # invited a moment ago: once is enough
         sent = [x for x in INV_SENT.get(steam, []) if now - x < 60]
         if len(sent) >= INVITE_MAX: INV_SENT[steam] = sent; return {'ok': False, 'error': 'too_soon'}   # no flood of invitations
@@ -946,9 +962,11 @@ def api(verb, steam, d):
         log('room %s: %s answers %s (%s)' % (r['id'], steam, ans, kind)); _pub(r); return {'ok': True}
     if verb == 'say':                                                       # 1.6.17: the lobby's chat (say_pre has checked it outside MM_LOCK)
         return _say(r, steam, d, bool(ob))
-    if ob and verb in ('cancel', 'ready', 'army'): return {'ok': False, 'error': 'obs'}   # an observer has no army and no say in the start
+    if ob and (verb in ('ready', 'army') or (verb == 'cancel' and steam != r['owner'])): return {'ok': False, 'error': 'obs'}   # an observer has no army and no say in the start (but the owner's Cancel)
     if verb == 'cancel':                                                    # stop the launch (any player, as Cancel on the game's countdown)
-        if r['state'] == 'countdown': me['ready'] = False; r['state'] = 'lobby'; _note(r, 'unready', [steam])
+        if r['state'] == 'countdown':
+            if me: me['ready'] = False
+            r['state'] = 'lobby'; _note(r, 'unready', [steam])
         elif r['state'] == 'launching': _cancel_launch(r, 'cancel', [steam])
         else: return {'ok': False, 'error': 'state'}
         _pub(r); return {'ok': True, 'room': view(r)}
@@ -970,7 +988,8 @@ def api(verb, steam, d):
     if verb == 'seat':
         if d.get('slot') == 'obs':                                          # 1.6.17: a player into the observers - his seat is free
             if ob: return {'ok': True, 'room': view(r)}
-            if steam == r['owner']: return {'ok': False, 'error': 'owner'}   # the match is started from the owner's game
+            # 24.11.2026 (owner): the owner too (was refused: "the match is started from his game" - but its host is picked among
+            # the seated players, his Play / ready check are the launcher's)
             if len(r['obs']) >= _obs_cap(r): return {'ok': False, 'error': 'obs_full'}
             r['slots'][r['slots'].index(me)] = None; r['obs'].append({'steam': steam, 'seen': now, 'gst': ''})
             if r['state'] == 'countdown': r['state'] = 'lobby'               # one seat fewer: the countdown stops, as when he leaves
@@ -991,7 +1010,7 @@ def api(verb, steam, d):
     if steam != r['owner']: return {'ok': False, 'error': 'owner'}
     if verb == 'start':                                                     # the owner's Play: everybody ready - the countdown
         if r['state'] == 'countdown': return {'ok': True, 'room': view(r)}
-        if _others_ready(r, now): me['ready'] = True                       # 1.5.8: his Start is his "ready" too
+        if me and _others_ready(r, now): me['ready'] = True                # 1.5.8: his Start is his "ready" too (an observer owner has no seat)
         if not _all_ready(r, now): return {'ok': False, 'error': 'not_ready'}
         r['state'] = 'countdown'; r['cd'] = now + CD; r['note'] = None; log('room %s: countdown (owner)' % r['id'])
         _pub(r); return {'ok': True, 'room': view(r)}

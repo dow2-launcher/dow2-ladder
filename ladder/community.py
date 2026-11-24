@@ -111,6 +111,7 @@ TR_SYS += (' Tokens like @M1, @M2 are player mentions: copy each one verbatim in
 def _mention_names():
     with users.LOCK:
         ns = {n.strip() for u in users.USERS.values() for n in (u.get('name'), u.get('alias')) if n and n.strip()}
+    ns.add('all')   # 24.11.2026 (owner, launcher 1.6.32): @all tags everybody - kept as it is in both translations
     return sorted(ns, key=len, reverse=True)
 
 def _mask_mentions(t):
