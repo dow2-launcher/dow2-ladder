@@ -11,16 +11,23 @@
 <!-- 18.11.2026 (SirItos: one header on every ladder page): the ladder's header on top - "Чат" its active item, the mirrors as buttons,
      the phone's drawer (ladder-hdr.css + ladder-hdr.js, everything under .hdr). 18.11.2026 (SirItos: "the chat must not stand out"):
      the chat itself in the site's look too (ladder-chat.css: the steel frame, the plates, the slate and teal; ids and classes as before) -->
-<link rel="stylesheet" href="/elite/ui/ladder-hdr.css?v=20261120a">
-<link rel="stylesheet" href="/elite/ui/ladder-chat.css?v=20261120a">
-<script defer src="/elite/ui/ladder-hdr.js?v=20261120a"></script>
-<script defer src="/elite/ui/mirrors.js?v=20261120a"></script>
+<!-- 25.11.2026 (SirItos: the chat "works crookedly" - the paging, no place icons...; the profile block not over the chat): the newest
+     messages in view at the start and the page following them (the page scrolls, not the list), the older ones pulled in as their top
+     comes into view; the launcher's chat look by the names - the Hall of Fame seal (/elite/fame.json), the Elite top-3 badge
+     (/ladder/api/own/all, badges.css), day headings, @mentions (names with spaces, me, @all) lit, a translated message's original on
+     hover; who I am is in the header now (ladder-hdr.js: a chip at its right, the drawer's first block on a phone) -->
+<link rel="stylesheet" href="/elite/ui/badges.css?v=20261125a">
+<link rel="stylesheet" href="/elite/ui/ladder-hdr.css?v=20261125a">
+<link rel="stylesheet" href="/elite/ui/ladder-chat.css?v=20261125a">
+<script defer src="/elite/ui/ladder-hdr.js?v=20261125a"></script>
+<script defer src="/elite/ui/mirrors.js?v=20261125a"></script>
 </head>
 <body>
 <header class="hdr">
   <button class="burger" id="burger" type="button" aria-controls="menu" aria-expanded="false" title="Меню" data-ht="menuT"><i></i></button>
   <a class="brand" href="/ladder/" aria-label="Elite Ladder — Dawn of War II"><span class="dd-logo" aria-hidden="true"><b class="dd-ii">II</b><span class="dd-w">Dawn <em>of</em> War</span><span class="dd-sub">Elite Ladder</span></span></a>
   <div class="menu" id="menu">
+    <div class="hme" id="hdrMe" hidden></div>
     <nav class="tabs"><a class="tab" href="/ladder/" data-ht="tabTable">Рейтинг</a><a class="tab" href="/ladder/?view=history" data-ht="tabHistory">История матчей</a><a class="tab" href="/ladder/?view=live" data-ht="tabLive">Идущие матчи</a><a class="tab on" href="/ladder/chat" aria-current="page" data-ht="chatLink">Чат</a></nav>
     <div class="hdr-r">
       <a class="btn gold small" href="/elite/" data-ht="dlLauncher">Скачать лаунчер</a>
@@ -34,8 +41,6 @@
     <h1>Общий чат</h1>
     <a id="lv" class="lv" href="/elite/" title="Скачать актуальную версию лаунчера" style="display:none"></a>
   </header>
-
-  <div id="meBox" class="me" style="display:none"></div>
 
   <div id="online" class="online" style="display:none"></div>
 
@@ -143,20 +148,42 @@ async function gotoMsg(id) {
   }
 }
 
+// 25.11.2026 (SirItos): who I am and Sign out are in the header (ladder-hdr.js) - here only the sign-in card or the input
 function renderMe() {
   const m = CH.me && CH.me.signed_in ? CH.me : null;
   if (!m) CH.replyTo = null;
   renderReplyBar();
-  $('meBox').style.display = m ? 'flex' : 'none';
   $('signin').style.display = m ? 'none' : 'block';
   $('composer').style.display = m ? 'flex' : 'none';
-  if (m) {
-    const rt = `<span class="rt">${esc(chRate(m).t)}</span>`;
-    const games = m.stats && m.stats.games ? `<span class="rt"> · ${m.stats.games} игр</span>` : '';
-    $('meBox').innerHTML = avatar(m.avatar) + `<div><div class="nm">${esc(m.name || m.steam)}</div>${rt}${games}</div>`
-      + `<button class="out" id="outBtn">Выйти</button>`;
-    $('outBtn').onclick = logout;
-  }
+}
+
+// ---------- 25.11.2026 (SirItos: "no place icons and so on"): the launcher chat's marks by the names ----------
+// the Elite table's top three (/ladder/api/own/all, every 2 min): one badge per mode, the mode's army, the place's metal (badges.css)
+const MODES = ['1v1', '2v2', '3v3'], TOPN = { '1v1': ['Капитан', 'Ветеран'], '2v2': ['Лорд-генерал', 'Комиссар'], '3v3': ['Варбосс', 'Ноб'] };
+function badges(steam) {
+  const e = CH.own && steam ? CH.own[String(steam)] : null; if (!e) return '';
+  return MODES.map(m => { const r = e[m] && e[m].rank; if (!r || r > 3) return '';
+    const t = TOPN[m][r === 1 ? 0 : 1] + ' · ' + r + '-е место в ' + m;
+    return `<a class="rt-b m${m} r${r}" href="/ladder/table?mode=${m}" title="${esc(t)}" aria-label="${esc(t)}"></a>`; }).join('');
+}
+// the Hall of Fame (/elite/fame.json): a purity seal left of the name; a person with a SteamID is found by it only, else by the name
+const SEAL = '<svg viewBox="0 0 20 30" aria-hidden="true"><path d="M6.4 14.5L4.6 29.2l2.3-1.3 1.6 1.7 1-14.3z" fill="#e7dab8"/><path d="M10.6 15.3l1 14.3 1.6-1.7 2.3 1.3-1.8-14.7z" fill="#d9c79b"/><path d="M10 .7l2.7 1.5 3 .6 1.1 2.9 1.9 2.4-1 2.9-.1 3.1-2.6 1.6-2 2.3-3-.5-3 .5-2.1-2.3-2.6-1.6-.1-3.1-1-2.9 1.9-2.4 1.1-2.9 3-.6z" fill="#a3221d" stroke="#4e0b09" stroke-width=".6"/><circle cx="10" cy="9.6" r="5.5" fill="#8a1814" stroke="#cf4b3f" stroke-width=".6"/><path d="M7.6 6.6h4.8M7.6 12.6h4.8M10 6.6v6" stroke="#e8786a" stroke-width="1.25"/></svg>';
+const fameKey = n => String(n || '').trim().toLowerCase();
+function seal(steam, name) {
+  const F = CH.fame; if (!F) return '';
+  const p = (steam && F.bySteam.get(String(steam))) || F.byName.get(fameKey(name)); if (!p) return '';
+  const tx = o => o ? (o.ru || o.en || '') : '', t = 'Зал славы' + (tx(p.role) ? ': ' + tx(p.role) : '') + (tx(p.short) ? '\n' + tx(p.short) : '');
+  return `<a class="seal" href="/elite/fame/" title="${esc(t)}" aria-label="${esc('Зал славы: ' + (p.name || ''))}">${SEAL}</a>`;
+}
+async function loadMarks(first) {
+  try { const d = await (first && window._oa ? window._oa : fetch('/ladder/api/own/all').then(r => r.json())); if (d && d.players) CH.own = d.players; } catch (e) {}
+  if (first) try {
+    const d = await fetch('/elite/fame.json', { cache: 'no-cache' }).then(r => r.json()), F = { bySteam: new Map(), byName: new Map() };
+    for (const p of (d && d.people) || []) { const ids = [].concat(p.steam || []).map(String).filter(x => /^\d{1,20}$/.test(x));
+      ids.forEach(x => F.bySteam.set(x, p)); if (!ids.length && fameKey(p.name)) F.byName.set(fameKey(p.name), p); }
+    CH.fame = F;
+  } catch (e) {}
+  renderMsgs(); renderOnline(CH.online);
 }
 
 // 20.11.2026 (SirItos: one number everywhere): a player's 1v1 as the site's table shows it (our own rating, mean - 2*RD; calibration
@@ -171,13 +198,13 @@ function chRate(u) {
   return u && u.rating ? { n: (Number(u.rating) | 0) + ' R', t: 'Relic 1v1: ' + (Number(u.rating) | 0) } : { n: '', t: '' };
 }
 function renderOnline(list) {
-  const box = $('online');
+  const box = $('online'); CH.online = list;
   if (!list || !list.length) { box.style.display = 'none'; return; }
   const chips = list.map(u => {
     const ingame = u.state && u.state !== 'menu';   // 'game'/'match'/… = в игре, 'menu' = в меню
     const r = chRate(u), rt = r.n ? `<span class="rt">${esc(r.n)}</span>` : '';
     const tip = (u.name || u.steam) + (r.t ? ' · ' + r.t : '') + (ingame ? ' · в игре' : '');
-    return `<span class="ou${ingame ? ' in' : ''}" data-nm="${esc(u.name || 'Player')}" title="${esc(tip)} · клик — ответить">${avatar(u.avatar)}<span class="on">${esc(u.name || 'Player')}</span>${rt}</span>`;
+    return `<span class="ou${ingame ? ' in' : ''}" data-nm="${esc(u.name || 'Player')}" title="${esc(tip)} · клик — ответить">${avatar(u.avatar)}${seal(u.steam, u.name)}<span class="on">${esc(u.name || 'Player')}</span>${badges(u.steam)}${rt}</span>`;
   }).join('');
   box.innerHTML = `<div class="ohdr"><span class="dot"></span>Онлайн · ${list.length}</div><div class="olist">${chips}</div>`;
   box.style.display = 'block';
@@ -192,29 +219,58 @@ async function pingOnline() {
   if (list) renderOnline(list);
 }
 
+// 25.11.2026 (SirItos: "the paging on scroll is crooked"): the PAGE scrolls (18.11: the list in a box of its own was too small on a
+// phone), so every "where am I" is the window's: at the start and while the reader is at the bottom the page follows the newest message;
+// older ones come in above as the list's top nears the view (an observer on the "earlier" button, which stays as a button too) and the
+// page is moved down by what came in, so the eye stays on the same message
+const pageEl = () => document.scrollingElement || document.documentElement;
+const atBottom = () => { const e = pageEl(); return e.scrollTop + window.innerHeight >= e.scrollHeight - 120; };
+const toBottom = () => { const e = pageEl(); e.scrollTop = e.scrollHeight; };
+// a heading for every day: Сегодня, Вчера, 24 ноября (with the year when it is not this one) - as the launcher's chat
+const dayKey = ts => { const d = new Date(ts * 1000); return d.getFullYear() * 10000 + d.getMonth() * 100 + d.getDate(); };
+function dayName(ts) {
+  const d = new Date(ts * 1000), now = new Date(), y = new Date(now); y.setDate(now.getDate() - 1);
+  if (d.toDateString() === now.toDateString()) return 'Сегодня';
+  if (d.toDateString() === y.toDateString()) return 'Вчера';
+  return d.toLocaleDateString('ru', d.getFullYear() === now.getFullYear() ? { day: 'numeric', month: 'long' } : { day: 'numeric', month: 'long', year: 'numeric' });
+}
+const hm = ts => new Date(ts * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
+const ALL = /(^|[^\p{L}\p{N}_])@all(?![\p{L}\p{N}_])/iu;
 function renderMsgs(opts) {
   opts = opts || {};
   const list = CH.lists[CH.room] || [];
-  const box = $('msgs');
-  const atEnd = box.scrollTop + box.clientHeight > box.scrollHeight - 40;
-  const prevH = box.scrollHeight, prevTop = box.scrollTop;
-  // 20.11.2026: a button (the page scrolls on a phone, not the list - scrolling the list to its top never happened there)
+  const box = $('msgs'), follow = !opts.keepTop && (opts.toEnd || atBottom());
+  const prevH = pageEl().scrollHeight, prevTop = pageEl().scrollTop;
   const top = CH.noMore[CH.room] || !list.length ? '' : '<button class="older" id="older" type="button">↑ Показать более ранние сообщения</button>';
-  const mine = CH.me && CH.me.signed_in ? String(CH.me.steam || '') : '', rOn = replyOn();
+  const mine = CH.me && CH.me.signed_in ? String(CH.me.steam || '') : '', myName = mine ? String(CH.me.name || '') : '', rOn = replyOn();
+  // @mentions: the names of this list (longest first, so "@Ab Cd" wins over "@Ab"), mine lit brighter, @all as a mention of everybody
+  const names = [...new Set(list.map(x => x.name).filter(Boolean))].sort((a, b) => b.length - a.length);
+  const at = html => names.reduce((h, n) => h.split('@' + esc(n)).join(`\u0000${n === myName ? 1 : 0}${esc(n)}\u0001`), html)
+    .replace(/\u0000([01])([^\u0001]*)\u0001/g, (_, me, n) => `<span class="at${me === '1' ? ' me' : ''}">@${n}</span>`)
+    .replace(new RegExp(ALL.source, 'giu'), '$1<span class="at me">@all</span>');
   const quote = q => !q ? '' : q.deleted ? `<div class="rq del"><i>Сообщение удалено</i></div>`
     : `<div class="rq" data-goto="${esc(String(q.id))}" role="button" tabindex="0" title="Показать сообщение"><b>${esc(q.name || 'Player')}</b><i>${esc(quoteText(q))}</i></div>`;
+  let day = null;
   box.innerHTML = list.length ? top + list.map(x => {
-    const own = mine && String(x.steam) === mine;
-    const toMe = mine && !own && x.reply && !x.reply.deleted && String(x.reply.steam) === mine;   // a reply to me: lit like a mention
+    const own = mine && String(x.steam) === mine, orig = x.orig || x.text, tx = String(x.text || '');
+    const toMe = mine && !own && ((x.reply && !x.reply.deleted && String(x.reply.steam) === mine)   // a reply to me, @me or @all: lit
+      || (myName && tx.toLowerCase().includes('@' + myName.toLowerCase())) || ALL.test(tx));
     const rpl = rOn && x.id && !own ? `<button class="rpl" data-reply="${esc(String(x.id))}" title="Ответить" aria-label="Ответить">${ARROW}</button>` : '';
-    return `<div class="m${toMe ? ' tome' : ''}" data-id="${esc(String(x.id))}">${avatar(x.avatar)}<div class="b"><div class="h"><b class="nk" data-nm="${esc(x.name || 'Player')}">${esc(x.name || 'Player')}</b> · ${when(x.ts)}${rpl}</div>`
-      + quote(x.reply) + `<div class="t">${body(x.text)}</div></div></div>`;
+    const k = dayKey(x.ts), head = k !== day ? `<div class="day"><span>${esc(dayName(x.ts))}</span></div>` : ''; day = k;
+    const tr = orig && orig !== tx ? ` title="${esc('Оригинал: ' + orig)}"` : '';   // a translated tab: the original on hover
+    return head + `<div class="m${own ? ' mine' : ''}${toMe ? ' tome' : ''}" data-id="${esc(String(x.id))}">${avatar(x.avatar)}<div class="b"><div class="h">${seal(x.steam, x.name)}<b class="nk" data-nm="${esc(x.name || 'Player')}">${esc(x.name || 'Player')}</b>${badges(x.steam)}<span class="tm" title="${esc(new Date(x.ts * 1000).toLocaleString('ru'))}">${hm(x.ts)}</span>${rpl}</div>`
+      + quote(x.reply) + `<div class="t${tr ? ' tr' : ''}"${tr}>${linkify(tx, p => at(esc(p)), linkA)}</div></div></div>`;
   }).join('') : `<div class="empty">Пока никто не писал. Будьте первым.</div>`;
-  if (opts.keepTop) {                                                       // prepended older: hold the view steady
-    box.scrollTop = box.scrollHeight - prevH + prevTop;
-    if (box.clientHeight >= box.scrollHeight - 2) window.scrollBy(0, box.scrollHeight - prevH);   // the page scrolls, not the list
-  }
-  else if (opts.toEnd || atEnd) box.scrollTop = box.scrollHeight;
+  if (opts.keepTop) pageEl().scrollTop = prevTop + pageEl().scrollHeight - prevH;   // older ones above: the same message stays in view
+  else if (follow) toBottom();
+  watchOlder();
+}
+// the "earlier" button coming near the view (300 px before) pulls the older page in - once per button (a new one is drawn after it)
+let olderIO = null;
+function watchOlder() {
+  if (!('IntersectionObserver' in window)) return;
+  olderIO = olderIO || new IntersectionObserver(es => { if (es.some(e => e.isIntersecting) && CH.ready) loadOlder(CH.room); }, { rootMargin: '300px 0px 0px 0px' });
+  olderIO.disconnect(); const o = $('older'); if (o) olderIO.observe(o);
 }
 
 // new messages (first load with ?limit, then polling with ?after)
@@ -231,9 +287,11 @@ async function load(room) {
     CH.last[r] = Math.max(CH.last[r] || 0, m.id);
     CH.first[r] = CH.first[r] ? Math.min(CH.first[r], m.id) : m.id;
   });
-  if (firstLoad && d.msgs.length < PAGE) CH.noMore[r] = true;   // whole history already fits in the first page
+  // the whole history fits in the first page - only the common tab can tell: a translated one may be cut short at a message still
+  // being translated (community._cut), its older pages say it themselves
+  if (firstLoad && r === 'all' && d.msgs.length < PAGE) CH.noMore[r] = true;
   setFeatures(d.features);   // Reply only where the server can do it
-  if (added && r === CH.room) renderMsgs();
+  if ((added || firstLoad) && r === CH.room) renderMsgs(firstLoad ? { toEnd: true } : undefined);
 }
 
 // scroll-up paging: pull the PAGE messages just before the oldest we hold
@@ -251,6 +309,7 @@ async function loadOlder(r) {
   }
   if (!d || !d.msgs || d.msgs.length < PAGE) CH.noMore[r] = true;
   CH.busy[r] = false;
+  if (!older.length && r === CH.room) renderMsgs({ keepTop: true });   // nothing new: the button back (or gone at the start of history)
 }
 
 async function send() {
@@ -260,7 +319,7 @@ async function send() {
   const rt = replyOn() && CH.replyTo ? CH.replyTo.id : 0;
   try {
     const r = await api('say', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ room: CH.room, text }, rt ? { reply_to: rt } : {})) });
-    if (r && r.ok) { if (CH.replyTo && CH.replyTo.id === rt) { CH.replyTo = null; renderReplyBar(); } await load(CH.room); $('msgs').scrollTop = $('msgs').scrollHeight; }
+    if (r && r.ok) { if (CH.replyTo && CH.replyTo.id === rt) { CH.replyTo = null; renderReplyBar(); } await load(CH.room); toBottom(); }
     else { el.value = text; toast((r && r.error) || 'Не отправлено'); }
   } catch (e) { el.value = text; toast('Сеть недоступна'); }
   $('sendBtn').disabled = false; el.focus();
@@ -272,10 +331,6 @@ function signIn() {
   if (nonce.length < 16) nonce = String(Date.now()) + Math.random().toString(16).slice(2);
   location.href = '/ladder/api/c/login?nonce=' + nonce + '&to=' + encodeURIComponent('/ladder/chat');
 }
-async function logout() {
-  try { await api('logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); } catch (e) {}
-  CH.me = null; renderMe(); toast('Вы вышли', true);
-}
 
 // tabs
 document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
@@ -283,16 +338,8 @@ document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
   document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x === b));
   renderMsgs({ toEnd: true }); load();
 });
-$('msgs').addEventListener('scroll', () => { if ($('msgs').scrollTop < 60) loadOlder(CH.room); });
-// 20.11.2026 (SirItos: on a phone the page scrolls, the list never reaches its own top): "Show earlier" is a button, and scrolling the
-// page UP until it shows loads them as well
+// 20.11.2026: "Show earlier" is a button too (and the observer above loads them as it comes near the view)
 $('msgs').addEventListener('click', e => { if (e.target.closest && e.target.closest('#older')) { e.target.closest('#older').disabled = true; loadOlder(CH.room); } });
-let pageY = window.scrollY;
-window.addEventListener('scroll', () => {
-  const up = window.scrollY < pageY; pageY = window.scrollY;
-  const o = up && $('older'); if (!o) return;
-  const r = o.getBoundingClientRect(); if (r.bottom > 60 && r.top < window.innerHeight) loadOlder(CH.room);
-}, { passive: true });
 document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.room === CH.room));
 
 $('steamBtn').onclick = signIn;
@@ -311,6 +358,7 @@ function mention(nm) {
   el.focus();
 }
 document.addEventListener('click', e => {
+  if (e.target.closest && e.target.closest('a.rt-b, a.seal')) return;   // a badge / a seal: its own link, not a mention
   const rp = e.target.closest && e.target.closest('[data-reply]');
   if (rp) { e.preventDefault(); replyStart(rp.getAttribute('data-reply')); return; }
   const go = e.target.closest && e.target.closest('[data-goto]');
@@ -331,14 +379,17 @@ async function showVer() {   // актуальная версия лаунчер
   } catch (e) {}
 }
 async function boot() {
-  try { CH.me = await api('whoami'); } catch (e) {}
+  // one whoami for the page and its header (ladder-hdr.js reads the same promise); the own table once for the badges and the header
+  window._wa = window._wa || fetch('/ladder/api/c/whoami', { credentials: 'same-origin', cache: 'no-store' }).then(r => r.json()).catch(() => ({}));
+  window._oa = window._oa || fetch('/ladder/api/own/all').then(r => r.json()).catch(() => ({}));
+  try { CH.me = await window._wa; } catch (e) {}
   renderMe();
   await load(CH.room);
-  renderMsgs({ toEnd: true });
-  pingOnline();
-  showVer();
+  CH.ready = true; renderMsgs({ toEnd: true });
+  pingOnline(); showVer(); loadMarks(true);
   setInterval(() => { load(); if (CH.room !== 'all') load('all'); }, 5000);
   setInterval(pingOnline, 25000);
+  setInterval(() => { if (!document.hidden) loadMarks(); }, 120000);
 }
 boot();
 </script>

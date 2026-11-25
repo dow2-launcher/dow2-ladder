@@ -11,6 +11,7 @@ if '--live-copy' in args: i = args.index('--live-copy'); LIVE = args[i + 1]; del
 APP = args[0] if args else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, APP)
 import own_matches as o
+o.REPO_MAPS = {}   # 25.11.2026: the repo's season pool (ladder/season_maps.py) has its own test (test_season_maps.py) - the file's rules here
 
 T = tempfile.mkdtemp(prefix='own_pre_'); T0 = 1_800_000_000; N = [0]
 def P(steam, team, rep=None, rep_t=None, leave=None): return dict(steam=steam, team=team, rep=rep, rep_t=rep_t, leave=leave)

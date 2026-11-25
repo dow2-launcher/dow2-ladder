@@ -26,6 +26,12 @@
 .act { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
 .res { font: 600 12.5px var(--fb); color: var(--mu); white-space: nowrap; }
 .res.est { color: var(--wa); font-style: italic; }
+/* 25.11.2026 (SirItos): the player page's matches are these cards too (ladder.js pCard) - his result over Replay, why a match is unrated
+   under the teams, the page's own player bold, the others links to their pages */
+.fin { font: 700 16px var(--fh); white-space: nowrap; }
+.fin.win { color: var(--ok); } .fin.loss { color: var(--bd); } .fin.loss_leave { color: var(--wa); } .fin.none { color: var(--mu); }
+.hwhy { margin-top: 3px; color: var(--mu); font-size: 13px; }
+.pl .n.me { color: #fff; } .pl a.n { color: var(--gd2); } .pl a.n:hover { color: #fff; }
 .more { display: flex; margin: 10px auto 0; }
 
 /* ---------- live: the counters, who is searching, the matches, the open lobbies ---------- */
@@ -93,9 +99,11 @@ details.smaps[open] summary { background: none; padding-bottom: 6px; margin-bott
 details.smaps summary .smm { gap: 0; font: 600 15px var(--fb); color: var(--mu); text-shadow: none; }
 .smb { padding: 0 2px; }
 .smn { margin: 0 0 10px; color: var(--mu); font-size: 13.5px; }
-/* 18.11.2026 (SirItos): the picked mode's 4 maps fill the width (232 px webp, maps_m/, <= 18 KB each); a phone 2 x 2 */
-.smr { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-.smt { margin: 0; padding: 5px; min-width: 0; }
+/* 18.11.2026 (SirItos): the picked mode's maps, 4 in a row (232 px webp, maps_m/, <= 18 KB each); a phone 2 in a row.
+   25.11.2026 (SirItos: 6 maps a mode now): an unfilled last row is centred (4 + 2: the two under the middle) - flex, the card a 1/--n
+   of the row less the gaps */
+.smr { --n: 4; --g: 12px; display: flex; flex-wrap: wrap; justify-content: center; gap: var(--g); }
+.smt { flex: 0 0 calc((100% - (var(--n) - 1) * var(--g)) / var(--n)); margin: 0; padding: 5px; min-width: 0; }
 /* 18.11.2026 (SirItos: "the maps load slowly"): the square is there from the start with a quiet teal shimmer; the picture fades in */
 .smi { display: block; aspect-ratio: 1; overflow: hidden; border: 1px solid #2b6f64; box-shadow: 0 0 0 1px #000;
   background: linear-gradient(100deg, transparent 35%, rgba(69, 224, 192, .11) 50%, transparent 65%) 0 0 / 300% 100% no-repeat, #061011; animation: smshim 1.4s linear infinite; }
@@ -105,7 +113,20 @@ details.smaps summary .smm { gap: 0; font: 600 15px var(--fb); color: var(--mu);
 @media (prefers-reduced-motion: reduce) { .smi { animation: none; } .smi img { transition: none; } }
 .smt figcaption { margin-top: 5px; font: 600 13.5px/1.2 var(--fb); text-align: center; overflow-wrap: anywhere; }
 @media (max-width: 860px) {
-  .smr { gap: 8px; }
+  .smr { --g: 8px; }
   .smt { padding: 3px; } .smt figcaption { font-size: 12px; }
 }
-@media (max-width: 620px) { .smr { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; } .smt figcaption { font-size: 13px; } }
+@media (max-width: 620px) { .smr { --n: 2; --g: 8px; } .smt figcaption { font-size: 13px; } }
+/* ---------- 25.11.2026 (SirItos: "in the table, see yourself at once", variant D): my row (the chat's sign-in, ladder.js) - a teal glowing
+   frame and "Я" by the name; the top three keep their medal's frame with a teal ring round it; while the table scrolls the row sticks to
+   the screen's top / bottom edge (inside the table) - always in view ---------- */
+#rows .tr.p.me { position: sticky; top: 6px; bottom: 6px; z-index: 3; }
+.tr.p.me:not(.top) { border-color: var(--gd); background: linear-gradient(90deg, rgba(38, 104, 92, .96), rgba(13, 34, 33, .97) 48%, rgba(7, 14, 15, .98)), var(--tex-card) center / cover, #0c1718;
+  box-shadow: 0 0 0 1px #000, inset 0 0 0 1px rgba(69, 224, 192, .85), inset 0 0 16px rgba(69, 224, 192, .22), 0 0 12px rgba(69, 224, 192, .45), 0 4px 14px rgba(0, 0, 0, .7); }
+.tr.p.top.me { box-shadow: 0 0 0 1px #000, 0 0 0 3px rgba(69, 224, 192, .9), inset 0 0 14px rgba(var(--mc), .12), 0 0 16px rgba(69, 224, 192, .5), 0 4px 14px rgba(0, 0, 0, .7); }
+.tr.p.me .nm > span { color: #fff; }
+.you { flex: none; padding: 1px 6px 0; font: 700 11px/1.45 var(--fb); letter-spacing: .08em; text-transform: uppercase; color: #032019;
+  background: linear-gradient(#8ff5dc, #45e0c0); box-shadow: 0 0 0 1px #000, 0 0 8px rgba(69, 224, 192, .55); }
+.tnote .lnk { padding: 0; border: 0; background: none; font: inherit; color: var(--gd); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.tnote .lnk:hover { color: #c9f7ea; }
+.tnote .lnk[hidden] { display: none; }

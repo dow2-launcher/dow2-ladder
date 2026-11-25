@@ -274,6 +274,9 @@ REPEAT_N = 3            # 1v1: the same pair's rated matches in REPEAT_S before 
 REPEAT_S = 86400
 REPEAT_W = 0.25         # ... both players' rating change is scaled by this (anti-abuse 3b, 17.11.2026)
 UNELIGIBLE = ('not_full_teams', 'no_steam', 'room', 'no_history', 'not_elite', 'peer_order')   # rule 1: a manual winner does not make these rated
+try: from season_maps import MAPS as REPO_MAPS   # 25.11.2026 (SirItos): the season's automatch pool in the repo (season_cfg)
+except Exception: REPO_MAPS = {}
+_NOTED = set()
 SEASON_FILE = 'own_season.json'   # <data>/own_season.json {"label": "2026-pre", "start": <unix ts>, "info": "https://..." (optional)}: the (pre)season of the own rating
 # 17.11.2026 (SirItos: «ливы в первые 2-3 минуты - игра не в рейтинг»): with own_season.json the early-leave window and the short-match
 # threshold are both 3 min, and only Elite matches are rated (a vanilla automatch match stays stored, unrated 'not_elite').
@@ -330,12 +333,24 @@ def season_cfg(data_dir=None, log=print):
     # a mode has one, the server picks one of exactly these at random (no player bans); the site's "Season maps" shows them. The keys
     # are checked against the map catalog by ladder.py (_season_pool); a missing "maps" or mode = the old rules
     maps = d.get('maps')
-    if isinstance(maps, dict):
-        pool = {m: list(dict.fromkeys(k for k in v if isinstance(k, str) and re.fullmatch(r'[\w.-]{1,64}', k)))[:20]
-                for m, v in maps.items() if m in MODES_ALL and isinstance(v, list)}
-        if any(pool.values()): out['maps'] = {m: v for m, v in pool.items() if v}
-    elif maps is not None: log('own_matches: %s: "maps" must be {"1v1": [map keys], ...}, got %r' % (fn, maps))
+    pool = _pool_of(maps) if isinstance(maps, dict) else {}
+    if maps is not None and not isinstance(maps, dict): log('own_matches: %s: "maps" must be {"1v1": [map keys], ...}, got %r' % (fn, maps))
+    # 25.11.2026 (SirItos): the pool is in the repo now (ladder/season_maps.py, deployed with the ladder) - a mode it lists wins over
+    # the file's; the file's "maps" only for a mode the repo leaves out. A file pool that differs is noted once (it no longer plays)
+    repo = _pool_of(REPO_MAPS) if isinstance(REPO_MAPS, dict) else {}
+    for m in sorted(repo):
+        if pool.get(m) and pool[m] != repo[m] and (fn, m) not in _NOTED:
+            _NOTED.add((fn, m)); log('own_matches: %s "maps" %s ignored: ladder/season_maps.py has the pool' % (fn, m))
+    pool = dict(pool, **repo)
+    if pool: out['maps'] = pool
     return out
+
+
+def _pool_of(maps):
+    """{"1v1": [keys], ...} -> the modes we rate with their keys (each once, a sane key, at most 20); empty lists left out"""
+    pool = {m: list(dict.fromkeys(k for k in v if isinstance(k, str) and re.fullmatch(r'[\w.-]{1,64}', k)))[:20]
+            for m, v in maps.items() if m in MODES_ALL and isinstance(v, (list, tuple))}
+    return {m: v for m, v in pool.items() if v}
 
 
 def default_season(data_dir=None):
@@ -751,19 +766,23 @@ def site_player(steam, race_key=lambda rc, modname: None, limit=50):
                                         (steam, cfg['start'] if cfg else -1, limit))]
         ms = []
         for sid in sids:
-            m = c.execute('SELECT kind, mode, map, modname, started, ended, winner_team, rated, why_unrated FROM own_matches WHERE sid = ?',
+            m = c.execute('SELECT kind, mode, map, modname, started, ended, winner_team, rated, why_unrated, lobby FROM own_matches WHERE sid = ?',
                           (sid,)).fetchone()
             if not m: continue
-            ps = c.execute('SELECT steam, name, team, race, final, note, weight, own_c, own_d, own_n FROM own_match_players '
+            ps = c.execute('SELECT steam, name, team, race, final, note, weight, own_c, own_d, own_n, hero FROM own_match_players '
                            'WHERE sid = ? ORDER BY team, pid', (sid,)).fetchall()
             teams, me = {}, None
-            for s, name, team, race, final, note, w, oc, od, on in ps:
-                p = {'steam': s, 'name': name or s, 'team': team, 'race': race_key(race, m[3]), 'final': final}
+            for s, name, team, race, final, note, w, oc, od, on, hero in ps:
+                # 25.11.2026 (SirItos: the matches as the history's cards): + every player's hero (0-2) and his table number after the
+                # match / its change / his games (own_c / own_d / own_n), as the history's rows carry them
+                p = {'steam': s, 'name': name or s, 'team': team, 'race': race_key(race, m[3]), 'final': final,
+                     'hero': hero if isinstance(hero, int) and 0 <= hero < 3 else None,
+                     'own_c': None if oc is None else round(oc), 'own_d': None if od is None else round(od), 'own_n': on}
                 teams.setdefault(team, []).append(p)
                 if s == steam:   # 17.11.2026: + the table's number after this match and its change (None in calibration), games after it
                     me = {'team': team, 'final': final, 'note': note, 'weight': w,
                           'c': None if oc is None else round(oc), 'd': None if od is None else round(od), 'n': on}
-            ms.append({'sid': sid, 'kind': m[0], 'mode': m[1], 'map': m[2], 'started': m[4], 'ended': m[5], 'winner_team': m[6],
+            ms.append({'sid': sid, 'lobby': m[9], 'kind': m[0], 'mode': m[1], 'map': m[2], 'started': m[4], 'ended': m[5], 'winner_team': m[6],
                        'rated': bool(m[7]), 'why': m[8], 'me': me, 'teams': [teams[k] for k in sorted(teams, key=lambda t: (t is None, t))]})
         name = _names(c, [steam]).get(steam) or ''
         ranks = {}                 # 17.11.2026: his place in each calibrated mode (the board's order: cons, then games)

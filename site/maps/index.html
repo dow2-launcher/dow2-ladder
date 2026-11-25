@@ -7,7 +7,8 @@
 <meta name="robots" content="noindex">
 <!-- 24.11.2026 (SirItos: "сделай страничку со всеми картами, которые есть в игре, в картинках, и я скажу, какие брать"):
      every map of the Elite catalog by mode (/ladder/api/lroom/catalog), the season's automatch pool marked (/ladder/api/own/season),
-     checkboxes -> the chosen keys as own_season.json "maps" to copy. Static: no server code. -->
+     checkboxes -> the chosen keys as {"maps": {...}} to copy. Static: no server code. 25.11.2026: the pool lives in the repo now -
+     the copied list goes into ladder/season_maps.py (a PR; it wins over own_season.json "maps"). -->
 <style>
 :root{--bg:#0d0b09;--panel:#16130f;--line:#3a3124;--gold:#d9b25f;--text:#e6dccb;--muted:#a39782;--pick:#2f6b3a}
 *{box-sizing:border-box}
