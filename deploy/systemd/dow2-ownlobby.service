@@ -8,7 +8,7 @@ User=ladder
 Group=ladder
 Environment=LOBBY_DATA=/srv/ownlobby/data
 Environment=LADDER_DB=/srv/ladder/data/ladder.sqlite
-Environment=LOBBY_RELAYS=74.248.144.168:47100,15.220.68.107:47100,116.202.106.150:47100
+Environment=LOBBY_RELAYS=74.248.144.168:47100,116.202.106.150:47100,83.217.192.34:47100,91.107.122.186:47100
 ExecStart=/usr/bin/python3 -u /srv/ownlobby/app/own_lobby.py
 Restart=always
 RestartSec=3
