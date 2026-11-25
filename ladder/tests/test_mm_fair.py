@@ -14,6 +14,7 @@ POOL = {'1v1': ['2p_doom_of_tularis', '2p_fortuna_sanctum', '2p_lugganath_glacie
         '3v3': ['6p_fortuna_sanctum', '6p_fen_dunloch_redux', '6p_garvusicegate', '6p_valhallaoilfield']}
 json.dump({'label': 'tpre', 'start': 1, 'maps': POOL}, open(T + '/data/own_season.json', 'w'))
 import ladder as L, own_matches as O
+O.REPO_MAPS = {}   # 25.11.2026: the file's pool here, not the repo's (ladder/season_maps.py)
 with L.db() as c: O.migrate(c)
 RATING = {}
 L._rating_info = lambda steam, mode: (int(steam[-3:]), RATING.get(steam, 1500), 200.0, 0, 'P' + steam[-3:], 'new')

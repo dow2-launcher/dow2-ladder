@@ -47,7 +47,10 @@ function hCard(m) {
   const side = t => {
     const ps = m.players.filter(p => p.team === t);
     const cls = m.winner ? (m.winner === t ? 'win' : 'lose') : '';
-    return `<div class="side ${cls}">` + ps.map(p => `<div class="pl">${heroImg(p)}<span class="n">${esc(p.name || 'Player')}</span>` + hRating(p) +
+    // 25.11.2026: the player page's cards (ladder.js pCard) know the SteamIDs - the page's own player bold, the others their pages
+    const nm = p => p.me ? `<span class="n me">${esc(p.name || 'Player')}</span>` : p.steam ? `<a class="n" href="${esc(playerUrl(p.steam, m.mode))}">${esc(p.name || 'Player')}</a>`
+      : `<span class="n">${esc(p.name || 'Player')}</span>`;
+    return `<div class="side ${cls}">` + ps.map(p => `<div class="pl">${heroImg(p)}${nm(p)}` + hRating(p) +
       (p.own_n == null && p.mmr_delta != null ? `<span class="d ${p.mmr_delta >= 0 ? 'up' : 'dn'}" title="${esc(T('mmrAfter'))}: ${p.mmr}${m.estimated ? ' (' + esc(T('estResult')) + ')' : ''}">${m.estimated ? '≈' : ''}${p.mmr_delta >= 0 ? '▲ +' + p.mmr_delta : '▼ ' + p.mmr_delta}</span>` : '') + `</div>`).join('') + `</div>`;
   };
   const mk = mapKey(m), mm = ASSETS.maps[mk], mini = mm && mm.minimap ? `style="background-image:url('${A + esc(thumb(mm.minimap))}')"` : '';
@@ -55,8 +58,8 @@ function hCard(m) {
   const w = m.watchers && m.watchers.length ? ` · ${esc(T('watchers'))}: ${m.watchers.map(esc).join(', ')}` : '';
   return `<div class="hm card"><div class="mini" ${mini} title="${mapTitle(mk)}"></div><div style="min-width:0">
     <div class="hd"><b>${esc(m.mode)}</b> · <b>${mapTitle(mk)}</b> · <span title="${hUTC(m.started)}">${hDate(m.started)} (${tzLabel(m.started)})</span> · <span title="${hUTC(m.started)}">${humanAgo(m.started)}</span>${m.duration ? ' · ' + dur(m.duration) : ''}${w}</div>
-    <div class="hteams">${side(1)}<span class="vsx">vs</span>${side(2)}</div></div>
-    <div class="act">${m.estimated ? `<span class="res est" title="${esc(T('estHint'))}">≈ ${esc(T('estResult'))}${m.confidence ? ' · ' + esc((T('conf') || {})[m.confidence] || m.confidence) : ''}</span>` : (res ? `<span class="res">${esc(res)}</span>` : '')}${m.replay ? `<a class="btn small" href="/replay/r/${esc(m.replay)}">▶ ${esc(T('replay'))}</a>` : `<span class="res">${esc(T('noReplay'))}</span>`}</div></div>`;
+    <div class="hteams">${side(1)}<span class="vsx">vs</span>${side(2)}</div>${m.why ? `<div class="hwhy">${esc(m.why)}</div>` : ''}</div>
+    <div class="act">${m.fin ? `<span class="fin ${esc(m.fin.f)}">${esc(m.fin.text)}</span>` : ''}${m.estimated ? `<span class="res est" title="${esc(T('estHint'))}">≈ ${esc(T('estResult'))}${m.confidence ? ' · ' + esc((T('conf') || {})[m.confidence] || m.confidence) : ''}</span>` : (res ? `<span class="res">${esc(res)}</span>` : '')}${m.replay ? `<a class="btn small" href="/replay/r/${esc(m.replay)}">▶ ${esc(T('replay'))}</a>` : `<span class="res">${esc(T('noReplay'))}</span>`}</div></div>`;
 }
 let hItems = [], hTimer = 0, hMaps = null, histInit = false, hSeq = 0;
 function hFillSelects(maps) {
@@ -242,5 +245,10 @@ $('#lang').addEventListener('click', e => { const b = e.target.closest('button')
 showView(VIEW); applyLang();
 if (PSTEAM) loadPlayer();
 openHow();
+// 25.11.2026 (SirItos): who is looking (the chat's sign-in) - his row in the table (ladder.js meBar); not signed in: "Sign in" in the note
+(window._wa = window._wa || fetch('/ladder/api/c/whoami', { credentials: 'same-origin', cache: 'no-store' }).then(r => r.json()).catch(() => ({}))).then(m => {   // ladder-hdr.js reads it too
+  if (m && m.signed_in && m.steam) { ME = String(m.steam); render(); return; }
+  const n = $('#meIn'); if (n) { n.hidden = false; n.onclick = meSignIn; }
+}).catch(() => {});
 /* Inbox: only for the admins of the feedback chat (their Steam sign-in on this site); nobody else sees the link */
 fetch('/ladder/api/inbox/me', { credentials: 'same-origin' }).then(r => r.json()).then(m => { if (m && m.admin) $('#inboxLink').hidden = false; }).catch(() => {});

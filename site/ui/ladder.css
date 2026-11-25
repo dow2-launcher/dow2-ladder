@@ -170,22 +170,6 @@ input[type=checkbox] { accent-color: var(--gd); }
 .prk { display: inline-flex; align-items: center; gap: 4px; font: 700 15px var(--fh); color: var(--gd2); letter-spacing: 0; text-transform: none; }
 .prk.t1 { color: var(--g1); } .prk.t2 { color: var(--g2); } .prk.t3 { color: var(--g3); }
 .mh { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin: 4px 0 6px; }
-.m { display: grid; grid-template-columns: 112px minmax(0, 1fr) 120px; gap: 12px; align-items: center; padding: 10px 4px; border-bottom: 1px solid var(--sep); }
-.m:last-child { border-bottom: 0; }
-.m .res2 { font: 700 17px var(--fh); }
-.m .res2.win { color: var(--ok); } .m .res2.loss { color: var(--bd); } .m .res2.loss_leave { color: var(--wa); } .m .res2.none { color: var(--mu); }
-.m .res2 small { display: block; font: 400 13px var(--fb); color: var(--mu); }
-.m .mid { min-width: 0; }
-.m .teams2 { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; margin: 2px 0; }
-.m .sd { display: inline-flex; flex-wrap: wrap; gap: 2px 10px; }
-.m .pq { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
-.m .pq img { width: 18px; height: 18px; }
-.m .pq.me { color: #eafff8; font-weight: 700; }
-.m .why { color: var(--mu); font-size: 13px; }
-.m .dl { text-align: right; font: 700 19px var(--fh); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.m .dl.up { color: var(--ok); text-shadow: 0 0 8px rgba(98, 227, 154, .35); } .m .dl.down { color: var(--bd); } .m .dl.zero { color: var(--sf); }
-.m .dl small { display: block; font: 400 12px var(--fb); color: var(--mu); text-shadow: none; }
-.m .dl.cal2, .m .dl.un { font: 400 13px var(--fb); color: var(--mu); }
 
 .foot { max-width: 1040px; margin: 0 auto; padding: 0 16px 28px; color: var(--dim); font-size: 13px; text-align: center; }
 
@@ -202,8 +186,5 @@ input[type=checkbox] { accent-color: var(--gd); }
   .pp-h h1 { font-size: 23px; } .av { width: 56px; height: 56px; }
   .cards { gap: 6px; } .mc { padding: 4px 6px 6px; } .mc .cv { font-size: 23px; } .mc .cv.cal { font-size: 13px; line-height: 1.6; }
   .mc .cs { font-size: 12px; white-space: normal; } .mc.pv .cv { font-size: 20px; } .mc .cal { font-size: 14px; gap: 3px; } .mc .cal .csk { width: 9px; height: 12px; } .mc .cal .csks { gap: 1px; } .mc .cm { font-size: 11.5px; letter-spacing: .04em; }
-  .m { grid-template-columns: 1fr auto; gap: 4px 10px; padding: 10px 2px; }
-  .m .res2 { grid-column: 1; } .m .dl { grid-column: 2; grid-row: 1; } .m .mid { grid-column: 1 / 3; }
-  .m .res2 small { display: inline; margin-left: 6px; }
   .how { padding: 0 2px 4px; }
 }

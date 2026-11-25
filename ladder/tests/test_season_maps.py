@@ -20,6 +20,8 @@ def season(d):
         if os.path.exists(SFILE): os.unlink(SFILE)
     else: json.dump(d, open(SFILE, 'w'))
 import ladder as L
+# 25.11.2026: the repo's pool (ladder/season_maps.py) wins over the file's - off for the file's cases, its own section at the end
+REPO = L.own_matches.REPO_MAPS; L.own_matches.REPO_MAPS = {}
 L._rating_info = lambda steam, mode: (int(steam[-3:]), 1500, 200.0, 0, 'P' + steam[-3:], 'new')
 A, B, C, D, E, F = ('7656119000000000%d' % i for i in range(1, 7))
 CAT = L._catalog(); NAME = lambda k: (CAT.get(k) or {}).get('name')
@@ -124,6 +126,39 @@ check('no known key: the old rules', L._nm_maps('elite', '1v1'), OLD1)
 season(dict(BASE, maps=['2p_doom_of_tularis']))
 check('"maps" not an object: ignored, the season still on', (L.own_matches.season_cfg() or {}).get('label'), '2027-pre')
 check('... and the old pool', L._nm_maps('elite', '1v1'), OLD1)
+
+print('== the repo\'s pool (ladder/season_maps.py, 25.11.2026 SirItos): it wins over the file\'s "maps"')
+AGREED = {'1v1': ['2p_seraph_palace', '2p_selenon_island', '2p_lugganath_glacier', '2p_calderisrefinery', '1v1typhonlowlands', '2p_questsdisaster'],
+          '2v2': ['4p_ancestors_rest', '4p_selenonfissure', '4p_golgothadepths', '4p_edgeofannihilation', '4p_desertshowdown', '4p_valderusrefinery'],
+          '3v3': ['6p_calderis_outskirts', '6p_angelgate', '6p_cityjungle', '6p_fen_dunloch_redux', '6p_hades_wastes_redux', '6p_meridianhighcity']}
+check('season_maps.py = the pool SirItos sent 25.11', REPO, AGREED)
+for mode, keys in AGREED.items():
+    check('%s: every key in the catalog, of the mode\'s size' % mode, [CAT.get(k, {}).get('maxplayers') for k in keys], [2 * L.TEAM_N[mode]] * 6)
+L.own_matches.REPO_MAPS = REPO
+season(None)
+check('no season file: the old rules, the repo\'s pool too', L._nm_maps('elite', '1v1'), OLD1)
+season(BASE)
+for mode, keys in AGREED.items(): check('a season file without "maps": elite %s = the repo\'s pool' % mode, L._nm_maps('elite', mode), keys)
+notes = []
+L.own_matches._NOTED.clear()
+season(dict(BASE, maps=SEASON))
+cfg = L.own_matches.season_cfg(log=notes.append); L.own_matches.season_cfg(log=notes.append)
+check('the file\'s "maps" too: the repo\'s pool wins in every mode', cfg['maps'], AGREED)
+check('... the file\'s pool noted once per mode', len(notes), 3)
+for mode, keys in AGREED.items(): check('elite %s = the repo\'s pool' % mode, L._nm_maps('elite', mode), keys)
+check('vanilla 2v2 unchanged', L._nm_maps('vanilla', '2v2'), VAN2)
+check('bans ignored', L._nm_wishes('elite', '1v1', {'bans': [NAME(k) for k in AGREED['1v1'][:3]]}), [])
+seen = set()
+for i in range(150): seen.add(match_map({A: {'bans': [NAME(k) for k in AGREED['1v1'][:3]]}, B: {}}))
+check('1v1 matches: every map of the repo\'s pool, nothing else', sorted(seen), sorted(AGREED['1v1']))
+v = L._season_maps_view()
+check('API: the repo\'s pool, its order', {m: [x['key'] for x in v[m]] for m in v}, AGREED)
+d = json.load(urllib.request.urlopen('http://127.0.0.1:%d/ladder/api/own/season' % srv.server_address[1], timeout=10))
+check('GET: 6 maps per mode', [len(d['maps'][m]) for m in ('1v1', '2v2', '3v3')], [6, 6, 6])
+L.own_matches.REPO_MAPS = {'1v1': AGREED['1v1'], '2v2': []}
+check('a mode the repo leaves out (or empty): the file\'s pool for it', (L._nm_maps('elite', '1v1'), L._nm_maps('elite', '2v2'), L._nm_maps('elite', '3v3')),
+      (AGREED['1v1'], SEASON['2v2'], SEASON['3v3']))
+L.own_matches.REPO_MAPS = REPO
 srv.shutdown()
 
 print('\n%d failed' % len(fails) if fails else '\nall ok')

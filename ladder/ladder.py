@@ -1253,6 +1253,24 @@ def history(q='', mode='', mapk='', race='', page=0, n=30, off=None):
     return {'total': len(out), 'page': page, 'items': items,
             'maps': sorted({i['map'] for i in out if i['map']})}
 
+def _with_replays(d):
+    """25.11.2026 (SirItos: the player page's matches as the history's cards, with its Replay button): each own match's replay id and
+    Relic's duration of it from mm_history (the history's row of the same lobby, _history_resolver fills them)"""
+    lobbies = [m['lobby'] for m in d.get('matches') or [] if m.get('lobby')]
+    if not lobbies: return d
+    try:
+        with db() as c:
+            got = {r[0]: r[1:] for r in c.execute('SELECT lobby, replay, result FROM mm_history WHERE lobby IN (%s)' % ','.join('?' * len(lobbies)), lobbies)}
+    except sqlite3.OperationalError: return d
+    for m in d['matches']:
+        g = got.get(m.get('lobby'))
+        if not g: continue
+        if g[0]: m['replay'] = g[0]
+        try: dur = (json.loads(g[1]) or {}).get('duration') if g[1] else None
+        except Exception: dur = None
+        if isinstance(dur, (int, float)) and dur > 0: m['duration'] = int(dur)
+    return d
+
 STEAM_NOW = {'t': 0, 'n': None}
 def _steam_now():  # игроков DoW2: Retribution в Steam прямо сейчас (Steam Web API, без ключа); кэш 5 минут
     if time.time() - STEAM_NOW['t'] > 300:
@@ -2365,7 +2383,7 @@ class H(BaseHTTPRequestHandler):
             if u.path == '/ladder/api/own/player':                # own rating: a player's own matches
                 steam = qs.get('steam', [''])[0]
                 if not re.fullmatch(r'\d{5,20}', steam): return self.send(400, {'error': 'steam'})
-                d = own_matches.site_player(steam, own_race_key)
+                d = _with_replays(own_matches.site_player(steam, own_race_key))
                 d['season'] = own_matches.default_season() or current_season(); d['preseason'] = bool(own_matches.season_cfg())
                 if d['ratings'] or d['matches'] or d.get('prev'):   # 17.11.2026, the player page: his Steam avatar (no lookups of random ids)
                     try: d['avatar'] = users.get(steam)['avatar'] or ''

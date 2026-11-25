@@ -92,13 +92,22 @@ function render() {
     const lost = p.losses + p.leaves;              // a leave is a loss (SirItos: W–L only)
     const wl = `<span class="wl" title="${esc(T('wlHint2') + (p.leaves ? ' · ' + T('leavesT')(p.leaves) : ''))}"><span class="w">${p.wins}</span>–<span class="lo">${lost}</span></span>`;
     const tip = esc(T('stats') + (p.hours_played != null ? ' · ' + T('hoursLine')(p.hours_played) : ''));
-    const name = `<span class="nm"><span>${esc(p.name || p.steam)}</span>${badge(p.rank, DATA.mode || MODE)}</span>`;
+    const me = ME && String(p.steam) === ME ? ' me' : '';   // 25.11.2026 (SirItos): my row - marked, "you" by the name
+    const name = `<span class="nm"><span>${esc(p.name || p.steam)}</span>${badge(p.rank, DATA.mode || MODE)}${me ? `<b class="you">${esc(T('you'))}</b>` : ''}</span>`;
     const href = esc(playerUrl(p.steam, DATA.mode || MODE));
     html += p.calibrating
-      ? `<a class="tr p cr" href="${href}" title="${tip}"><span class="l rk">—</span><span class="l">${name}</span><span class="cal" title="${esc(T('calT')(p.cal_played, p.cal_needed))}">${calCell(p.cal_played, p.cal_needed)}</span><span>${p.games}</span>${wl}</a>`
-      : `<a class="tr p${p.rank <= 3 ? ' top top' + p.rank : ''}" href="${href}" title="${tip}"><span class="l rk">${p.rank}</span><span class="l">${name}</span><span class="rv" title="${esc(p.rating + ' ± ' + p.rd)}">${p.cons}</span><span>${p.games}</span>${wl}</a>`;
+      ? `<a class="tr p cr${me}" href="${href}" title="${tip}"><span class="l rk">—</span><span class="l">${name}</span><span class="cal" title="${esc(T('calT')(p.cal_played, p.cal_needed))}">${calCell(p.cal_played, p.cal_needed)}</span><span>${p.games}</span>${wl}</a>`
+      : `<a class="tr p${p.rank <= 3 ? ' top top' + p.rank : ''}${me}" href="${href}" title="${tip}"><span class="l rk">${p.rank}</span><span class="l">${name}</span><span class="rv" title="${esc(p.rating + ' ± ' + p.rd)}">${p.cons}</span><span>${p.games}</span>${wl}</a>`;
   }
   tb.innerHTML = html;
+}
+// ---------- 25.11.2026 (SirItos: "in the table, see yourself at once", variant D of the board): who is looking - the chat's Steam sign-in
+// (its session cookie, /ladder/api/c/whoami, ladder-x.js asks at the start). His row is marked (.me, "Я" by the name - he looks from his
+// own side) and sticks to the screen's top / bottom edge while the table scrolls (CSS). Not signed in: "Sign in" in the note ----------
+let ME = '';
+function meSignIn() {   // the chat's sign-in, back to this table
+  let n = ''; const a = new Uint8Array(24); crypto.getRandomValues(a); a.forEach(x => n += x.toString(16).padStart(2, '0'));
+  location.href = '/ladder/api/c/login?nonce=' + n + '&to=' + encodeURIComponent('/ladder/table');
 }
 async function loadTable() {
   const my = ++SEQ;
@@ -146,25 +155,22 @@ function card(m, prev) {
   const body = `<div class="cm"><span>${m.replace('v', ' vs ')}</span>${rk}</div>${v}${s1 ? `<div class="cs">${s1}</div>` : ''}${s2 ? `<div class="cs">${s2}</div>` : ''}`;
   return prev ? `<div class="mc card pv">${body}</div>` : `<button class="mc card${PMODE === m ? ' on' : ''}" data-m="${m}">${body}</button>`;
 }
-function matchRow(m) {
+// 25.11.2026 (SirItos: "the player's matches look other than the history's - make them the same, with the Replay button"): his matches
+// are the history's cards (ladder-x.js hCard): the map, both sides with race / hero icons, every player's table number and its change,
+// the winner's side lit, Replay; his own side first, the other names his pages; in the right column his result, under the teams why
+// a match moved no rating (an early leave, a launcher room...)
+function pCard(m) {
   const me = m.me || {}, f = me.final || 'none', why = [];
+  const live = !m.ended && f === 'none' && Date.now() / 1000 - m.started < 7200;   // still being played: "playing", no result, no reasons
   const notes = [...new Set((me.note || '').split(',').map(n => /^left_/.test(n) ? 'left_first' : n).filter(n => T('note')[n]))];   // left_36s_before_end
   notes.forEach(n => why.push(T('note')[n]));
-  const counted = me.n != null;                                   // it moved his rating (rated, or his own loss for an early leave)
-  if (!m.rated) why.push(T('unrated') + ': ' + ((m.why && T('why')[m.why]) || m.why || '—'));
-  const pq = p => `<span class="pq${p.steam === PSTEAM ? ' me' : ''}">${raceImg(p.race)}${p.steam === PSTEAM ? esc(p.name || p.steam)
-    : `<a href="${esc(playerUrl(p.steam, m.mode))}">${esc(p.name || p.steam)}</a>`}</span>`;
+  if (!m.rated && !live) why.push(T('unrated') + ': ' + ((m.why && T('why')[m.why]) || m.why || '—'));
   const mine = m.teams.find(tm => tm.some(p => p.steam === PSTEAM)) || [], other = m.teams.filter(tm => tm !== mine);
-  const teams = `<span class="sd">${mine.map(pq).join('')}</span>` + other.map(tm => `<span class="vs">${esc(T('vs'))}</span><span class="sd">${tm.map(pq).join('')}</span>`).join('');
-  let dl;
-  if (!counted) dl = `<div class="dl un">${esc(T('unrated'))}</div>`;
-  else if (me.d != null) dl = `<div class="dl ${me.d > 0 ? 'up' : me.d < 0 ? 'down' : 'zero'}" title="${esc(T('tableNum')(me.c))}">${me.d > 0 ? '+' + me.d : me.d < 0 ? '−' + (-me.d) : '±0'}<small>${me.c}</small></div>`;
-  else if (me.c != null) dl = `<div class="dl zero" title="${esc(T('calDone'))}">${me.c}<small>${esc(T('calDone'))}</small></div>`;
-  else dl = `<div class="dl cal2">${esc(T('cal')(Math.min(me.n, PDATA.cal_games || 5), PDATA.cal_games || 5))}</div>`;
-  const dur = m.ended && m.started ? Math.round((m.ended - m.started) / 60) : null;
-  return `<div class="m"><div class="res2 ${f}">${esc(T('fin')[f] || f)}<small>${esc(m.mode || '')}</small></div>
-    <div class="mid"><div class="meta">${hDate(m.started)} · ${pMapTitle(m.map)}${dur != null ? ' · ' + dur + ' ' + esc(T('min')) : ''}</div><div class="teams2">${teams}</div>
-    ${why.length ? `<div class="why">${why.map(esc).join(' · ')}</div>` : ''}</div>${dl}</div>`;
+  const side = (tm, t) => tm.map(p => Object.assign({}, p, { team: t, me: p.steam === PSTEAM }));
+  const players = side(mine, 1).concat(...other.map(tm => side(tm, 2)));
+  const wt = m.winner_team, winner = wt == null ? null : mine.length && mine[0].team === wt ? 1 : 2;
+  return hCard({ mode: m.mode, map: m.map, started: m.started, duration: m.duration || (m.ended && m.started ? m.ended - m.started : null),
+    players, winner, state: live ? 'playing' : 'finished', replay: m.replay, fin: live ? null : { f, text: T('fin')[f] || f }, why: why.join(' · ') });
 }
 function renderPlayer() {
   if (!PSTEAM) return;
@@ -182,7 +188,7 @@ function renderPlayer() {
     <div class="prevh"><h2 class="h2">${esc(T('prevSeason')(PDATA.prev.season))}</h2><span class="muted">${esc(T('prevNote'))}</span></div>
     <div class="cards">${MODES.map(m => card(m, PDATA.prev)).join('')}</div>` : ''}
     <div class="ph" style="margin-top:16px"><h2 class="h2">${esc(T('recent'))}</h2><span class="sp"></span><div class="seg small" id="pmodes">${['', ...MODES].map(m => `<button data-m="${m}" class="${PMODE === m ? 'on' : ''}">${m ? m.replace('v', ' vs ') : esc(T('all'))}</button>`).join('')}</div></div>
-    <div class="ms">${ms.length ? ms.map(matchRow).join('') : `<div class="empty">${esc(T('noMatches'))}</div>`}</div>`;
+    <div class="ms">${ms.length ? ms.map(pCard).join('') : `<div class="empty">${esc(T('noMatches'))}</div>`}</div>`;
 }
 async function loadPlayer() {
   try {
