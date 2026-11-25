@@ -12,7 +12,6 @@ OUT = '/srv/ladder/data/relays.json'
 # Единый список узлов сети. Порядок = приоритет для tie-break в _best_relay.
 RELAYS = [
     {"ip": "74.248.144.168",  "name": "Poland (Azure)",  "region": "eu"},   # 23.11.2026: replaces AWS Poland
-    {"ip": "15.220.68.107",  "name": "Poland (Amazon)",  "region": "eu"},   # closing - remove once AWS is off
     {"ip": "116.202.106.150", "name": "Germany",          "region": "eu"},
     {"ip": "83.217.192.34",   "name": "Moscow",           "region": "ru"},
     {"ip": "91.107.122.186",  "name": "Moscow (pivolan)", "region": "ru"},
