@@ -81,8 +81,21 @@ Node quality per player (06.11.2026): the "leave" line of a player carries his S
 max_solo_ms - his stalls >= SOLO_GAP while the others' turns kept coming (his way here stuck, not the match); the ladder's
 nodeq_collect.py joins it with the UDP gateway's "close" line of his connection (by the local port, "lport" there) for the
 losses, and stops using a node that is bad for a player (ladder/nodeq.py).
+Bridge tail (26.11.2026, the RLink fatal "We've received data from the server in our name that we never sent", session.cpp
+3383, DOW2.exe 0x6216D4): in five log packages since 03.11 (four in reports/rlink_fatal_1112, WarGood 26.11 - his host on the
+same node died with him) a player whose Relic game went through a bridge here died of it, always 1-2 s after players who had
+dropped on the loading screen were removed ("onframe:1"); the bridge passes frames as they are, so what Relic sent under the
+player's own number has to be seen. Every Relic bridge (DWR3) keeps its last RELAY_BRIDGE_TAIL
+frames (6000, at most RELAY_BRIDGE_TAIL_SECS 240 s; 0 = off) both ways: turns (09 / 17), ticks (0a) and hellos whole, the
+rest only its first 64 bytes. When the bridge ends it replays the game's own check on them (tail_check: the game's turns
+wait in a queue until a tick brings the same bytes back under its number, a tick entry under its number that matches none of
+the waiting ones = the fatal) and writes the frames to RELAY_BRIDGE_TAIL_DIR (<dir of RELAY_LOG>/bridge_tail, the newest
+RELAY_BRIDGE_TAIL_KEEP 200 files) when the game went silent RELAY_BRIDGE_TAIL_SILENT (8) s before its connection ended (a
+crash: a game that leaves closes at once) or the check found such an entry; one ev=bridge_tail line says what it found
+(kind "again" = a repeat of one of our turns that came back already, "never_sent" = bytes we never sent).
+gameserver/bridge_tail.py reads such a file again. Both nodes of a Moscow player's way write one: they must be the same.
 """
-import asyncio, ipaddress, json, os, socket, struct, sys, time
+import asyncio, collections, gzip, ipaddress, json, os, socket, struct, sys, time
 try: import du_client                                # the UDP tunnel between our nodes (same directory)
 except Exception: du_client = None
 try: import live_rec                                  # the live replay: a running match as a replay (same directory)
@@ -130,6 +143,13 @@ LIVE_MAX = 6 * 1024 * 1024                          # bytes of records in one an
 GAP = 0.25                                          # s: a player's turns this far apart count as a stall (a lost packet, a hiccup)
 SOLO_GAP = 1.0                                      # s: a stall of one player alone this long counts against his way to this node
 TCP_QUICKACK, TCP_THIN_LINEAR_TIMEOUTS = 12, 16     # Linux socket options (not in the socket module everywhere)
+TAIL_FRAMES = int(os.environ.get('RELAY_BRIDGE_TAIL', '6000'))        # Relic bridges: frames kept (both ways), 0 = off (see "Bridge tail")
+TAIL_SECS = float(os.environ.get('RELAY_BRIDGE_TAIL_SECS', '240'))    # ... and none older than this
+TAIL_SILENT = float(os.environ.get('RELAY_BRIDGE_TAIL_SILENT', '8'))  # s the game was silent before its connection ended: a crash
+TAIL_KEEP = int(os.environ.get('RELAY_BRIDGE_TAIL_KEEP', '200'))      # files kept
+TAIL_DIR = os.environ.get('RELAY_BRIDGE_TAIL_DIR') or os.path.join(os.path.dirname(os.path.abspath(LOG)), 'bridge_tail')
+TAIL_WHOLE = (b'\x09', b'\x17', b'\x0a', b'\x15')   # turns, ticks, hellos: kept whole (up to TAIL_FULL bytes); the rest: the head
+TAIL_FULL, TAIL_HEAD = 4096, 64
 
 
 def tcp_info(w):
@@ -750,6 +770,114 @@ class BridgeStats:
         if win: self.new_window()
 
 
+class BridgeTail:
+    """the last frames of one Relic bridge (26.11.2026, see "Bridge tail"): (wall time, 'u' game -> Relic | 'd' Relic -> game,
+    length, bytes - whole for turns / ticks / hellos up to TAIL_FULL, else the first TAIL_HEAD)"""
+
+    def __init__(self, n=None, secs=None):
+        self.q = collections.deque(maxlen=n or TAIL_FRAMES); self.secs = secs or TAIL_SECS; self.dropped = 0; self.t0 = time.time()
+
+    def add(self, d, m):
+        t = time.time(); q = self.q
+        if len(q) == q.maxlen: self.dropped += 1
+        q.append((t, d, len(m), bytes(m) if m[:1] in TAIL_WHOLE and len(m) <= TAIL_FULL else bytes(m[:TAIL_HEAD])))
+        while q and t - q[0][0] > self.secs: q.popleft(); self.dropped += 1
+
+
+def turn_key(m):
+    """a game frame -> the bytes its tick entry must bring back (09 fe <u16 LE len + data>, or the 09 inside 17), None if no turn"""
+    if m[:1] == b'\x09' and len(m) >= 4: return bytes(m[2:])
+    if m[:1] == b'\x17' and len(m) >= 2:
+        r = m[2 + 8 * m[1]:]
+        if r[:1] == b'\x09' and len(r) >= 4: return bytes(r[2:])
+    return None
+
+
+def tick_entries(m):
+    """0a fe <n> n*(idx, u16 LE len + data) <m> m*idx -> [(idx, u16 len + data)], None if it does not parse"""
+    if len(m) < 4 or m[:1] != b'\x0a': return None
+    o, out = 3, []
+    for _ in range(m[2]):
+        if o + 3 > len(m): return None
+        n = int.from_bytes(m[o + 1:o + 3], 'little')
+        if o + 3 + n > len(m): return None
+        out.append((m[o], bytes(m[o + 1:o + 3 + n]))); o += 3 + n
+    if o >= len(m) or o + 1 + m[o] != len(m): return None
+    return out
+
+
+def tail_check(frames, trimmed=False):
+    """the game's own check (DOW2.exe 0x6216C2-0x6217F7) replayed on a bridge's frames: every turn the game sent waits in a
+    queue; a tick entry under the game's number takes turns off the front until one has the same bytes - none left = the fatal
+    "data from the server in our name that we never sent" (0x6216D4). The game's number: the one whose entries bring back the
+    most of its turns. -> dict: our_idx, sent, ticks, echoed, and the first entry the game would have died of ("first": kind
+    "again" = a repeat of a turn already brought back, "never_sent" = bytes it never sent; its time, the tick, what still
+    waited, the bytes) - the replay stops there (the game is gone). trimmed: the frames do not start at the connection's start
+    (an entry in the first 3 s may bring back a turn from before them: "before_tail", not counted)"""
+    sent, ents, ticks = [], [], 0
+    for t, d, n, m in frames:
+        if d == 'u':
+            k = turn_key(m) if n == len(m) else None
+            if k is not None: sent.append((t, k))
+        elif m[:1] == b'\x0a' and n == len(m):
+            es = tick_entries(m)
+            if es is None: continue
+            ticks += 1
+            for i, k in es: ents.append((t, ticks, i, k, m))
+    r = dict(our_idx=None, sent=len(sent), ticks=ticks, echoed=0, first=None)
+    keys = {k for _, k in sent}
+    score = collections.Counter(i for _, _, i, k, _ in ents if k in keys)
+    if not score: return r
+    me = r['our_idx'] = score.most_common(1)[0][0]
+    t0 = sent[0][0] if sent else 0.0
+    cur = ns = 0
+    for t, tick, i, k, m in ents:
+        while ns < len(sent) and sent[ns][0] <= t: ns += 1
+        if i != me: continue
+        j = cur
+        while j < ns and sent[j][1] != k: j += 1
+        if j < ns: cur = j + 1; r['echoed'] += 1; continue
+        if trimmed and t - t0 < 3: cur = ns; continue
+        before = [x for x in range(cur) if sent[x][1] == k]
+        r['first'] = dict(kind='again' if before else 'never_sent', t=round(t, 3), tick=tick, waiting=ns - cur,
+                          sent_ago_s=round(t - sent[before[-1]][0], 3) if before else None,
+                          echoed_before=r['echoed'], len=len(k), bytes=k[:64].hex(), tick_len=len(m), tick_hex=m[:512].hex())
+        break
+    return r
+
+
+def tail_file(st, tail, p):
+    """at the end of a Relic bridge (in a worker thread): the check, and the frames to TAIL_DIR when the game went silent long
+    before the end (a crash) or the check found the entry the game dies of; one ev=bridge_tail line then"""
+    try:
+        frames = list(tail.q)
+        if not frames: return
+        silent = time.monotonic() - st.last_tx if st.last_tx is not None else None
+        crash = st.closed_by == 'game' and silent is not None and silent > TAIL_SILENT
+        v = tail_check(frames, tail.dropped > 0)
+        if not crash and not v['first']: return
+        os.makedirs(TAIL_DIR, exist_ok=True)
+        name = '%s_%s.jsonl.gz' % (time.strftime('%Y%m%d-%H%M%S'), p.addr.replace(':', '-'))
+        path = os.path.join(TAIL_DIR, name)
+        head = dict(ev='bridge_tail', v=1, node=NODE, peer=p.addr, dest=st.dest, closed_by=st.closed_by, crash=crash,
+                    silent_s=round(silent, 1) if silent is not None else None, since=round(tail.t0, 3), dropped=tail.dropped,
+                    frames=len(frames), check=v)
+        with gzip.open(path, 'wt') as f:
+            f.write(json.dumps(head) + '\n')
+            for t, d, n, m in frames: f.write(json.dumps([round(t, 4), d, n, m.hex()]) + '\n')
+        old = sorted(x for x in os.listdir(TAIL_DIR) if x.endswith('.jsonl.gz'))
+        for x in old[:max(0, len(old) - TAIL_KEEP)]:
+            try: os.remove(os.path.join(TAIL_DIR, x))
+            except OSError: pass
+        fst = v['first'] or {}
+        log(ev='bridge_tail', peer=p.addr, dest=st.dest, file=name, crash=int(crash), silent_s=head['silent_s'], frames=len(frames),
+            dropped=tail.dropped, our_idx=v['our_idx'], sent=v['sent'], ticks=v['ticks'], echoed=v['echoed'],
+            fatal=fst.get('kind'), fatal_tick=fst.get('tick'), fatal_waiting=fst.get('waiting'), fatal_bytes=fst.get('bytes', '')[:48])
+    except Exception as e:
+        try: log(ev='bridge_tail_error', peer=p.addr, err=repr(e))
+        except Exception: pass
+
+
 async def pass_on(q, w, p, dest, held, answered, pre=b'', why=None):
     """pass this peer on (to our other server or to the Relic relay its game wanted): what it sent so far, then both
     ways as they are. False = that server could not be reached (nothing was sent to the game)"""
@@ -765,6 +893,7 @@ async def pass_on(q, w, p, dest, held, answered, pre=b'', why=None):
     to = 'ours' if pre else ('relic' if held else 'relic_bridge')
     log(ev='pass_on', peer=p.addr, dest=f'{dest[0]}:{dest[1]}', to=to, held=len(held), via=how, **({'why': why} if why else {}))
     st = BridgeStats(p, dest, to, usock, uw if how == 'du' else None)
+    tail = BridgeTail() if to == 'relic_bridge' and TAIL_FRAMES > 0 else None   # the RLink fatal (see "Bridge tail")
     if pre: uw.write(pre)
     for m in held: uw.write(len(m).to_bytes(2, 'big') + m); st.tx(len(m) + 2)
     await uw.drain()
@@ -774,6 +903,7 @@ async def pass_on(q, w, p, dest, held, answered, pre=b'', why=None):
             while True:
                 m = await q.get()
                 if m is None: st.closed_by = st.closed_by or 'game'; break
+                if tail: tail.add('u', m)
                 uw.write(len(m).to_bytes(2, 'big') + m); st.tx(len(m) + 2); await uw.drain()
         except Exception as e: st.closed_by = st.closed_by or f'up:{type(e).__name__}'
         finally: st.snap(); uw.close()
@@ -784,6 +914,7 @@ async def pass_on(q, w, p, dest, held, answered, pre=b'', why=None):
                 n = int.from_bytes(await ur.readexactly(2), 'big')
                 m = await ur.readexactly(n) if n else b''
                 st.rx(n + 2)
+                if tail: tail.add('d', m)
                 if answered and m in answered: answered.remove(m); continue
                 w.write(n.to_bytes(2, 'big') + m); await w.drain()
         except asyncio.IncompleteReadError: st.closed_by = st.closed_by or 'relic'
@@ -803,6 +934,9 @@ async def pass_on(q, w, p, dest, held, answered, pre=b'', why=None):
         try: st.sample(uw)
         except Exception: pass
         st.line('bridge_end')
+        if tail:                                        # the check and the file in a worker thread: the ticks here go on meanwhile
+            try: await asyncio.get_running_loop().run_in_executor(None, tail_file, st, tail, p)
+            except Exception: pass
     return True
 
 
