@@ -710,6 +710,15 @@ async def nm_call(fn, p, sess):
         x['polled'] = time.time()
         return nm_answer(x, sess['pid'])
     if fn == 'stoppolling':
+        if not x and not (p.get('pollID') or p.get('myPollID')):
+            # 26.11.2026 (stands, party_1126): the game sends automatch/stoppolling with NO poll id (every stand trace) - the
+            # player's Stop Searching, and also the party leader's game ending its search by itself when a party member leaves the
+            # party (Back). Without a poll id nothing was found: the ladder kept the party's search and the member who left, still
+            # polling it, stood on "Processing" until he restarted the game (MMFind <= 0.55 does not leave the queue then). Now the
+            # caller's own search that is still only searching is the one he stops (a matched one is left to the room's own
+            # join / leave handling - a game leaving a failed room stops its search too, that must not make it the culprit).
+            x = next((y for y in reversed(list(NM_POLLS.values())) if y['pid'] == sess['pid'] and y['state'] == 'searching'), None)
+            if x: log('native automatch: pid=%d stoppolling without a poll id - his search %d' % (sess['pid'], x['poll']))
         if x and x['state'] in ('searching', 'matched') and sess['pid'] == x['pid']:
             x['state'] = 'gone'; log('native automatch: pid=%d stops searching' % x['pid'])
             ladder_bg('leave', {'steam': x['steam'], 'why': 'Stop Searching'})
