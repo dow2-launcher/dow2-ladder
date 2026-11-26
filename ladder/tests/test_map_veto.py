@@ -38,7 +38,10 @@ check('wishes from bans: the pool without them', L._nm_wishes('elite', '1v1', {'
       [k for k in POOL if k not in ('2p_bay_of_grots', '2p_vulcan_pits')])
 check('no bans: any map ([])', L._nm_wishes('elite', '1v1', {'bans': []}), [])
 check('older MMFind: the maps left checked', L._nm_wishes('elite', '1v1', {'maps': [NAME['2p_fen_dunloch']]}), ['2p_fen_dunloch'])
-check('pool names for Map Preferences', L._nm_pool_names('elite', '1v1'), sorted(NAME.values(), key=str.lower))
+check('pool names for Map Preferences', L._nm_pool_names('elite', '1v1'), sorted({n for k in POOL for n in L._map_names_all(k)}, key=str.lower))
+# 26.11.2026 (TvangeS: 3 maps of 6 in a Russian game): the localised names are in the pool too and map back to the keys
+check('"(2p) Outer Reaches" in a Russian game -> its key', L._map_keys(['(2) Внешние пределы']), {'2p_outerreaches'})
+check('the pool has the Russian name too', '(2) Внешние пределы' in L._nm_pool_names('elite', '1v1'), True)
 
 print('== the match never gets a map one of its players banned')
 seen = set()
@@ -75,7 +78,7 @@ class R(io.BytesIO):
 L.urllib.request.urlopen = lambda *a, **k: R(json.dumps({'native': True, 'here': True}).encode())
 L.NM_PREFS.clear()
 r = L.mm_native(C, {'steam': C, 'mode': '1v1', 'game': 'elite', 'peek': True, 'bans': [NAME['2p_vulcan_pits']], 'maps': []})
-check('peek: native + the pool', (r.get('native'), r.get('pool')), (True, sorted(NAME.values(), key=str.lower)))
+check('peek: native + the pool', (r.get('native'), r.get('pool')), (True, sorted({n for k in POOL for n in L._map_names_all(k)}, key=str.lower)))
 check('peek keeps his bans (NM_PREFS)', L.NM_PREFS[C]['d']['bans'], [NAME['2p_vulcan_pits']])
 check('peek keeps no search hint', C in L.NM_HINTS, False)
 r = L.mm_native(D, {'steam': D, 'mode': '1v1', 'game': 'elite', 'bans': []})
