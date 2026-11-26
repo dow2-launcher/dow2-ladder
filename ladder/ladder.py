@@ -1709,6 +1709,23 @@ def _catalog():
         except Exception: pass
     return CATALOG
 
+MAP_L10N = {}
+def _map_l10n():
+    """26.11.2026 (TvangeS: "the automatch shows only three maps of six"): the game lists the stock maps by their LOCALISED names
+    (a Russian game: "(2) Перегонный завод Калдериса" for "(2p) Calderis Refinery"; Elite's own maps keep their English name).
+    map_names_l10n.json {key: {"ru": [names]}} - made from the game's DOW2.ucs / Elite.ucs (en text -> id -> ru text)"""
+    if not MAP_L10N:
+        try:
+            with open(os.path.dirname(os.path.abspath(__file__)) + '/map_names_l10n.json', encoding='utf-8') as f: MAP_L10N.update(json.load(f))
+        except Exception: MAP_L10N['_'] = {}
+    return MAP_L10N
+
+def _map_names_all(k):
+    """every name the game may list map k by: the catalog (English) name + its localised ones"""
+    names = [(_catalog().get(k) or {}).get('name') or k]
+    for lst in (_map_l10n().get(k) or {}).values(): names += [n for n in lst if n]
+    return names
+
 def _season_pool(game, mode):
     """18.11.2026 (SirItos): the season's map pool of the Elite automatch - own_season.json "maps" {"1v1": [keys], ...}, the keys the
     catalog knows with the mode's size, in the file's order. None = the old rules (vanilla, no season file, no "maps" for this mode)"""
@@ -1748,7 +1765,8 @@ def _map_keys(names):
     """map keys for names as the game lists them ("(2p) Bay of Grots") or keys; one name may stand for several keys (a vanilla map
     and its Elite copy share the name)"""
     by_name = {}
-    for k, v in _catalog().items(): by_name.setdefault((v.get('name') or '').lower(), set()).add(k)
+    for k in _catalog():
+        for n in _map_names_all(k): by_name.setdefault(n.lower(), set()).add(k)
     out = set()
     for w in names: out |= by_name.get(str(w).lower(), {str(w)})
     return out
@@ -1767,8 +1785,7 @@ def _nm_wishes(game, mode, h):
 
 def _nm_pool_names(game, mode):
     """MMFind 0.49's Map Preferences lists only the maps a native match of this mode can get (the names as the game lists them)"""
-    cat = _catalog()
-    return sorted({(cat.get(k) or {}).get('name') or k for k in _nm_maps(game, mode)}, key=str.lower)
+    return sorted({n for k in _nm_maps(game, mode) for n in _map_names_all(k)}, key=str.lower)   # 26.11: + localised names
 
 def _nm_pick_map(grp, mode):
     """06.11.2026 (players: "the map ban does not work"): a ban is a veto, as in Relic's own automatch - the map of a native match is

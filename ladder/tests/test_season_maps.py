@@ -75,7 +75,7 @@ season(dict(BASE, maps=SEASON))
 for mode, keys in SEASON.items():
     check('elite %s = exactly the season pool' % mode, L._nm_maps('elite', mode), keys)
     check('elite %s with wishes: still the pool' % mode, L._nm_maps('elite', mode, [NAME(keys[0])]), keys)
-    check('Map Preferences %s: only its 4 maps' % mode, L._nm_pool_names('elite', mode), sorted((NAME(k) for k in keys), key=str.lower))
+    check('Map Preferences %s: only its 4 maps' % mode, L._nm_pool_names('elite', mode), sorted({n for k in keys for n in L._map_names_all(k)}, key=str.lower))
 check('"elite-3.2.1" counts as Elite', L._nm_maps('elite-3.2.1', '2v2'), SEASON['2v2'])
 check('bans ignored: any map ([])', L._nm_wishes('elite', '1v1', {'bans': [NAME(k) for k in SEASON['1v1'][:3]]}), [])
 check('older MMFind wishes ignored too', L._nm_wishes('elite', '1v1', {'maps': [NAME('2p_doom_of_tularis')]}), [])
