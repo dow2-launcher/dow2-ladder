@@ -1206,6 +1206,10 @@ def history(q='', mode='', mapk='', race='', page=0, n=30, off=None):
     for lobby, mid, md, mp, started, ended, pl, w, res, rep in rows:
         pl = json.loads(pl); res = json.loads(res) if res else None; w = json.loads(w or '[]')
         mapk_ = ((res or {}).get('mapname') or mp or '').lower()
+        # 27.11.2026 (SirItos: "the random race is not shown in the matches"): Random picked at the start (the row keeps 'random') - the
+        # player is marked, the race the game rolled (Relic's / our report below) still replaces it; the site draws "?" + its tip
+        for p in pl:
+            if p.get('race') == 'random': p['random'] = True
         if res:                                    # Relic знает точно: раса, герой, победа
             by = {r['pid']: r for r in res['players']}
             played = _own_races(res['own_id']) if res.get('own_id') else {}
@@ -1260,7 +1264,7 @@ def _with_replays(d):
     if not lobbies: return d
     try:
         with db() as c:
-            got = {r[0]: r[1:] for r in c.execute('SELECT lobby, replay, result FROM mm_history WHERE lobby IN (%s)' % ','.join('?' * len(lobbies)), lobbies)}
+            got = {r[0]: r[1:] for r in c.execute('SELECT lobby, replay, result, players FROM mm_history WHERE lobby IN (%s)' % ','.join('?' * len(lobbies)), lobbies)}
     except sqlite3.OperationalError: return d
     for m in d['matches']:
         g = got.get(m.get('lobby'))
@@ -1269,6 +1273,12 @@ def _with_replays(d):
         try: dur = (json.loads(g[1]) or {}).get('duration') if g[1] else None
         except Exception: dur = None
         if isinstance(dur, (int, float)) and dur > 0: m['duration'] = int(dur)
+        # 27.11.2026: who picked Random (the history's row keeps 'random' from the start; own_match_players only the race played)
+        try: rnd = {str(p.get('steam')) for p in json.loads(g[2] or '[]') if isinstance(p, dict) and p.get('race') == 'random'}
+        except Exception: rnd = set()
+        for t in m.get('teams') or []:
+            for p in t:
+                if str(p.get('steam')) in rnd: p['random'] = True
     return d
 
 STEAM_NOW = {'t': 0, 'n': None}

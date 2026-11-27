@@ -162,3 +162,17 @@ html { scroll-padding-top: 116px; }
 /* 20.11.2026 (SirItos: "on a phone the chat covers the menu"): no backdrop-filter - it made the header the box of its fixed drawer
    (the menu was cut to the header's 54 px and the messages drew over it); the bar is opaque enough without the blur */
 body > header.hdr { position: sticky; top: 0; z-index: 50; background: linear-gradient(#04090a, #050b0c); }   /* 25.11.2026: opaque - the messages ran faintly under it */
+
+/* 27.11.2026 (SirItos, as the launcher 1.6.36): one author's messages in a row are a stack, as in Discord / Telegram - the avatar and the
+   name once, at its top; the stack's other messages without the line between them, the time in the avatar's column on hover. Every
+   message keeps its own Reply: the arrow at the row's right edge, the row lit under the mouse so it is plain which one it answers.
+   Every row keeps the 8 px left of it (mine / a mention of me draw their edge there) - a lit message inside a stack does not shift */
+.m { position: relative; padding: 8px 28px 8px 8px; }
+.m.cont { border-top: 0; padding-top: 0; margin-top: -5px; }
+.m > .rpl { position: absolute; top: 8px; right: 2px; margin: 0; }
+.m.cont > .rpl { top: 1px; }
+.m:hover { background: rgba(69, 224, 192, .04); }
+.m.tome:hover { background: linear-gradient(90deg, rgba(69, 224, 192, .13), rgba(69, 224, 192, .04) 70%); }
+.m .gt { flex: none; width: 34px; padding-top: 4px; font-size: 11px; line-height: 15px; text-align: center; color: var(--mu); white-space: nowrap; visibility: hidden; }
+.m.cont:hover .gt { visibility: visible; }
+.m.mine, .m.tome { padding-left: 8px; }

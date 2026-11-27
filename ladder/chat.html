@@ -18,7 +18,7 @@
      hover; who I am is in the header now (ladder-hdr.js: a chip at its right, the drawer's first block on a phone) -->
 <link rel="stylesheet" href="/elite/ui/badges.css?v=20261125a">
 <link rel="stylesheet" href="/elite/ui/ladder-hdr.css?v=20261125a">
-<link rel="stylesheet" href="/elite/ui/ladder-chat.css?v=20261125a">
+<link rel="stylesheet" href="/elite/ui/ladder-chat.css?v=20261127a">
 <script defer src="/elite/ui/ladder-hdr.js?v=20261125a"></script>
 <script defer src="/elite/ui/mirrors.js?v=20261125a"></script>
 </head>
@@ -250,16 +250,23 @@ function renderMsgs(opts) {
     .replace(new RegExp(ALL.source, 'giu'), '$1<span class="at me">@all</span>');
   const quote = q => !q ? '' : q.deleted ? `<div class="rq del"><i>Сообщение удалено</i></div>`
     : `<div class="rq" data-goto="${esc(String(q.id))}" role="button" tabindex="0" title="Показать сообщение"><b>${esc(q.name || 'Player')}</b><i>${esc(quoteText(q))}</i></div>`;
-  let day = null;
+  let day = null, who = null;   // who: the author of the message above (a stack goes on while it is the same one)
   box.innerHTML = list.length ? top + list.map(x => {
     const own = mine && String(x.steam) === mine, orig = x.orig || x.text, tx = String(x.text || '');
     const toMe = mine && !own && ((x.reply && !x.reply.deleted && String(x.reply.steam) === mine)   // a reply to me, @me or @all: lit
       || (myName && tx.toLowerCase().includes('@' + myName.toLowerCase())) || ALL.test(tx));
     const rpl = rOn && x.id && !own ? `<button class="rpl" data-reply="${esc(String(x.id))}" title="Ответить" aria-label="Ответить">${ARROW}</button>` : '';
-    const k = dayKey(x.ts), head = k !== day ? `<div class="day"><span>${esc(dayName(x.ts))}</span></div>` : ''; day = k;
+    const k = dayKey(x.ts), head = k !== day ? `<div class="day"><span>${esc(dayName(x.ts))}</span></div>` : '';
+    const by = String(x.steam || x.name || ''), cont = k === day && who === by; day = k; who = by;
     const tr = orig && orig !== tx ? ` title="${esc('Оригинал: ' + orig)}"` : '';   // a translated tab: the original on hover
-    return head + `<div class="m${own ? ' mine' : ''}${toMe ? ' tome' : ''}" data-id="${esc(String(x.id))}">${avatar(x.avatar)}<div class="b"><div class="h">${seal(x.steam, x.name)}<b class="nk" data-nm="${esc(x.name || 'Player')}">${esc(x.name || 'Player')}</b>${badges(x.steam)}<span class="tm" title="${esc(new Date(x.ts * 1000).toLocaleString('ru'))}">${hm(x.ts)}</span>${rpl}</div>`
-      + quote(x.reply) + `<div class="t${tr ? ' tr' : ''}"${tr}>${linkify(tx, p => at(esc(p)), linkA)}</div></div></div>`;
+    const when = esc(new Date(x.ts * 1000).toLocaleString('ru')), cls = `m${own ? ' mine' : ''}${toMe ? ' tome' : ''}`;
+    const body = quote(x.reply) + `<div class="t${tr ? ' tr' : ''}"${tr}>${linkify(tx, p => at(esc(p)), linkA)}</div>`;
+    // 27.11.2026 (SirItos, as the launcher 1.6.36): one author's messages in a row are a stack (Discord / Telegram) - the avatar and
+    // the name once, at its top, until another player writes; each message keeps its Reply (the arrow at the row's right edge) and
+    // its time (in the avatar's column on hover)
+    if (cont) return `<div class="${cls} cont" data-id="${esc(String(x.id))}"><span class="gt" title="${when}">${hm(x.ts)}</span><div class="b">${body}</div>${rpl}</div>`;
+    return head + `<div class="${cls}" data-id="${esc(String(x.id))}">${avatar(x.avatar)}<div class="b"><div class="h">${seal(x.steam, x.name)}<b class="nk" data-nm="${esc(x.name || 'Player')}">${esc(x.name || 'Player')}</b>${badges(x.steam)}<span class="tm" title="${when}">${hm(x.ts)}</span></div>`
+      + body + `</div>${rpl}</div>`;
   }).join('') : `<div class="empty">Пока никто не писал. Будьте первым.</div>`;
   if (opts.keepTop) pageEl().scrollTop = prevTop + pageEl().scrollHeight - prevH;   // older ones above: the same message stays in view
   else if (follow) toBottom();
