@@ -4,7 +4,7 @@
 (function () {
   const TX = {
     en: { title: 'The match, second by second', badge: 'game engine', sub: 'Every squad of the match as the game itself simulated it: positions, health and orders each second. Press play or click any moment.',
-      play: 'Play', pause: 'Pause', trails: 'Trails', heat: 'Heat map', heatNone: 'off', army: 'Army strength (total HP of the squads on the field)',
+      play: 'Play', pause: 'Pause', trails: 'Trails', icons: 'Squad icons', heat: 'Heat map', heatNone: 'off', army: 'Army strength (total HP of the squads on the field)',
       pts: 'Strategic points held', req: 'Squads on the field', moments: 'Key moments', all: 'All', fights: 'Fights', heroes: 'Heroes', deaths: 'Losses', chat: 'Chat',
       team: n => 'Team ' + n, sides: ['Blue', 'Red'], fight: 'Fight', near: d => d === 'C' ? 'in the centre' : 'in the ' + TX.en.dirs[d], won: t => 'won by ' + t, even: 'even trade', lostHp: 'HP lost', wiped: 'squads wiped',
       heroDown: (h, p) => `${h} (${p}) is down`, squadLost: (s, p) => `${s} (${p}) wiped out`, alive: 'squads', bank: 'req', power: 'power', waaagh: 'Waaagh',
@@ -23,7 +23,7 @@
       resVpWin: 'the victory point score of the other side ran out (the game\'s own win condition)', resConcede: 'the other side conceded (the game\'s own win condition)',
       resHq: 'the HQ of the other side was destroyed (the game\'s own win condition)', resGame: 'the game\'s own win condition' },
     ru: { title: 'Матч посекундно', badge: 'движок игры', sub: 'Все отряды матча так, как их просчитала сама игра: где стоят, сколько здоровья и что делают — каждую секунду. Жмите «Смотреть» или кликайте в любой момент.',
-      play: 'Смотреть', pause: 'Пауза', trails: 'Следы', heat: 'Тепловая карта', heatNone: 'выкл', army: 'Сила армий (сумма HP отрядов на поле)',
+      play: 'Смотреть', pause: 'Пауза', trails: 'Следы', icons: 'Иконки отрядов', heat: 'Тепловая карта', heatNone: 'выкл', army: 'Сила армий (сумма HP отрядов на поле)',
       pts: 'Стратегические точки под контролем', req: 'Отрядов на поле', moments: 'Ключевые моменты', all: 'Все', fights: 'Бои', heroes: 'Герои', deaths: 'Потери', chat: 'Чат',
       team: n => 'Команда ' + n, sides: ['Синие', 'Красные'], fight: 'Бой', near: d => d === 'C' ? 'в центре' : 'на ' + TX.ru.dirs[d], won: t => t + ' выиграли', even: 'размен на равных', lostHp: 'потеряно HP', wiped: 'отрядов уничтожено',
       heroDown: (h, p) => `${h} (${p}) пал`, squadLost: (s, p) => `${s} (${p}) уничтожен`, alive: 'отрядов', bank: 'рек.', power: 'энергия', waaagh: 'Waaagh',
@@ -223,7 +223,8 @@
     try { D = await (await fetch('/replay/api/r/' + rid + '/sim.json?v=2')).json(); } catch (e) { card.innerHTML = `<div class="sim-sub">${tx('fail')}</div>`; return; }
     await assetsReady;
     const sqa = await SQA();
-    S = { rid, D, SQ: sqa, views: views || 0, t: 0, playing: false, speed: 8, trails: true, heat: '', last: 0, evf: 'all', mapKey: mapKey || D.map, hover: null };
+    let icons = true; try { icons = localStorage.getItem('simIcons') !== '0'; } catch (e) {}   // the squad icons on unless turned off (SirItos 27.11)
+    S = { rid, D, SQ: sqa, views: views || 0, t: 0, playing: false, speed: 8, trails: true, icons, ims: {}, heat: '', last: 0, evf: 'all', mapKey: mapKey || D.map, hover: null };
     prep();
     S.res = verdict(D, D.players, window.RESCTX && window.RESCTX.guess, 0);
     window.SIMD = { rid, D, res: S.res };
@@ -371,6 +372,7 @@
         <div class="sim-seg" id="simSpd">${SPEEDS.map(v => `<button data-v="${v}">${v}×</button>`).join('')}</div>
         <span class="sim-time" id="simTime"></span>
         <label class="sim-opt"><input type="checkbox" id="simTr" checked> <span id="simTrL"></span></label>
+        <label class="sim-opt"><input type="checkbox" id="simIc"${S.icons ? ' checked' : ''}> <span id="simIcL"></span></label>
         <label class="sim-opt"><span id="simHL"></span> <select id="simHeat"></select></label>
       </div>
       <div class="sim-tl"><canvas id="simTl"></canvas></div>
@@ -394,6 +396,7 @@
     $('simStart').onclick = () => { S.el.big.remove(); S.el.big = null; S.speed = 8; toggle(true); };
     $('simSpd').onclick = e => { const v = +e.target.dataset.v; if (v) { S.speed = v; segs(); } };
     $('simTr').onchange = e => { S.trails = e.target.checked; draw(); };
+    $('simIc').onchange = e => { S.icons = e.target.checked; try { localStorage.setItem('simIcons', S.icons ? '1' : '0'); } catch (x) {} draw(); };
     $('simHeat').onchange = e => { S.heat = e.target.value; draw(); };
     const seekCanvas = (cv, e) => { const r = cv.getBoundingClientRect(); seek(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * (D.dur - 1)); };
     for (const cv of [S.el.tl, S.el.tk, S.el.army, S.el.pts, S.el.req]) {
@@ -416,7 +419,7 @@
     if (!S || !S.el) return;
     const $ = id => document.getElementById(id);
     $('simT').textContent = tx('title'); $('simB').textContent = tx('badge'); $('simSub').textContent = tx('sub');
-    $('simTrL').textContent = tx('trails'); $('simHL').textContent = tx('heat');
+    $('simTrL').textContent = tx('trails'); $('simIcL').textContent = tx('icons'); $('simHL').textContent = tx('heat');
     $('simC1').textContent = tx('army'); $('simC2').textContent = tx('pts'); $('simC3').textContent = tx('req'); $('simMo').textContent = tx('moments');
     if (S.tk) { $('simTkL').innerHTML = `${tx('tk')} <small>(${S.tk.max} → 0)</small>`; $('simTkL').title = tx('tkHint')(S.tk.max); }
     if (S.el.big) $('simStart').textContent = tx('start');
@@ -645,6 +648,14 @@
     sizeCanvas(S.el.map, h);
   }
   const W2P = (x, z) => [(x / S.D.w + 0.5) * S.mw, (0.5 - z / S.D.h) * S.mh];
+  // 27.11.2026 (SirItos: "we know what each squad is - draw its icon on the map instead of the shapes, as an option, only in the
+  // simulation"): the squad's portrait of the side panel (squads.json) once loaded; none (yet) - the shape as before
+  function iconOf(sq) {
+    const a = (S.SQ || {})[sq[3]]; if (!a || !a.i) return null;
+    let im = S.ims[sq[3]];
+    if (!im) { im = S.ims[sq[3]] = new Image(); im.onload = () => { if (S && !S.playing) draw(); }; im.src = A + a.i; }
+    return im.complete && im.naturalWidth ? im : null;
+  }
 
   function draw() {
     if (!S || !S.el) return;
@@ -724,18 +735,26 @@
     const labels = [];
     for (const q of sqs) {
       const sq = D.squads[q.id], p = S.P[sq[0]]; if (!p) continue;
-      const [px, py] = W2P(q.x, q.z), hero = sq[2], down = q.hp <= 0 || q.n <= 0;
-      const r = (hero ? 6.5 : 3.4 + Math.min(q.n, 8) * 0.42) * k;
+      const [px, py] = W2P(q.x, q.z), hero = sq[2], down = q.hp <= 0 || q.n <= 0, ic = S.icons ? iconOf(sq) : null;
+      // an icon: a tile big enough to tell the portrait (a hero bigger); a shape: its size by the models left
+      const r = ic ? (hero ? 12.5 : 10) * k : (hero ? 6.5 : 3.4 + Math.min(q.n, 8) * 0.42) * k;
       if (S.hover) { const dd = Math.hypot(S.hover[0] - px, S.hover[1] - py); if (dd < Math.max(10, r + 4) && dd < hd) { hd = dd; hov = { q, sq, p, px, py }; } }
       if (down) { c.globalAlpha = 0.8; c.strokeStyle = '#ccc'; c.lineWidth = 2; c.beginPath(); c.moveTo(px - r, py - r); c.lineTo(px + r, py + r); c.moveTo(px + r, py - r); c.lineTo(px - r, py + r); c.stroke(); c.globalAlpha = 1; continue; }
       const st = q.st, retreat = st === 5, fight = st === 3 || st === 4, dim = S.focus != null && sq[0] !== S.focus;
       c.globalAlpha = dim ? 0.16 : 1;
       if (fight && blink && !dim) { c.beginPath(); c.arc(px, py, r + 4.5 * k, 0, 7); c.fillStyle = 'rgba(255,150,40,.5)'; c.fill(); }
-      const shape = rr => { c.beginPath(); if (p.side) { c.rect(px - rr, py - rr, 2 * rr, 2 * rr); } else c.arc(px, py, rr * 1.08, 0, 7); };
+      const shape = rr => { c.beginPath(); if (p.side) { c.rect(px - rr, py - rr, 2 * rr, 2 * rr); } else c.arc(px, py, rr * (ic ? 1 : 1.08), 0, 7); };
       if (hero) { shape(r + 2.6 * k); c.fillStyle = '#ffd75e'; c.fill(); }
-      shape(r);
-      c.fillStyle = p.color; if (retreat) c.globalAlpha *= 0.5; c.fill(); c.globalAlpha = dim ? 0.16 : 1;
-      c.lineWidth = 2 * k; c.strokeStyle = TEAMC[p.side]; if (retreat) { c.setLineDash([3, 2]); c.strokeStyle = '#fff'; c.lineWidth = 1.4; } c.stroke(); c.setLineDash([]);
+      if (ic) {   // the team's shape kept (blue round, red square), the portrait inside it, its edge in the player's colour
+        c.save(); shape(r); c.clip(); c.fillStyle = '#1b1c1f'; c.fill(); if (retreat) c.globalAlpha *= 0.5;
+        c.drawImage(ic, px - r, py - r, 2 * r, 2 * r); c.restore();
+        shape(r + 1.6 * k); c.lineWidth = 1.2; c.strokeStyle = 'rgba(0,0,0,.8)'; c.stroke();
+        shape(r); c.lineWidth = 2.2 * k; c.strokeStyle = p.color; if (retreat) { c.setLineDash([3, 2]); c.strokeStyle = '#fff'; c.lineWidth = 1.6; } c.stroke(); c.setLineDash([]);
+      } else {
+        shape(r);
+        c.fillStyle = p.color; if (retreat) c.globalAlpha *= 0.5; c.fill(); c.globalAlpha = dim ? 0.16 : 1;
+        c.lineWidth = 2 * k; c.strokeStyle = TEAMC[p.side]; if (retreat) { c.setLineDash([3, 2]); c.strokeStyle = '#fff'; c.lineWidth = 1.4; } c.stroke(); c.setLineDash([]);
+      }
       if (S.num[q.id] && !dim) labels.push([S.num[q.id], px, py, r, q.id === S.hl, p.color, hero]);
       if (q.id === S.hl) { c.beginPath(); c.arc(px, py, r + 6 * k, 0, 7); c.strokeStyle = '#fff'; c.lineWidth = 2.2; c.stroke(); c.beginPath(); c.arc(px, py, r + 6 * k + 2.2, 0, 7); c.strokeStyle = 'rgba(0,0,0,.7)'; c.lineWidth = 1.2; c.stroke(); }
       if (q.hp < 99) { const bw = Math.max(8, 2 * r), by = py + r + 3 * k; c.fillStyle = 'rgba(0,0,0,.7)'; c.fillRect(px - bw / 2 - 1, by - 1, bw + 2, 4); c.fillStyle = q.hp > 50 ? '#6dff7a' : q.hp > 25 ? '#ffd23f' : '#ff4d4d'; c.fillRect(px - bw / 2, by, bw * q.hp / 100, 2); }

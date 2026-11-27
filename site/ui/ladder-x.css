@@ -130,3 +130,6 @@ details.smaps summary .smm { gap: 0; font: 600 15px var(--fb); color: var(--mu);
 .tnote .lnk { padding: 0; border: 0; background: none; font: inherit; color: var(--gd); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .tnote .lnk:hover { color: #c9f7ea; }
 .tnote .lnk[hidden] { display: none; }
+/* 27.11.2026 (SirItos): a player who picked Random - the "?" in the race icon's place of a match card (history, the player page), its
+   size and no frame (as the launcher's random "?": the bold letter in teal with a soft glow) */
+.pl .rnd { width: 20px; height: 20px; border: 0; background: none; font: 700 16px/1 var(--fb); text-shadow: 0 0 6px rgba(69, 224, 192, .45); cursor: help; }

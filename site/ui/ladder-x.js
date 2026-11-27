@@ -24,11 +24,14 @@ function mapKey(m) {                 // a resolved match has the asset's key; an
 const thumb = p => String(p || '').replace(/^maps\/([\w.-]+)\.png$/, 'maps_s/$1.webp');
 function mapTitle(k) { const m = ASSETS.maps[k]; return m && m.name ? esc(m.name) : mapName(k); }
 function heroImg(p) {
-  if (p.race === 'random') return `<span class="rnd" title="${esc(T('rnd'))}">?</span>`;   // Random and the played race not known (yet)
-  const r = ASSETS.races[p.race]; if (!r) return '';
+  const rnd = tip => `<span class="rnd" title="${esc(tip)}">?</span>`;
+  if (p.race === 'random') return rnd(T('rnd'));   // Random and the played race not known (yet)
+  const r = ASSETS.races[p.race]; if (!r) return p.random ? rnd(T('rnd')) : '';
   const h = p.hero != null && r.heroes && r.heroes[p.hero];
-  const ri = `<img class="rc" src="${A + r.icon}" alt="" title="${esc(raceName(p.race))}">`;
-  return h ? ri + `<img src="${A + h.icon}" alt="" title="${esc(raceName(p.race) + ' · ' + h.name)}">` : ri;
+  // 27.11.2026 (SirItos: "the random race is not shown in the matches - the "?" as in the launcher"): Random picked (the server's
+  // random: true) - the "?" in the race's place, the race the game rolled in its tip, the hero's portrait as it was
+  const ri = p.random ? rnd(T('rnd') + ' → ' + raceName(p.race)) : `<img class="rc" src="${A + r.icon}" alt="" title="${esc(raceName(p.race))}">`;
+  return h ? ri + `<img src="${A + h.icon}" alt="" title="${esc((p.random ? T('rnd') + ' → ' : '') + raceName(p.race) + ' · ' + h.name)}">` : ri;
 }
 function tzLabel(t) { const off = -new Date(t * 1000).getTimezoneOffset(); if (!off) return 'UTC'; const a = Math.abs(off), hh = Math.floor(a / 60), mm = a % 60; return 'UTC' + (off > 0 ? '+' : '−') + hh + (mm ? ':' + String(mm).padStart(2, '0') : ''); }
 function hUTC(t) { return new Date(t * 1000).toISOString().replace('T', ' ').slice(0, 16) + ' UTC'; }
